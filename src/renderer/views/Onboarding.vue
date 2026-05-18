@@ -4,7 +4,7 @@
     :show-back="currentStep > 0 && currentStep < 3"
     :show-next="currentStep < 3"
     :show-skip="currentStep === 1 || currentStep === 2"
-    :next-disabled="nextDisabled"
+    :next-disabled="false"
     :next-label="currentStep === 2 ? '完成配置' : '下一步'"
     @next="handleNext"
     @back="currentStep--"
@@ -161,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Platform, Promotion, MagicStick, CircleCheckFilled } from '@element-plus/icons-vue';
@@ -181,11 +181,6 @@ const accountAdded = ref(false);
 const browserMode = ref<AppSettings['browserMode']>('embedded');
 const chromePath = ref('');
 const fingerprintBrowserPath = ref('');
-
-const nextDisabled = computed(() => {
-  if (currentStep.value === 1) return false;
-  return false;
-});
 
 async function handleNext() {
   if (currentStep.value === 2) {
@@ -228,6 +223,10 @@ async function handleFinish() {
   await settingsStore.updateSetting('onboardingCompleted', true);
   router.replace('/');
 }
+
+onMounted(() => {
+  console.log('[Onboarding] Mounted, currentStep:', currentStep.value);
+});
 </script>
 
 <style scoped>

@@ -1,20 +1,12 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router';
 import MainLayout from '@/renderer/layouts/MainLayout.vue';
-import OnboardingLayout from '@/renderer/layouts/OnboardingLayout.vue';
 
 const routes: RouteRecordRaw[] = [
   {
     path: '/onboarding',
-    component: OnboardingLayout,
+    name: 'Onboarding',
+    component: () => import('@/renderer/views/Onboarding.vue'),
     meta: { requiresOnboarding: false },
-    children: [
-      {
-        path: '',
-        name: 'Onboarding',
-        component: () => import('@/renderer/views/Onboarding.vue'),
-        meta: { requiresOnboarding: false },
-      },
-    ],
   },
   {
     path: '/',
