@@ -69,6 +69,7 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue';
 import { Check } from '@element-plus/icons-vue';
 
 const steps = [
@@ -80,20 +81,38 @@ const steps = [
 
 const version = '0.2.0';
 
-defineProps<{
+interface Props {
   activeStep: number;
   showBack?: boolean;
   showNext?: boolean;
   showSkip?: boolean;
   nextDisabled?: boolean;
   nextLabel?: string;
-}>();
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  showBack: false,
+  showNext: true,
+  showSkip: false,
+  nextDisabled: false,
+  nextLabel: '下一步'
+});
 
 defineEmits<{
   next: [];
   back: [];
   skip: [];
 }>();
+
+onMounted(() => {
+  console.log('[OnboardingLayout] Mounted with props:', {
+    activeStep: props.activeStep,
+    showNext: props.showNext,
+    showBack: props.showBack,
+    showSkip: props.showSkip,
+    nextLabel: props.nextLabel
+  });
+});
 </script>
 
 <style scoped>
@@ -269,10 +288,18 @@ defineEmits<{
   padding-top: var(--space-4);
   border-top: 1px solid var(--color-border-light);
   gap: var(--space-3);
+  min-height: 48px;
 }
 
 .onboarding-layout__footer :deep(.el-button) {
   min-width: 80px;
+  display: inline-flex !important;
+  visibility: visible !important;
+}
+
+.onboarding-layout__footer :deep(.el-button--primary) {
+  background-color: var(--color-primary) !important;
+  color: white !important;
 }
 
 .onboarding-layout__spacer {
