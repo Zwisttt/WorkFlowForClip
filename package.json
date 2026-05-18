@@ -8,7 +8,7 @@
     "dev:vite": "vite",
     "dev:electron": "npm run build:electron && electron .",
     "build": "npm run build:electron && vite build",
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:electron": "tsc -p tsconfig.electron.json && cp -r electron/data/migrations/*.sql dist/electron/data/migrations/",
     "start": "npm run build && electron .",
     "preview": "vite preview",
     "lint": "eslint . --ext .ts,.vue",
