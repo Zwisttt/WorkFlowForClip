@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/electron/main';
 
-const SENTRY_DSN = 'https://placeholder@o0.ingest.sentry.io/0';
+const SENTRY_DSN = '__SENTRY_DSN_REDACTED__';
 
 const SENSITIVE_KEYS = [
   /cookie/i,
