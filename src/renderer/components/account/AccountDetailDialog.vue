@@ -202,7 +202,7 @@ function getPlatformLabel(platform: string): string {
 
 <style scoped>
 .form-item-hint {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--el-text-color-secondary);
   margin-top: 4px;
   line-height: 1.4;

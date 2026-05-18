@@ -15,6 +15,7 @@ import type {
   CommentContext,
   CommentResult,
   PageChangeReport,
+  HealthCheckResult,
 } from './types';
 
 export type {
@@ -33,6 +34,7 @@ export type {
   CommentContext,
   CommentResult,
   PageChangeReport,
+  HealthCheckResult,
 };
 
 export interface IPlatformInfo {
@@ -48,6 +50,7 @@ export interface ILoginAdapter {
   login(accountId: string, headless?: boolean): Promise<CookieResult>;
   checkCookie(accountId: string): Promise<boolean>;
   getQRCode(accountId: string): Promise<string>;
+  checkHealth?(accountId: string): Promise<HealthCheckResult>;
 }
 
 export interface IUploadAdapter {
@@ -68,8 +71,13 @@ export interface ICommentAdapter {
   postComment(ctx: CommentContext): Promise<CommentResult>;
 }
 
+export interface ICoverAdapter {
+  getCoverRatios?(): string[];
+}
+
 export type PlatformAdapter = IPlatformInfo &
   ILoginAdapter &
   IUploadAdapter &
   IPublishAdapter &
-  IStatsAdapter;
+  IStatsAdapter &
+  ICoverAdapter;

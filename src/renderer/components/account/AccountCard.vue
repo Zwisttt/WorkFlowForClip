@@ -173,7 +173,7 @@ const groupName = computed(() => {
 .account-card__avatar {
   flex-shrink: 0;
   background: var(--color-primary-light);
-  color: #fff;
+  color: var(--color-bg-card);
   font-weight: var(--font-weight-semibold);
 }
 
@@ -247,7 +247,7 @@ const groupName = computed(() => {
 }
 
 .binding-tag {
-  font-size: 10px;
+  font-size: var(--font-size-3xs);
 }
 
 .account-card__footer {

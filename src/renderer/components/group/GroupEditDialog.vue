@@ -15,12 +15,12 @@
       <el-form-item label="标记颜色">
         <div class="color-picker">
           <button
-            v-for="c in colors"
+            v-for="(c, i) in cssVarColors"
             :key="c"
             class="color-picker__item"
-            :class="{ 'color-picker__item--active': form.color === c }"
+            :class="{ 'color-picker__item--active': form.color === resolvedColors[i] }"
             :style="{ background: c }"
-            @click="form.color = c"
+            @click="form.color = resolvedColors[i]"
           />
         </div>
       </el-form-item>
@@ -77,14 +77,21 @@ const submitting = ref(false);
 
 const isEdit = computed(() => !!props.group?.id);
 
-const colors = [
-  '#f56c6c', '#e6a23c', '#67c23a', '#409eff',
-  '#909399', '#9b59b6', '#1abc9c', '#e74c3c',
+const cssVarColors = [
+  'var(--group-color-1)', 'var(--group-color-2)',
+  'var(--group-color-3)', 'var(--group-color-4)',
+  'var(--group-color-5)', 'var(--group-color-6)',
+  'var(--group-color-7)', 'var(--group-color-8)',
+];
+
+const resolvedColors = [
+  '#db4b4b', '#e8993d', '#37b36e', '#2974e0',
+  '#8a95a5', '#7f52b8', '#29b89d', '#e04040',
 ];
 
 const form = reactive({
   name: '',
-  color: colors[0],
+  color: resolvedColors[0],
   accountIds: [] as string[],
 });
 
@@ -108,7 +115,7 @@ watch(
 
 function resetForm() {
   form.name = '';
-  form.color = colors[0];
+  form.color = resolvedColors[0];
   form.accountIds = [];
 }
 

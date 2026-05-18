@@ -129,6 +129,15 @@ export async function publish(ctx: PublishContext): Promise<PublishResult> {
     const page = existingPage;
     await fillVideoMetadata(page, title, description, tags);
 
+    if (ctx.dryRun) {
+      logger.info(`[DRY RUN] Skipping final publish for ${ctx.accountId}`);
+      return {
+        success: true,
+        message: '[DEBUG] 预发布模式：已跳过最终发布按钮',
+        videoId: ctx.videoId,
+      };
+    }
+
     const success = await executePublish(page);
 
     if (success) {
@@ -159,4 +168,8 @@ export async function publish(ctx: PublishContext): Promise<PublishResult> {
 function extractVideoId(url: string): string | undefined {
   const match = url.match(/\/article\/manage\/video\?.*id=([^&]+)/);
   return match ? match[1] : undefined;
+}
+
+export function getCoverRatios(): string[] {
+  return ['16:9', '4:3', '1:1'];
 }

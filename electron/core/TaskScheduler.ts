@@ -2,6 +2,7 @@ import { Logger } from './Logger';
 import { EventBus } from './EventBus';
 import { QueueManager, generateId } from './QueueManager';
 import { RateLimiter } from './RateLimiter';
+import { FailureCoordinator } from './FailureCoordinator';
 import { TaskEvents } from './types/task';
 import type {
   ITaskScheduler,
@@ -23,6 +24,7 @@ export class TaskScheduler implements ITaskScheduler {
   private queue: QueueManager;
   private rateLimiter: RateLimiter;
   private eventBus: EventBus;
+  private readonly failureCoordinator = new FailureCoordinator();
 
   private running = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -297,6 +299,12 @@ export class TaskScheduler implements ITaskScheduler {
   }
 
   private async handleFailure(task: ITask, error: string): Promise<void> {
+    this.failureCoordinator.recordFailure(task.platform, task.accountId, error);
+
+    if (this.failureCoordinator.shouldStopAccount(task.platform, task.accountId)) {
+      this.markPlatformTasksSkipped(task.platform, task.accountId);
+    }
+
     const updated = this.getTaskFromMap(task.id);
     const currentRetry = updated?.retryCount ?? task.retryCount;
 
@@ -317,6 +325,18 @@ export class TaskScheduler implements ITaskScheduler {
     } else {
       this.queue.updateStatus(task.id, 'failed', `已达最大重试次数(${task.maxRetries}): ${error}`);
       logger.error(`任务最终失败: ${task.id} 重试${currentRetry}次 原因=${error}`);
+    }
+  }
+
+  private markPlatformTasksSkipped(platform: string, accountId: string): void {
+    const pending = this.queue.getByStatus('queued')
+      .concat(this.queue.getByStatus('pending'));
+    for (const task of pending) {
+      if (task.platform === platform && task.accountId === accountId) {
+        task.status = 'skipped';
+        task.error = 'skipped_predecessor_failed';
+        this.eventBus.emit(TaskEvents.TASK_SKIPPED, task);
+      }
     }
   }
 

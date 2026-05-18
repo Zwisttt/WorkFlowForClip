@@ -3,6 +3,7 @@ import { Logger } from '../core/Logger';
 import { EventBus } from '../core/EventBus';
 import { TaskScheduler } from '../core/TaskScheduler';
 import { PlatformRegistry } from '../platform/base/PlatformRegistry';
+import { accountService } from './AccountService';
 import { publishTaskRepo } from '../data/repositories/PublishTaskRepository';
 import { taskItemRepo } from '../data/repositories/TaskItemRepository';
 import { groupPublishRuleRepo } from '../data/repositories/GroupPublishRuleRepository';
@@ -162,7 +163,7 @@ export class PublishService implements IPublishService {
     const tasks: PublishTask[] = [];
 
     for (const groupId of request.groupIds) {
-      const accountsInGroup = await accountRepo.findWhere({ status: 'active' } as Partial<DbAccount>);
+      let accountsInGroup = await accountRepo.findWhere({ status: 'active' } as Partial<DbAccount>);
 
       const groupRules = await groupPublishRuleRepo.findEnabledByGroup(groupId);
       const platformAccounts = new Map<string, string[]>();
@@ -174,15 +175,28 @@ export class PublishService implements IPublishService {
         platformAccounts.set(rule.platform, accountIds);
       }
 
+      if (request.prePublishCheck) {
+        const unhealthyAccounts: string[] = [];
+        for (const account of accountsInGroup) {
+          const isValid = await accountService.validateCookie(account.id);
+          if (!isValid) {
+            unhealthyAccounts.push(account.id);
+          }
+        }
+        accountsInGroup = accountsInGroup.filter((a) => !unhealthyAccounts.includes(a.id));
+      }
+
       for (const [platform, accountIds] of platformAccounts) {
         for (const accountId of accountIds) {
+          if (!accountsInGroup.find((a) => a.id === accountId)) continue;
+
           const task = await this.createPublishTask({
             contentId: request.contentId,
             platform,
             accountId,
             scheduledAt: request.scheduledAt,
             publishMode: request.publishMode,
-            metadata: {},
+            metadata: { dryRun: request.dryRun },
           });
           tasks.push(task);
         }
@@ -679,6 +693,49 @@ export class PublishService implements IPublishService {
   private emitItemFailed(taskId: string, itemId: string, error: string): void {
     const payload: ItemFailedPayload = { taskId, itemId, error };
     this.eventBus.emit(PublishEvent.ITEM_FAILED, payload);
+  }
+
+  async preCheckAccounts(request: BatchPublishRequest): Promise<{ healthy: string[]; unhealthy: string[] }> {
+    const healthy: string[] = [];
+    const unhealthy: string[] = [];
+
+    for (const groupId of request.groupIds) {
+      const accountsInGroup = await accountRepo.findWhere({ status: 'active' } as Partial<DbAccount>);
+      const groupRules = await groupPublishRuleRepo.findEnabledByGroup(groupId);
+
+      for (const rule of groupRules) {
+        const accounts = accountsInGroup.filter((a) => a.platform === rule.platform);
+        for (const account of accounts) {
+          const isValid = await accountService.validateCookie(account.id);
+          if (isValid) {
+            healthy.push(account.id);
+          } else {
+            unhealthy.push(account.id);
+          }
+        }
+      }
+    }
+
+    return { healthy: [...new Set(healthy)], unhealthy: [...new Set(unhealthy)] };
+  }
+
+  async getPublishHistory(filters: { platform?: string; accountId?: string; startDate?: string; endDate?: string }): Promise<PublishTask[]> {
+    const conditions: Partial<DbPublishTask> = {};
+    if (filters.platform) conditions.platform = filters.platform;
+    if (filters.accountId) conditions.account_id = filters.accountId;
+
+    let tasks = await publishTaskRepo.findWhere(conditions);
+
+    if (filters.startDate) {
+      const start = new Date(filters.startDate);
+      tasks = tasks.filter((t) => new Date(t.created_at) >= start);
+    }
+    if (filters.endDate) {
+      const end = new Date(filters.endDate);
+      tasks = tasks.filter((t) => new Date(t.created_at) <= end);
+    }
+
+    return tasks.map((t) => this.dbRowToTask(t));
   }
 }
 

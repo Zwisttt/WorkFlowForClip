@@ -308,6 +308,7 @@ function statusLabel(status: TaskStatus): string {
     success: '已完成',
     failed: '失败',
     cancelled: '已取消',
+    skipped: '已跳过',
   };
   return labels[status] || status;
 }
@@ -319,6 +320,7 @@ function statusType(status: TaskStatus): '' | 'success' | 'warning' | 'danger' |
     success: 'success',
     failed: 'danger',
     cancelled: 'warning',
+    skipped: 'info',
   };
   return types[status] || '';
 }

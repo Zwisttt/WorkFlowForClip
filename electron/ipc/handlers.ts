@@ -28,6 +28,7 @@ import type {
   PublishResult,
   PublishTaskStatusDetail,
   PublishRequest,
+  BatchPublishRequest,
 } from '../services/types/publish';
 import type { PlatformConfig, PlatformCapabilities, CookieResult } from '../platform/base/types';
 import type { PublishEvent } from '../core/types/eventbus';
@@ -145,6 +146,10 @@ const CHANNEL = {
   NOTIFICATION_GET_PREFERENCES: 'notification:getPreferences',
   NOTIFICATION_UPDATE_PREFERENCES: 'notification:updatePreferences',
   NOTIFICATION_TEST: 'notification:test',
+
+  PUBLISH_PRE_CHECK: 'publish:preCheck',
+  PUBLISH_HISTORY: 'publish:history',
+  PLATFORM_COVER_RATIOS: 'platform:coverRatios',
 } as const;
 
 export interface IpcResult<T = unknown> {
@@ -865,6 +870,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNEL.NOTIFICATION_TEST, async () => {
     notificationService.sendTest();
     return ok(null);
+  });
+
+  ipcMain.handle(CHANNEL.PUBLISH_PRE_CHECK, async (_e, request: BatchPublishRequest) => {
+    return wrap(() => publishService.preCheckAccounts(request));
+  });
+
+  ipcMain.handle(CHANNEL.PLATFORM_COVER_RATIOS, async (_e, platformId: string) => {
+    const adapter = PlatformRegistry.getAdapter(platformId);
+    return adapter?.capabilities?.coverRatios ?? [];
+  });
+
+  ipcMain.handle(CHANNEL.PUBLISH_HISTORY, async (_e, filters: { platform?: string; accountId?: string; startDate?: string; endDate?: string }) => {
+    return wrap(() => publishService.getPublishHistory(filters));
   });
 
   logger.info('IPC 处理器已注册');

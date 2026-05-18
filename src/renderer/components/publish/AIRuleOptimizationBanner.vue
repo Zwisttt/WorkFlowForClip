@@ -113,7 +113,7 @@ function dismissSuggestion(suggestionId: string) {
     <div v-else-if="visibleSuggestions.length > 0" class="ai-rule-banner">
       <div class="ai-rule-banner__header">
         <div class="ai-rule-banner__title">
-          <el-icon :size="18" color="#7c3aed"><MagicStick /></el-icon>
+          <el-icon :size="18" class="ai-rule-banner__icon"><MagicStick /></el-icon>
           <span class="ai-rule-banner__label">AI 规则优化建议</span>
           <span class="ai-rule-banner__group">{{ groupName }}</span>
         </div>
@@ -158,11 +158,11 @@ function dismissSuggestion(suggestionId: string) {
 <style scoped>
 /* ── Banner container ── */
 .ai-rule-banner {
-  background-color: #f5f3ff;
+  background-color: var(--color-accent-light);
   border-radius: var(--border-radius-md);
   padding: var(--space-4);
   margin-bottom: var(--space-4);
-  border: 1px solid #ede9fe;
+  border: 1px solid var(--color-accent-light);
 }
 
 /* ── Header ── */
@@ -179,6 +179,10 @@ function dismissSuggestion(suggestionId: string) {
   gap: var(--space-2);
 }
 
+.ai-rule-banner__icon {
+  color: var(--color-accent);
+}
+
 .ai-rule-banner__label {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
@@ -188,7 +192,7 @@ function dismissSuggestion(suggestionId: string) {
 .ai-rule-banner__group {
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
-  background-color: rgba(124, 58, 237, 0.08);
+  background-color: color-mix(in srgb, var(--color-accent) 8%, transparent);
   padding: 2px var(--space-2);
   border-radius: var(--border-radius-sm);
 }
@@ -207,7 +211,7 @@ function dismissSuggestion(suggestionId: string) {
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  background-color: #ffffff;
+  background-color: var(--color-bg-card);
   border-radius: var(--border-radius-sm);
   border-left: 3px solid var(--color-border);
   transition: box-shadow var(--transition-fast);
@@ -218,15 +222,15 @@ function dismissSuggestion(suggestionId: string) {
 }
 
 .ai-rule-banner__item.is-strong {
-  border-left-color: #7c3aed;
+  border-left-color: var(--color-accent);
 }
 
 .ai-rule-banner__item.is-weak {
-  border-left-color: #8c8c8c;
+  border-left-color: var(--color-text-secondary);
 }
 
 .ai-rule-banner__item.is-warning {
-  border-left-color: #cf1322;
+  border-left-color: var(--color-danger);
 }
 
 /* ── Suggestion content ── */
@@ -303,7 +307,7 @@ function dismissSuggestion(suggestionId: string) {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: linear-gradient(90deg, #ede9fe 25%, #e0dbff 50%, #ede9fe 75%);
+  background: linear-gradient(90deg, var(--color-bg-card) 25%, var(--color-border) 50%, var(--color-bg-card) 75%);
   background-size: 200% 100%;
   animation: skeleton-pulse 1.5s ease-in-out infinite;
 }
@@ -316,7 +320,7 @@ function dismissSuggestion(suggestionId: string) {
 .skeleton-bar {
   height: 14px;
   border-radius: var(--border-radius-sm);
-  background: linear-gradient(90deg, #ede9fe 25%, #e0dbff 50%, #ede9fe 75%);
+  background: linear-gradient(90deg, var(--color-bg-card) 25%, var(--color-border) 50%, var(--color-bg-card) 75%);
   background-size: 200% 100%;
   animation: skeleton-pulse 1.5s ease-in-out infinite;
 }
@@ -341,7 +345,7 @@ function dismissSuggestion(suggestionId: string) {
 }
 
 .ai-rule-banner__item--skeleton {
-  border-left-color: #ede9fe;
+  border-left-color: var(--color-border);
 }
 
 .skeleton-text-group {

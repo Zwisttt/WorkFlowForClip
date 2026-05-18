@@ -11,6 +11,7 @@
           <CircleCheckFilled v-else-if="task.status === 'success'" />
           <CircleCloseFilled v-else-if="task.status === 'failed'" />
           <Clock v-else-if="task.status === 'pending'" />
+          <RemoveFilled v-else-if="task.status === 'skipped'" />
           <WarningFilled v-else />
         </el-icon>
       </div>
@@ -101,6 +102,7 @@ import {
   WarningFilled,
   Monitor,
   User,
+  RemoveFilled,
 } from '@element-plus/icons-vue';
 import type { Task, TaskStatus } from '@/renderer/stores/task';
 
@@ -134,6 +136,7 @@ const statusMap: Record<TaskStatus, string> = {
   success: '已完成',
   failed: '失败',
   cancelled: '已取消',
+  skipped: '已跳过',
 };
 
 const statusTagTypeMap: Record<TaskStatus, string> = {
@@ -142,6 +145,7 @@ const statusTagTypeMap: Record<TaskStatus, string> = {
   success: 'success',
   failed: 'danger',
   cancelled: 'warning',
+  skipped: 'info',
 };
 
 const titleLabel = computed(() => {
@@ -153,7 +157,9 @@ const titleLabel = computed(() => {
 const platformLabel = computed(() => platformMap[props.task.platform] || props.task.platform);
 const statusLabel = computed(() => statusMap[props.task.status]);
 const statusTagType = computed(() => statusTagTypeMap[props.task.status]);
-const progressColor = computed(() => '#409eff');
+const progressColor = computed(() =>
+  getComputedStyle(document.documentElement).getPropertyValue('--color-primary').trim()
+);
 
 const timeLabel = computed(() => {
   if (props.task.status === 'success' && props.task.completedAt) {
@@ -217,6 +223,11 @@ function formatTime(iso: string) {
   opacity: 0.5;
 }
 
+.task-item--skipped {
+  border-left: 3px solid var(--color-info);
+  opacity: 0.6;
+}
+
 .task-item__header {
   display: flex;
   align-items: flex-start;
@@ -252,6 +263,11 @@ function formatTime(iso: string) {
 
 .task-item__icon-wrap--pending {
   background: rgba(144, 147, 153, 0.1);
+  color: var(--color-info);
+}
+
+.task-item__icon-wrap--skipped {
+  background: rgba(144, 147, 153, 0.08);
   color: var(--color-info);
 }
 

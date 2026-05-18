@@ -30,8 +30,8 @@
               :style="{
                 backgroundColor: row.groupColor,
                 borderColor: row.groupColor,
-                color: '#fff',
               }"
+              class="wsrd-group-tag"
               effect="dark"
               round
             >
@@ -52,6 +52,44 @@
 
     <el-empty v-else description="点击上方按钮生成排期预览" />
 
+    <div v-if="scheduledTasks.length > 0" class="wsrd-publish-options">
+      <h4 class="wsrd-options-title">发布设置</h4>
+      <div class="wsrd-options-grid">
+        <div class="wsrd-option-item">
+          <el-form-item label="预发布模式">
+            <el-switch v-model="dryRunEnabled" />
+            <span class="wsrd-option-hint">开启后将执行所有步骤但不点击最终发布按钮</span>
+          </el-form-item>
+        </div>
+        <div class="wsrd-option-item">
+          <el-form-item label="发布前账号检测">
+            <el-switch v-model="prePublishCheckEnabled" @change="onPreCheckToggle" />
+          </el-form-item>
+        </div>
+        <div v-if="coverRatios.length > 0" class="wsrd-option-item">
+          <el-form-item label="封面比例">
+            <el-select v-model="selectedCoverRatio" placeholder="自动" clearable size="default">
+              <el-option label="自动" value="" />
+              <el-option v-for="ratio in coverRatios" :key="ratio" :label="ratio" :value="ratio" />
+            </el-select>
+          </el-form-item>
+        </div>
+      </div>
+
+      <div v-if="healthCheckResults.length > 0" class="wsrd-health-check">
+        <div class="wsrd-health-check__title">账号检测结果</div>
+        <div class="wsrd-health-check__list">
+          <div v-for="result in healthCheckResults" :key="result.accountId" class="wsrd-health-check__item">
+            <el-tag :type="result.healthy ? 'success' : 'danger'" size="small" round>
+              {{ result.healthy ? '正常' : '异常' }}
+            </el-tag>
+            <span class="wsrd-health-check__name">{{ result.accountName }}</span>
+            <span v-if="result.message" class="wsrd-health-check__msg">{{ result.message }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="wsrd-footer">
       <el-button @click="$emit('prev')">上一步</el-button>
       <el-button type="success" :disabled="scheduledTasks.length === 0" @click="handleConfirm">
@@ -62,10 +100,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { Calendar } from '@element-plus/icons-vue';
 import { useContentStore } from '@/renderer/stores/content';
 import { useGroupStore, type PublishRule } from '@/renderer/stores/group';
+import { usePublishStore, type HealthCheckResult } from '@/renderer/stores/publish';
 
 export interface ScheduledTaskRow {
   date: string;
@@ -87,6 +126,8 @@ export interface ConfirmPayload {
   accountIds: string[];
   scheduledAt: string;
   publishMode: string;
+  dryRun?: boolean;
+  coverRatio?: string;
 }
 
 const props = defineProps<{
@@ -101,9 +142,15 @@ const emit = defineEmits<{
 
 const contentStore = useContentStore();
 const groupStore = useGroupStore();
+const publishStore = usePublishStore();
 
 const generating = ref(false);
 const scheduledTasks = ref<ScheduledTaskRow[]>([]);
+const dryRunEnabled = ref(false);
+const prePublishCheckEnabled = ref(true);
+const healthCheckResults = ref<HealthCheckResult[]>([]);
+const coverRatios = ref<string[]>([]);
+const selectedCoverRatio = ref('');
 
 const uniqueDays = computed(() => {
   const days = new Set(scheduledTasks.value.map((t) => t.date));
@@ -231,6 +278,44 @@ async function generateSchedule() {
 
   scheduledTasks.value = tasks;
   generating.value = false;
+
+  fetchCoverRatiosForGroups(selectedGroups);
+}
+
+async function fetchCoverRatiosForGroups(groups: { accountIds: string[] }[]) {
+  const allAccountIds = groups.flatMap(g => g.accountIds);
+  if (allAccountIds.length === 0 || !window.matrixflow) {
+    coverRatios.value = [];
+    return;
+  }
+  const platformIds = new Set<string>();
+  for (const accountId of allAccountIds) {
+    try {
+      const accounts = await window.matrixflow.accounts.list();
+      const acc = (accounts as Array<{ id: string; platform: string }>).find(a => a.id === accountId);
+      if (acc) platformIds.add(acc.platform);
+    } catch { /* skip */ }
+  }
+  for (const platformId of platformIds) {
+    await publishStore.fetchCoverRatios(platformId);
+    if (publishStore.availableCoverRatios.length > 0) {
+      coverRatios.value = publishStore.availableCoverRatios;
+      return;
+    }
+  }
+  coverRatios.value = [];
+}
+
+async function onPreCheckToggle(enabled: boolean) {
+  if (!enabled) {
+    healthCheckResults.value = [];
+    return;
+  }
+  const allAccountIds = scheduledTasks.value.flatMap(t => t.accountIds);
+  const uniqueIds = [...new Set(allAccountIds)];
+  if (uniqueIds.length === 0) return;
+  await publishStore.runPrePublishCheck(uniqueIds);
+  healthCheckResults.value = publishStore.healthCheckResults;
 }
 
 function handleConfirm() {
@@ -240,6 +325,8 @@ function handleConfirm() {
     accountIds: t.accountIds,
     scheduledAt: t.scheduledAt,
     publishMode: t.publishMode,
+    dryRun: dryRunEnabled.value || undefined,
+    coverRatio: selectedCoverRatio.value || undefined,
   }));
   emit('confirm', payload);
 }
@@ -276,6 +363,10 @@ function handleConfirm() {
   box-shadow: var(--shadow-sm);
 }
 
+.wsrd-group-tag {
+  color: var(--color-bg-card);
+}
+
 .wsrd-date {
   font-variant-numeric: tabular-nums;
   font-size: var(--font-size-sm);
@@ -297,5 +388,75 @@ function handleConfirm() {
   border-top: 1px solid var(--color-border-light);
   background: var(--color-bg-card);
   border-radius: 0 0 var(--border-radius-lg) var(--border-radius-lg);
+}
+
+/* ── Publish Options ── */
+.wsrd-publish-options {
+  background: var(--color-bg-card);
+  border-radius: var(--border-radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.wsrd-options-title {
+  margin: 0;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.wsrd-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+.wsrd-option-item :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.wsrd-option-hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin-left: var(--space-2);
+}
+
+/* ── Health Check ── */
+.wsrd-health-check {
+  border-top: 1px solid var(--color-border-light);
+  padding-top: var(--space-3);
+}
+
+.wsrd-health-check__title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-2) 0;
+}
+
+.wsrd-health-check__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.wsrd-health-check__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.wsrd-health-check__name {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.wsrd-health-check__msg {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
 }
 </style>

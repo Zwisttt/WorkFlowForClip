@@ -47,7 +47,7 @@ import {
   RadarComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import { isDark, PLATFORM_COLORS } from './theme';
+import { isDark, PLATFORM_COLORS, cssVar } from './theme';
 
 use([
   BarChart,
@@ -80,20 +80,20 @@ const radarChartRef = ref<InstanceType<typeof VChart>>();
 
 const platformNames = computed(() => props.platforms.map((p) => p.platform));
 const platformColorList = computed(() =>
-  props.platforms.map((p) => PLATFORM_COLORS[p.platform] ?? '#409eff'),
+  props.platforms.map((p) => PLATFORM_COLORS[p.platform] ?? cssVar('--chart-color-1', '#409eff')),
 );
 
 const tooltipConfig = computed(() => ({
-  backgroundColor: isDark.value ? '#1d1e2c' : '#fff',
-  borderColor: isDark.value ? '#333' : '#e5e6eb',
+  backgroundColor: isDark.value ? cssVar('--chart-bg-dark', '#1d1e2c') : cssVar('--chart-bg-light', '#ffffff'),
+  borderColor: isDark.value ? cssVar('--chart-border-dark', '#333') : cssVar('--chart-border-light', '#e5e6eb'),
   textStyle: {
-    color: isDark.value ? '#a3a6b4' : '#4e5969',
+    color: isDark.value ? cssVar('--chart-text-dark', '#a3a6b4') : cssVar('--chart-text-light', '#4e5969'),
     fontSize: 12,
   },
 }));
 
 const axisLabelStyle = computed(() => ({
-  color: isDark.value ? '#86909c' : '#86909c',
+  color: cssVar('--chart-text-secondary', '#86909c'),
   fontSize: 11,
 }));
 
@@ -107,7 +107,7 @@ const barOption = computed(() => ({
     top: 0,
     right: 0,
     textStyle: {
-      color: isDark.value ? '#a3a6b4' : '#86909c',
+      color: isDark.value ? cssVar('--chart-text-dark', '#a3a6b4') : cssVar('--chart-text-secondary', '#86909c'),
       fontSize: 12,
     },
     icon: 'roundRect',
@@ -124,7 +124,7 @@ const barOption = computed(() => ({
   xAxis: {
     type: 'category',
     data: platformNames.value,
-    axisLine: { lineStyle: { color: isDark.value ? '#333' : '#e5e6eb' } },
+    axisLine: { lineStyle: { color: isDark.value ? cssVar('--chart-border-dark', '#333') : cssVar('--chart-border-light', '#e5e6eb') } },
     axisLabel: axisLabelStyle.value,
     axisTick: { show: false },
   },
@@ -132,16 +132,16 @@ const barOption = computed(() => ({
     {
       type: 'value',
       name: '发布量',
-      nameTextStyle: { color: isDark.value ? '#86909c' : '#86909c', fontSize: 11 },
+      nameTextStyle: { color: cssVar('--chart-text-secondary', '#86909c'), fontSize: 11 },
       splitLine: {
-        lineStyle: { color: isDark.value ? 'rgba(255,255,255,0.06)' : '#f2f3f5' },
+        lineStyle: { color: isDark.value ? cssVar('--chart-split-line-dark', 'rgba(255,255,255,0.06)') : cssVar('--chart-split-line-light', '#f2f3f5') },
       },
       axisLabel: axisLabelStyle.value,
     },
     {
       type: 'value',
       name: '成功率 %',
-      nameTextStyle: { color: isDark.value ? '#86909c' : '#86909c', fontSize: 11 },
+      nameTextStyle: { color: cssVar('--chart-text-secondary', '#86909c'), fontSize: 11 },
       max: 100,
       splitLine: { show: false },
       axisLabel: axisLabelStyle.value,
@@ -159,7 +159,7 @@ const barOption = computed(() => ({
           x: 0, y: 0, x2: 0, y2: 1,
           colorStops: props.platforms.map((p, i) => ({
             offset: i === 0 ? 0 : 1,
-            color: PLATFORM_COLORS[p.platform] ?? '#409eff',
+            color: PLATFORM_COLORS[p.platform] ?? cssVar('--chart-color-1', '#409eff'),
           })),
         },
         borderRadius: [4, 4, 0, 0],
@@ -172,7 +172,7 @@ const barOption = computed(() => ({
       data: props.platforms.map((p) => p.successRate),
       barWidth: '28%',
       itemStyle: {
-        color: '#67c23a',
+        color: cssVar('--chart-color-2', '#67c23a'),
         borderRadius: [4, 4, 0, 0],
         opacity: 0.7,
       },
@@ -196,7 +196,7 @@ const radarOption = computed(() => ({
     top: 0,
     right: 0,
     textStyle: {
-      color: isDark.value ? '#a3a6b4' : '#86909c',
+      color: isDark.value ? cssVar('--chart-text-dark', '#a3a6b4') : cssVar('--chart-text-secondary', '#86909c'),
       fontSize: 12,
     },
     icon: 'roundRect',
@@ -211,17 +211,17 @@ const radarOption = computed(() => ({
       max: 100,
     })),
     axisName: {
-      color: isDark.value ? '#86909c' : '#86909c',
+      color: cssVar('--chart-text-secondary', '#86909c'),
       fontSize: 11,
     },
     splitLine: {
-      lineStyle: { color: isDark.value ? 'rgba(255,255,255,0.06)' : '#f2f3f5' },
+      lineStyle: { color: isDark.value ? cssVar('--chart-split-line-dark', 'rgba(255,255,255,0.06)') : cssVar('--chart-split-line-light', '#f2f3f5') },
     },
     splitArea: {
       areaStyle: { color: isDark.value ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)' },
     },
     axisLine: {
-      lineStyle: { color: isDark.value ? 'rgba(255,255,255,0.08)' : '#e5e6eb' },
+      lineStyle: { color: isDark.value ? cssVar('--chart-split-line-dark', 'rgba(255,255,255,0.08)') : cssVar('--chart-border-light', '#e5e6eb') },
     },
   },
   series: [
@@ -230,9 +230,9 @@ const radarOption = computed(() => ({
       data: props.platforms.map((p) => ({
         value: radarDimensions.map((d) => p[d.key]),
         name: p.platform,
-        lineStyle: { color: PLATFORM_COLORS[p.platform] ?? '#409eff', width: 2 },
-        areaStyle: { color: PLATFORM_COLORS[p.platform] ?? '#409eff', opacity: 0.1 },
-        itemStyle: { color: PLATFORM_COLORS[p.platform] ?? '#409eff' },
+        lineStyle: { color: PLATFORM_COLORS[p.platform] ?? cssVar('--chart-color-1', '#409eff'), width: 2 },
+        areaStyle: { color: PLATFORM_COLORS[p.platform] ?? cssVar('--chart-color-1', '#409eff'), opacity: 0.1 },
+        itemStyle: { color: PLATFORM_COLORS[p.platform] ?? cssVar('--chart-color-1', '#409eff') },
       })),
     },
   ],

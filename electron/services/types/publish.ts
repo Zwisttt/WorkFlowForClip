@@ -38,6 +38,7 @@ export interface PublishRequest {
     description?: string;
     tags?: string[];
     visibility?: PublishVisibility;
+    dryRun?: boolean;
   };
 }
 
@@ -46,6 +47,8 @@ export interface BatchPublishRequest {
   groupIds: string[];
   scheduledAt?: Date;
   publishMode: PublishMode;
+  dryRun?: boolean;
+  prePublishCheck?: boolean;
 }
 
 // ─── 发布任务 ────────────────────────────────────────────────
@@ -204,4 +207,8 @@ export interface IPublishService {
 
   // 发布规则应用
   applyGroupRules(taskId: string, groupId: string): Promise<void>;
+
+  // 预检和历史
+  preCheckAccounts(request: BatchPublishRequest): Promise<{ healthy: string[]; unhealthy: string[] }>;
+  getPublishHistory(filters: { platform?: string; accountId?: string; startDate?: string; endDate?: string }): Promise<PublishTask[]>;
 }

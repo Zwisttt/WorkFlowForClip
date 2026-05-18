@@ -158,7 +158,7 @@ export default {
 
 .panel-count {
   color: var(--el-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--font-size-base);
 }
 
 .panel-tabs {
@@ -191,13 +191,13 @@ export default {
 }
 
 .platform-icon {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: bold;
   color: var(--el-color-primary);
 }
 
 .nickname {
-  font-size: 14px;
+  font-size: var(--font-size-base);
 }
 
 .close-btn {
@@ -231,7 +231,7 @@ export default {
 }
 
 .placeholder-title {
-  font-size: 18px;
+  font-size: var(--font-size-xl);
   font-weight: 500;
   margin-bottom: 8px;
 }
@@ -272,14 +272,14 @@ export default {
 }
 
 .platform-badge {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--el-color-primary);
   font-weight: 500;
   margin-bottom: 4px;
 }
 
 .panel-name {
-  font-size: 14px;
+  font-size: var(--font-size-base);
   color: var(--el-text-color-primary);
 }
 
@@ -299,12 +299,12 @@ export default {
 }
 
 .panel-empty .hint {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   margin-top: 8px;
 }
 
 .hint-secondary {
-  font-size: 11px;
+  font-size: var(--font-size-2xs);
   color: var(--el-text-color-placeholder);
   margin-top: 4px;
 }

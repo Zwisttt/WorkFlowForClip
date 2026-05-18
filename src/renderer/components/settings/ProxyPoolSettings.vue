@@ -249,7 +249,7 @@ async function deleteProxy(proxy: Proxy) {
 
 .section-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--font-size-lg);
   font-weight: 500;
 }
 </style>

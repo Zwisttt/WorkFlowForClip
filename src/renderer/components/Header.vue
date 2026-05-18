@@ -75,7 +75,7 @@ const currentTitle = computed(() => {
 
 .header__avatar {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-bg-card);
 }
 
 .header__username {

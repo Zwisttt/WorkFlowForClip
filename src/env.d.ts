@@ -31,6 +31,8 @@ interface MatrixFlowAPI {
     submit: (request: any) => Promise<IpcResult<any>>;
     cancel: (taskId: string) => Promise<IpcResult<void>>;
     status: (taskId: string) => Promise<IpcResult<any>>;
+    preCheck: (request: any) => Promise<IpcResult<any>>;
+    history: (filters: any) => Promise<IpcResult<any>>;
     createTask: (data: any) => Promise<any>;
     updateTask: (taskId: string, data: any) => Promise<any>;
     deleteTask: (taskId: string) => Promise<any>;
@@ -47,6 +49,7 @@ interface MatrixFlowAPI {
   platform: {
     list: () => Promise<IpcResult<any[]>>;
     login: (accountId: string) => Promise<IpcResult<any>>;
+    coverRatios: (platformId: string) => Promise<IpcResult<string[]>>;
   };
 
   accounts: {

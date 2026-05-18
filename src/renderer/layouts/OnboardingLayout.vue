@@ -105,7 +105,7 @@ defineEmits<{
   align-items: center;
   justify-content: center;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-bg-card);
   border-radius: var(--border-radius-md);
   font-size: var(--font-size-2xl);
   font-weight: var(--font-weight-semibold);

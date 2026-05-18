@@ -95,14 +95,14 @@ export const REST_DAY_OPTIONS = [
 ];
 
 const GROUP_COLORS = [
-  '#f56c6c',
-  '#e6a23c',
-  '#67c23a',
-  '#409eff',
-  '#909399',
-  '#9b59b6',
-  '#1abc9c',
-  '#e74c3c',
+  '#db4b4b',
+  '#e8993d',
+  '#37b36e',
+  '#2974e0',
+  '#8a95a5',
+  '#7f52b8',
+  '#29b89d',
+  '#e04040',
 ];
 
 function getRandomColor(): string {

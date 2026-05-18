@@ -216,7 +216,7 @@ async function savePlatformConfig(id: string) {
 }
 
 .platform-item__icon {
-  font-size: 24px;
+  font-size: var(--font-size-3xl);
   flex-shrink: 0;
 }
 

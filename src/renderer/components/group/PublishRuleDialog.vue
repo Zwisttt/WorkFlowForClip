@@ -356,7 +356,7 @@ async function handleSave() {
 }
 
 .template-card__icon {
-  font-size: 28px;
+  font-size: calc(var(--font-size-3xl) * 1.17);
   line-height: 1;
   margin-bottom: var(--space-2);
 }
@@ -382,7 +382,7 @@ async function handleSave() {
 }
 
 .template-card__tag {
-  font-size: 11px;
+  font-size: var(--font-size-2xs);
 }
 
 .rule-form {

@@ -22,7 +22,7 @@
 
         <div class="feature-list">
           <div v-for="feature in features" :key="feature.id" class="feature-item">
-            <el-icon :size="16" :color="feature.enabled ? '#67C23A' : '#909399'">
+            <el-icon :size="16" :color="featureIconColor(feature.enabled)">
               <CircleCheck v-if="feature.enabled" />
               <CircleClose v-else />
             </el-icon>
@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import { CircleCheck, CircleClose } from '@element-plus/icons-vue';
@@ -112,6 +112,13 @@ const requesting = ref(false);
 const showOfflineDialog = ref(false);
 const offlineFilePath = ref('');
 const offlineStep = ref(0);
+
+function featureIconColor(enabled: boolean): string {
+  const style = getComputedStyle(document.documentElement);
+  return enabled
+    ? style.getPropertyValue('--color-success').trim()
+    : style.getPropertyValue('--color-info').trim();
+}
 
 interface LicenseData {
   valid: boolean;
@@ -279,7 +286,7 @@ async function handleOfflineActivate() {
 
 .license-details p {
   margin: 4px 0;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .feature-list {
@@ -299,7 +306,7 @@ async function handleOfflineActivate() {
 
 .feature-name {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--font-size-base);
 }
 
 .offline-actions {

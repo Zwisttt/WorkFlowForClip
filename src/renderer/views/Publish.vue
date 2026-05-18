@@ -501,13 +501,15 @@ function onAICheckConfirmed() {
 }
 
 // Wizard integration
-async function onWizardConfirmed(tasks: Array<{ contentId: string; groupId: string; accountIds: string[]; scheduledAt: string; publishMode: string }>) {
+async function onWizardConfirmed(tasks: Array<{ contentId: string; groupId: string; accountIds: string[]; scheduledAt: string; publishMode: string; dryRun?: boolean; coverRatio?: string }>) {
   for (const task of tasks) {
     await publishStore.createTask({
       contentId: task.contentId,
       accountIds: task.accountIds,
       scheduledAt: task.scheduledAt,
       publishMode: task.publishMode as PublishMode,
+      dryRun: task.dryRun,
+      coverRatio: task.coverRatio,
     });
   }
   showWizard.value = false;
@@ -682,7 +684,7 @@ onMounted(() => {
 
 .calendar__cell.is-today .cell__day {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-bg-card);
   border-radius: 50%;
   width: 24px;
   height: 24px;
@@ -714,13 +716,13 @@ onMounted(() => {
 }
 
 .cell__badge {
-  font-size: 10px;
+  font-size: var(--font-size-3xs);
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
   border-radius: 8px;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-bg-card);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -740,7 +742,7 @@ onMounted(() => {
   gap: var(--space-1);
   padding: 2px var(--space-1);
   border-radius: var(--border-radius-sm);
-  font-size: 11px;
+  font-size: var(--font-size-2xs);
   line-height: 18px;
   cursor: grab;
   overflow: hidden;
@@ -790,7 +792,7 @@ onMounted(() => {
 
 .task-chip__icon {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .task-chip__title {
@@ -799,7 +801,7 @@ onMounted(() => {
 }
 
 .task-more {
-  font-size: 10px;
+  font-size: var(--font-size-3xs);
   color: var(--color-text-secondary);
   padding-left: var(--space-1);
 }

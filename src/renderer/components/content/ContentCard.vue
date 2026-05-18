@@ -213,7 +213,7 @@ const formatDate = computed(() => {
   padding: 1px var(--space-1);
   border-radius: var(--border-radius-sm);
   background: rgba(0, 0, 0, 0.7);
-  color: #fff;
+  color: var(--color-bg-card);
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.5px;
@@ -226,8 +226,8 @@ const formatDate = computed(() => {
   padding: 1px var(--space-2);
   border-radius: var(--border-radius-sm);
   background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 10px;
+  color: var(--color-bg-card);
+  font-size: var(--font-size-3xs);
   backdrop-filter: blur(4px);
 }
 
@@ -270,14 +270,14 @@ const formatDate = computed(() => {
 }
 
 .content-card__tag {
-  font-size: 10px;
+  font-size: var(--font-size-3xs);
   border: none;
   background: var(--color-bg-page);
   color: var(--color-text-secondary);
 }
 
 .content-card__tag-more {
-  font-size: 10px;
+  font-size: var(--font-size-3xs);
   color: var(--color-text-placeholder);
 }
 

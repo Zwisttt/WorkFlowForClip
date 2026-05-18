@@ -6,7 +6,7 @@
 export type TaskType = 'upload' | 'publish' | 'stats' | 'comment';
 
 /** 任务状态 */
-export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'retry';
+export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'retry' | 'skipped';
 
 /** 任务优先级（数值越大优先级越高） */
 export const enum TaskPriority {
@@ -128,12 +128,16 @@ export const TaskEvents = {
   TASK_CREATED: 'task:created',
   TASK_QUEUED: 'task:queued',
   TASK_STARTED: 'task:started',
+  TASK_PROGRESS: 'task:progress',
   TASK_COMPLETED: 'task:completed',
   TASK_FAILED: 'task:failed',
   TASK_RETRY: 'task:retry',
+  TASK_RETRYING: 'task:retrying',
   TASK_CANCELLED: 'task:cancelled',
+  TASK_SKIPPED: 'task:skipped',
   SCHEDULER_STARTED: 'scheduler:started',
   SCHEDULER_STOPPED: 'scheduler:stopped',
+  QUEUE_UPDATED: 'queue:updated',
   QUEUE_PERSISTED: 'queue:persisted',
   QUEUE_RESTORED: 'queue:restored',
   RATE_LIMITED: 'rate:limited',

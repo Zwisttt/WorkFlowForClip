@@ -280,7 +280,7 @@ function handleUpload() {
   padding: 1px var(--space-1);
   border-radius: var(--border-radius-sm);
   background: rgba(0, 0, 0, 0.7);
-  color: #fff;
+  color: var(--color-bg-card);
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.5px;
@@ -293,8 +293,8 @@ function handleUpload() {
   padding: 1px var(--space-2);
   border-radius: var(--border-radius-sm);
   background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 10px;
+  color: var(--color-bg-card);
+  font-size: var(--font-size-3xs);
   backdrop-filter: blur(4px);
 }
 
@@ -324,7 +324,7 @@ function handleUpload() {
 }
 
 .wsc-card__tags {
-  font-size: 10px;
+  font-size: var(--font-size-3xs);
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;

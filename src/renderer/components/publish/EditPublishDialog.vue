@@ -77,6 +77,7 @@ const statusTypeMap: Record<PublishStatus, string> = {
   completed: 'success',
   failed: 'danger',
   cancelled: 'info',
+  skipped: 'info',
 };
 
 const statusLabelMap: Record<PublishStatus, string> = {
@@ -86,6 +87,7 @@ const statusLabelMap: Record<PublishStatus, string> = {
   completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
+  skipped: '已跳过',
 };
 
 watch(

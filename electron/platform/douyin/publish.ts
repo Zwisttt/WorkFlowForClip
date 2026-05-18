@@ -123,7 +123,7 @@ export async function publish(ctx: PublishContext): Promise<PublishResult> {
   const { page: existingPage, accountId, title, description, tags, scheduledTime } = ctx;
 
   if (existingPage) {
-    return executePublishOnPage(existingPage, title, description, tags, scheduledTime);
+    return executePublishOnPage(existingPage, title, description, tags, scheduledTime, ctx.dryRun, ctx.accountId, ctx.videoId);
   }
 
   if (!accountId) {
@@ -141,7 +141,7 @@ export async function publish(ctx: PublishContext): Promise<PublishResult> {
   try {
     const page = await context.newPage();
     await page.goto(DOUYIN_URLS.upload, { waitUntil: 'domcontentloaded' });
-    return await executePublishOnPage(page, title, description, tags, scheduledTime);
+    return await executePublishOnPage(page, title, description, tags, scheduledTime, ctx.dryRun, ctx.accountId, ctx.videoId);
   } catch (error) {
     return { success: false, message: `发布出错: ${error instanceof Error ? error.message : String(error)}` };
   } finally {
@@ -155,13 +155,25 @@ async function executePublishOnPage(
   title: string,
   description?: string,
   tags?: string[],
-  scheduledTime?: Date
+  scheduledTime?: Date,
+  dryRun?: boolean,
+  accountId?: string,
+  videoId?: string
 ): Promise<PublishResult> {
   try {
     await fillVideoMetadata(page, title, description, tags);
 
     if (scheduledTime) {
       logger.warn('抖音定时发布请使用 schedule 方法');
+    }
+
+    if (dryRun) {
+      logger.info(`[DRY RUN] Skipping final publish for ${accountId ?? 'unknown'}`);
+      return {
+        success: true,
+        message: '[DEBUG] 预发布模式：已跳过最终发布按钮',
+        videoId,
+      };
     }
 
     const success = await executePublish(page);
@@ -181,4 +193,8 @@ async function executePublishOnPage(
 function extractVideoId(url: string): string | undefined {
   const match = url.match(/\/content\/manage\?.*item_ids=([^&]+)/);
   return match ? match[1] : undefined;
+}
+
+export function getCoverRatios(): string[] {
+  return ['16:9', '4:3', '3:4'];
 }

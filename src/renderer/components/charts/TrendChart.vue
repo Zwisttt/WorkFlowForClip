@@ -35,7 +35,7 @@ import {
   DataZoomComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import { isDark } from './theme';
+import { isDark, cssVar } from './theme';
 
 use([
   LineChart,
@@ -61,7 +61,12 @@ const props = withDefaults(defineProps<{
 }>(), {
   title: '趋势图',
   chartType: 'line',
-  colors: () => ['#409eff', '#67c23a', '#e6a23c', '#f56c6c'],
+  colors: () => [
+    cssVar('--chart-color-1', '#409eff'),
+    cssVar('--chart-color-2', '#67c23a'),
+    cssVar('--chart-color-3', '#e6a23c'),
+    cssVar('--chart-color-4', '#f56c6c'),
+  ],
 });
 
 const chartRef = ref<InstanceType<typeof VChart>>();
@@ -103,10 +108,10 @@ const chartOption = computed(() => {
   return {
     tooltip: {
       trigger: 'axis',
-      backgroundColor: isDark.value ? '#1d1e2c' : '#fff',
-      borderColor: isDark.value ? '#333' : '#e5e6eb',
+      backgroundColor: isDark.value ? cssVar('--chart-bg-dark', '#1d1e2c') : cssVar('--chart-bg-light', '#ffffff'),
+      borderColor: isDark.value ? cssVar('--chart-border-dark', '#333') : cssVar('--chart-border-light', '#e5e6eb'),
       textStyle: {
-        color: isDark.value ? '#a3a6b4' : '#4e5969',
+        color: isDark.value ? cssVar('--chart-text-dark', '#a3a6b4') : cssVar('--chart-text-light', '#4e5969'),
         fontSize: 12,
       },
     },
@@ -114,7 +119,7 @@ const chartOption = computed(() => {
       top: 0,
       right: 0,
       textStyle: {
-        color: isDark.value ? '#a3a6b4' : '#86909c',
+        color: isDark.value ? cssVar('--chart-text-dark', '#a3a6b4') : cssVar('--chart-text-secondary', '#86909c'),
         fontSize: 12,
       },
       icon: 'roundRect',
@@ -133,9 +138,9 @@ const chartOption = computed(() => {
       type: 'category',
       data: props.dates,
       boundaryGap: activeChartType.value === 'bar',
-      axisLine: { lineStyle: { color: isDark.value ? '#333' : '#e5e6eb' } },
+      axisLine: { lineStyle: { color: isDark.value ? cssVar('--chart-border-dark', '#333') : cssVar('--chart-border-light', '#e5e6eb') } },
       axisLabel: {
-        color: isDark.value ? '#86909c' : '#86909c',
+        color: cssVar('--chart-text-secondary', '#86909c'),
         fontSize: 11,
       },
       axisTick: { show: false },
@@ -143,10 +148,10 @@ const chartOption = computed(() => {
     yAxis: {
       type: 'value',
       splitLine: {
-        lineStyle: { color: isDark.value ? 'rgba(255,255,255,0.06)' : '#f2f3f5' },
+        lineStyle: { color: isDark.value ? cssVar('--chart-split-line-dark', 'rgba(255,255,255,0.06)') : cssVar('--chart-split-line-light', '#f2f3f5') },
       },
       axisLabel: {
-        color: isDark.value ? '#86909c' : '#86909c',
+        color: cssVar('--chart-text-secondary', '#86909c'),
         fontSize: 11,
       },
     },

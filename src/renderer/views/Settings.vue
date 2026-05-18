@@ -270,9 +270,9 @@ async function selectFingerprintPath() {
 }
 
 .settings-hint {
-  font-size: var(--font-size-xs, 12px);
-  color: var(--color-text-secondary, #909399);
-  margin: var(--space-1, 4px) 0 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  margin: var(--space-1) 0 0 0;
   line-height: 1.5;
 }
 </style>

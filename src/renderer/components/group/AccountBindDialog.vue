@@ -187,7 +187,7 @@ async function handleSave() {
 .bind-item__avatar {
   flex-shrink: 0;
   background: var(--color-primary-light);
-  color: #fff;
+  color: var(--color-bg-card);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
 }

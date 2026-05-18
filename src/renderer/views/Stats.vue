@@ -66,7 +66,7 @@
       :dates="trendDates"
       :series="trendSeries"
       :chart-type="'area'"
-      :colors="['#409eff', '#67c23a', '#e6a23c']"
+      :colors="chartColors"
     />
 
     <!-- 平台对比 -->
@@ -110,7 +110,7 @@
         <el-table-column prop="successRate" label="成功率" width="100">
           <template #default="{ row }">
             <el-progress :percentage="row.successRate" :stroke-width="6" :show-text="false" />
-            <span style="font-size: 12px;">{{ row.successRate }}%</span>
+            <span class="success-rate-text">{{ row.successRate }}%</span>
           </template>
         </el-table-column>
       </el-table>
@@ -133,17 +133,97 @@
       <el-tab-pane label="AI 周报" name="report">
         <WeeklyReportPanel />
       </el-tab-pane>
+
+      <el-tab-pane label="发布历史" name="history">
+        <div class="history-section">
+          <div class="history-filter">
+            <el-select
+              v-model="historyPlatform"
+              placeholder="全部平台"
+              clearable
+              size="default"
+              style="width: 140px"
+              @change="onHistoryFilterChange"
+            >
+              <el-option label="抖音" value="douyin" />
+              <el-option label="小红书" value="xiaohongshu" />
+              <el-option label="视频号" value="channels" />
+              <el-option label="快手" value="kuaishou" />
+            </el-select>
+            <el-date-picker
+              v-model="historyDateRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              size="default"
+              style="width: 260px"
+              value-format="YYYY-MM-DD"
+              @change="onHistoryFilterChange"
+            />
+          </div>
+
+          <el-table
+            v-loading="publishStore.publishHistoryLoading"
+            :data="publishStore.publishHistory"
+            stripe
+            size="default"
+            style="width: 100%"
+          >
+            <el-table-column prop="scheduledAt" label="日期" width="120">
+              <template #default="{ row }">
+                {{ row.scheduledAt?.slice(0, 10) || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="platform" label="平台" width="100">
+              <template #default="{ row }">
+                <el-tag size="small">{{ getPlatformLabel(row.platform) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="accountName" label="账号" min-width="120" show-overflow-tooltip />
+            <el-table-column prop="contentTitle" label="标题" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="status" label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag
+                  :type="historyStatusType(row.status)"
+                  size="small"
+                  round
+                >
+                  {{ historyStatusLabel(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="dryRun" label="模式" width="80">
+              <template #default="{ row }">
+                <el-tag v-if="row.dryRun" type="warning" size="small" effect="plain">预发布</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div v-if="publishStore.publishHistoryTotal > 0" class="history-pagination">
+            <el-pagination
+              :total="publishStore.publishHistoryTotal"
+              :page-size="historyPageSize"
+              :current-page="historyPage"
+              layout="total, prev, pager, next"
+              small
+              @current-change="onHistoryPageChange"
+            />
+          </div>
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { User, CircleCheck, VideoCamera, TrendCharts } from '@element-plus/icons-vue';
 import { useAccountStore } from '@/renderer/stores/account';
 import { useContentStore } from '@/renderer/stores/content';
 import { useTaskStore } from '@/renderer/stores/task';
 import { useStatsStore } from '@/renderer/stores/stats';
+import { usePublishStore } from '@/renderer/stores/publish';
 import { TrendChart, PlatformComparison } from '@/renderer/components/charts';
 import { isDark } from '@/renderer/components/charts';
 import type { TrendSeries } from '@/renderer/components/charts/TrendChart.vue';
@@ -156,10 +236,25 @@ const accountStore = useAccountStore();
 const contentStore = useContentStore();
 const taskStore = useTaskStore();
 const statsStore = useStatsStore();
+const publishStore = usePublishStore();
 
 const dateRange = ref<'7' | '30' | '90'>('30');
 const selectedPlatforms = ref<string[]>([]);
 const rankingMetric = ref<'playCount' | 'likeCount' | 'publishCount'>('playCount');
+
+const historyPlatform = ref('');
+const historyDateRange = ref<[string, string] | null>(null);
+const historyPage = ref(1);
+const historyPageSize = ref(20);
+
+const chartColors = computed(() => {
+  const s = getComputedStyle(document.documentElement);
+  return [
+    s.getPropertyValue('--chart-color-1').trim(),
+    s.getPropertyValue('--chart-color-2').trim(),
+    s.getPropertyValue('--chart-color-3').trim(),
+  ];
+});
 
 onMounted(() => {
   accountStore.fetchAccounts();
@@ -168,6 +263,58 @@ onMounted(() => {
   statsStore.fetchAll(dateRange.value);
   statsStore.fetchAccountRanking();
 });
+
+watch(activeTab, (tab) => {
+  if (tab === 'history') {
+    loadPublishHistory();
+  }
+});
+
+function loadPublishHistory() {
+  publishStore.fetchPublishHistory({
+    platform: historyPlatform.value || undefined,
+    startDate: historyDateRange.value?.[0] || undefined,
+    endDate: historyDateRange.value?.[1] || undefined,
+    page: historyPage.value,
+    pageSize: historyPageSize.value,
+  });
+}
+
+function onHistoryFilterChange() {
+  historyPage.value = 1;
+  loadPublishHistory();
+}
+
+function onHistoryPageChange(page: number) {
+  historyPage.value = page;
+  loadPublishHistory();
+}
+
+function historyStatusType(status: string): string {
+  const map: Record<string, string> = {
+    completed: 'success',
+    failed: 'danger',
+    running: '',
+    pending: 'info',
+    scheduled: '',
+    cancelled: 'warning',
+    skipped: 'info',
+  };
+  return map[status] ?? 'info';
+}
+
+function historyStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    completed: '已完成',
+    failed: '失败',
+    running: '进行中',
+    pending: '等待中',
+    scheduled: '已排期',
+    cancelled: '已取消',
+    skipped: '已跳过',
+  };
+  return map[status] ?? status;
+}
 
 onUnmounted(() => {
   observer.disconnect();
@@ -352,6 +499,28 @@ observer.observe(document.documentElement, { attributes: true, attributeFilter: 
   margin: 0;
   font-size: var(--font-size-lg);
   color: var(--color-text-primary);
+}
+
+.success-rate-text {
+  font-size: var(--font-size-xs);
+}
+
+.history-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.history-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.history-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--space-3);
 }
 
 @media (max-width: 900px) {

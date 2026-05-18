@@ -227,7 +227,7 @@ function onTaskContextMenu(e: MouseEvent, task: PublishTask) {
 
 .week-header__day.is-today .week-header__day-number {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-bg-card);
   border-radius: 50%;
   width: 28px;
   height: 28px;
@@ -285,7 +285,7 @@ function onTaskContextMenu(e: MouseEvent, task: PublishTask) {
   gap: var(--space-1);
   padding: 2px var(--space-1);
   border-radius: var(--border-radius-sm);
-  font-size: 11px;
+  font-size: var(--font-size-2xs);
   line-height: 16px;
   cursor: grab;
   overflow: hidden;

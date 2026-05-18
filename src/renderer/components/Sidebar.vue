@@ -104,7 +104,7 @@ function isActive(path: string): boolean {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--color-bg-card);
   font-weight: var(--font-weight-bold, 700);
   font-size: var(--font-size-lg);
   flex-shrink: 0;

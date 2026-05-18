@@ -43,6 +43,10 @@ const api = {
       ipcRenderer.invoke('publish:cancel', taskId),
     status: (taskId: string): Invoke<PublishTaskStatusDetail> =>
       ipcRenderer.invoke('publish:status', taskId),
+    preCheck: (request: any): Invoke<any> =>
+      ipcRenderer.invoke('publish:preCheck', request),
+    history: (filters: any): Invoke<any> =>
+      ipcRenderer.invoke('publish:history', filters),
   },
 
   task: {
@@ -57,6 +61,8 @@ const api = {
       ipcRenderer.invoke('platform:list'),
     login: (accountId: string): Invoke<CookieResult> =>
       ipcRenderer.invoke('platform:login', accountId),
+    coverRatios: (platformId: string): Invoke<string[]> =>
+      ipcRenderer.invoke('platform:coverRatios', platformId),
   },
 
   accounts: {

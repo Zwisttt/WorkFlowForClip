@@ -44,6 +44,8 @@ export interface WizardConfirmedTask {
   accountIds: string[];
   scheduledAt: string;
   publishMode: string;
+  dryRun?: boolean;
+  coverRatio?: string;
 }
 
 const emit = defineEmits<{

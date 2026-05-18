@@ -139,6 +139,7 @@ const statusMap: Record<TaskStatus, string> = {
   success: '已完成',
   failed: '失败',
   cancelled: '已取消',
+  skipped: '已跳过',
 };
 
 const statusTagTypeMap: Record<TaskStatus, string> = {
@@ -147,6 +148,7 @@ const statusTagTypeMap: Record<TaskStatus, string> = {
   success: 'success',
   failed: 'danger',
   cancelled: 'warning',
+  skipped: 'info',
 };
 
 const typeLabel = computed(() => typeMap[props.task?.type || ''] || props.task?.type);

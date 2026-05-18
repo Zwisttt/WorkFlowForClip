@@ -259,16 +259,16 @@ const dragPreviewStyle = computed(() => ({
 // ── 平台颜色 ──
 
 const PLATFORM_COLORS: Record<string, string> = {
-  douyin: '#161823',
-  kuaishou: '#ff4906',
-  bilibili: '#00a1d6',
-  xiaohongshu: '#fe2c55',
-  wechat: '#07c160',
-  toutiaohao: '#f85959',
-  zhihu: '#0084ff',
-  csdn: '#fc5531',
-  juejin: '#007fff',
-  weibo: '#e6162d',
+  douyin: 'var(--color-plat-douyin)',
+  kuaishou: 'var(--color-plat-kuaishou)',
+  bilibili: 'var(--color-plat-bilibili)',
+  xiaohongshu: 'var(--color-plat-xiaohongshu)',
+  wechat: 'var(--color-plat-wechat)',
+  toutiaohao: 'var(--color-plat-toutiaohao)',
+  zhihu: 'var(--color-plat-zhihu)',
+  csdn: 'var(--color-plat-csdn)',
+  juejin: 'var(--color-plat-juejin)',
+  weibo: 'var(--color-plat-weibo)',
 };
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -284,12 +284,21 @@ const PLATFORM_LABELS: Record<string, string> = {
   weibo: '微博',
 };
 
+function resolveCSSVar(value: string): string {
+  if (value.startsWith('var(')) {
+    const name = value.slice(4, -1);
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  return value;
+}
+
 function platformColor(plat: string): string {
   if (props.platforms) {
     const found = props.platforms.find(p => p.id === plat);
     if (found) return found.color;
   }
-  return PLATFORM_COLORS[plat] || '#909399';
+  const color = PLATFORM_COLORS[plat];
+  return color ? resolveCSSVar(color) : resolveCSSVar('var(--color-info)');
 }
 
 function platformLabel(plat: string): string {
@@ -714,7 +723,7 @@ watch(
 
 .pc-month__cell.is-today .pc-month__day {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-bg-card);
   border-radius: 50%;
   width: 24px;
   height: 24px;
@@ -745,13 +754,13 @@ watch(
 }
 
 .pc-month__badge {
-  font-size: 10px;
+  font-size: var(--font-size-3xs);
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
   border-radius: 8px;
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-bg-card);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -766,7 +775,7 @@ watch(
 }
 
 .pc-month__more {
-  font-size: 10px;
+  font-size: var(--font-size-3xs);
   color: var(--color-text-secondary);
   padding-left: var(--space-1);
 }
@@ -778,13 +787,13 @@ watch(
   gap: var(--space-1);
   padding: 2px var(--space-1);
   border-radius: var(--border-radius-sm);
-  font-size: 11px;
+  font-size: var(--font-size-2xs);
   line-height: 18px;
   cursor: grab;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  background: color-mix(in srgb, var(--plat-color, #909399) 8%, transparent);
+  background: color-mix(in srgb, var(--plat-color, var(--color-info)) 8%, transparent);
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
@@ -801,7 +810,7 @@ watch(
   width: 3px;
   height: 14px;
   border-radius: 2px;
-  background: var(--plat-color, #909399);
+  background: var(--plat-color, var(--color-info));
   flex-shrink: 0;
 }
 
@@ -856,7 +865,7 @@ watch(
 
 .pc-week__col-head.is-today .pc-week__col-date {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-bg-card);
   border-radius: 50%;
   width: 32px;
   height: 32px;
@@ -927,7 +936,7 @@ watch(
   height: 100%;
   min-height: 20px;
   border-radius: 2px;
-  background: var(--plat-color, #909399);
+  background: var(--plat-color, var(--color-info));
   flex-shrink: 0;
 }
 
@@ -949,7 +958,7 @@ watch(
 
 .pc-week-task__warn {
   color: var(--color-danger);
-  font-size: 14px;
+  font-size: var(--font-size-base);
   flex-shrink: 0;
 }
 
@@ -1040,7 +1049,7 @@ watch(
   width: 4px;
   align-self: stretch;
   border-radius: 2px;
-  background: var(--plat-color, #909399);
+  background: var(--plat-color, var(--color-info));
   flex-shrink: 0;
 }
 
@@ -1062,13 +1071,13 @@ watch(
 }
 
 .pc-day-task__meta {
-  font-size: 10px;
+  font-size: var(--font-size-base);
   color: var(--color-text-secondary);
 }
 
 .pc-day-task__warn {
   color: var(--color-danger);
-  font-size: 14px;
+  font-size: var(--font-size-base);
   flex-shrink: 0;
 }
 
@@ -1091,7 +1100,7 @@ watch(
   z-index: 9999;
   padding: var(--space-1) var(--space-2);
   background: var(--color-primary);
-  color: #fff;
+  color: var(--color-bg-card);
   font-size: var(--font-size-xs);
   border-radius: var(--border-radius-sm);
   pointer-events: none;

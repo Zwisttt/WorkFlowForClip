@@ -97,18 +97,18 @@ async function sendTestNotification() {
 
 .section-title h4 {
   margin: 0 0 4px 0;
-  font-size: 14px;
+  font-size: var(--font-size-base);
   font-weight: 500;
 }
 
 .section-desc {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--el-text-color-secondary);
 }
 
 .settings-hint {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--el-text-color-secondary);
   margin: 4px 0 0 0;
   line-height: 1.5;

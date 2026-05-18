@@ -96,7 +96,7 @@ function openLink(url: string) {
   height: 48px;
   border-radius: var(--border-radius-lg);
   background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
-  color: #fff;
+  color: var(--color-bg-card);
   display: flex;
   align-items: center;
   justify-content: center;

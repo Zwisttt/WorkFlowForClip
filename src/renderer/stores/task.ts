@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 
-export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
+export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled' | 'skipped';
 
 export interface Task {
   id: string;
@@ -36,6 +36,7 @@ export const useTaskStore = defineStore('task', () => {
     running: runningTasks.value.length,
     success: tasks.value.filter((t) => t.status === 'success').length,
     failed: failedTasks.value.length,
+    skipped: tasks.value.filter((t) => t.status === 'skipped').length,
   }));
 
   async function fetchTasks(filter?: Record<string, unknown>) {

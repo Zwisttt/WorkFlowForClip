@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 
-export type PublishStatus = 'pending' | 'scheduled' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type PublishStatus = 'pending' | 'scheduled' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
 export type PublishMode = 'server' | 'client';
 
 export interface PublishTask {
@@ -18,11 +18,48 @@ export interface PublishTask {
   completedAt?: string;
   createdAt: string;
   updatedAt: string;
+  dryRun?: boolean;
+  coverRatio?: string;
+}
+
+export interface HealthCheckResult {
+  accountId: string;
+  accountName: string;
+  healthy: boolean;
+  message?: string;
+}
+
+export interface PublishHistoryItem {
+  id: string;
+  platform: string;
+  accountId: string;
+  accountName: string;
+  contentTitle: string;
+  status: PublishStatus;
+  scheduledAt: string;
+  completedAt?: string;
+  dryRun?: boolean;
+}
+
+export interface PublishHistoryFilters {
+  platform?: string;
+  accountId?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  pageSize?: number;
 }
 
 export const usePublishStore = defineStore('publish', () => {
   const tasks = ref<PublishTask[]>([]);
   const loading = ref(false);
+  const dryRun = ref(false);
+  const prePublishCheck = ref(true);
+  const healthCheckResults = ref<HealthCheckResult[]>([]);
+  const publishHistory = ref<PublishHistoryItem[]>([]);
+  const publishHistoryTotal = ref(0);
+  const publishHistoryLoading = ref(false);
+  const availableCoverRatios = ref<string[]>([]);
 
   // scheduledAt 按日期分组：'YYYY-MM-DD' -> PublishTask[]
   const tasksByDate = computed(() => {
@@ -55,6 +92,8 @@ export const usePublishStore = defineStore('publish', () => {
     accountIds: string[];
     scheduledAt: string | null;
     publishMode: PublishMode;
+    dryRun?: boolean;
+    coverRatio?: string;
   }) {
     if (!window.matrixflow) return;
     const results: PublishTask[] = [];
@@ -65,7 +104,10 @@ export const usePublishStore = defineStore('publish', () => {
         platform: '',
         scheduledAt: data.scheduledAt,
         publishMode: data.publishMode,
-        metadata: {},
+        metadata: {
+          dryRun: data.dryRun,
+          coverRatio: data.coverRatio,
+        },
       });
       if (task) results.push(task as PublishTask);
     }
@@ -112,9 +154,52 @@ export const usePublishStore = defineStore('publish', () => {
     }
   }
 
+  async function runPrePublishCheck(accountIds: string[]) {
+    if (!window.matrixflow) return;
+    try {
+      const results = await window.matrixflow.publish.preCheck({ accountIds });
+      healthCheckResults.value = (results.data as HealthCheckResult[]) ?? [];
+    } catch {
+      healthCheckResults.value = [];
+    }
+  }
+
+  async function fetchPublishHistory(filters?: PublishHistoryFilters) {
+    if (!window.matrixflow) return;
+    publishHistoryLoading.value = true;
+    try {
+      const result = await window.matrixflow.publish.history(filters ?? {});
+      const payload = result.data as { items?: PublishHistoryItem[]; total?: number };
+      publishHistory.value = payload?.items ?? [];
+      publishHistoryTotal.value = payload?.total ?? 0;
+    } catch {
+      publishHistory.value = [];
+      publishHistoryTotal.value = 0;
+    } finally {
+      publishHistoryLoading.value = false;
+    }
+  }
+
+  async function fetchCoverRatios(platformId: string) {
+    if (!window.matrixflow) return;
+    try {
+      const ratios = await window.matrixflow.platform.coverRatios(platformId);
+      availableCoverRatios.value = (ratios.data as string[]) ?? [];
+    } catch {
+      availableCoverRatios.value = [];
+    }
+  }
+
   return {
     tasks,
     loading,
+    dryRun,
+    prePublishCheck,
+    healthCheckResults,
+    publishHistory,
+    publishHistoryTotal,
+    publishHistoryLoading,
+    availableCoverRatios,
     tasksByDate,
     pendingCount,
     scheduledCount,
@@ -125,5 +210,8 @@ export const usePublishStore = defineStore('publish', () => {
     cancelTask,
     retryTask,
     confirmPendingTasks,
+    runPrePublishCheck,
+    fetchPublishHistory,
+    fetchCoverRatios,
   };
 });

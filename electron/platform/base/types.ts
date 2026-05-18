@@ -5,6 +5,7 @@ export interface PlatformCapabilities {
   maxScheduleDays: number;
   comment: boolean;
   image: boolean;
+  coverRatios?: string[];
 }
 
 export interface PlatformConfig {
@@ -38,6 +39,8 @@ export interface UploadContext {
   description?: string;
   tags?: string[];
   coverPath?: string;
+  coverRatio?: string;
+  coverDimensions?: { width: number; height: number };
 }
 
 export interface UploadResult {
@@ -54,6 +57,7 @@ export interface PublishContext {
   description?: string;
   tags?: string[];
   scheduledTime?: Date;
+  dryRun?: boolean;
 }
 
 export interface PublishResult {
@@ -111,4 +115,12 @@ export interface PageChangeReport {
   hasChanges: boolean;
   changedSelectors: string[];
   timestamp: Date;
+}
+
+export interface HealthCheckResult {
+  healthy: boolean;
+  platform: string;
+  accountId: string;
+  issues: string[];
+  lastChecked: string;
 }
