@@ -268,6 +268,11 @@ defineEmits<{
   align-items: center;
   padding-top: var(--space-4);
   border-top: 1px solid var(--color-border-light);
+  gap: var(--space-3);
+}
+
+.onboarding-layout__footer :deep(.el-button) {
+  min-width: 80px;
 }
 
 .onboarding-layout__spacer {
