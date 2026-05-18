@@ -1,4 +1,7 @@
 import sharp from 'sharp';
+import { Logger } from '../../../core/Logger';
+
+const logger = new Logger('CoverUtils');
 
 export interface CoverDimensions {
   width: number;
@@ -10,9 +13,15 @@ export async function cropCover(
   outputPath: string,
   ratio: string
 ): Promise<void> {
+  logger.info(`Cropping cover: ${inputPath} → ${outputPath} (ratio: ${ratio})`);
+  
   const [w, h] = ratio.split(':').map(Number);
   const metadata = await sharp(inputPath).metadata();
-  if (!metadata.width || !metadata.height) throw new Error('Cannot read image dimensions');
+  if (!metadata.width || !metadata.height) {
+    const error = new Error('Cannot read image dimensions');
+    logger.error(`Cover crop failed: ${error.message}`, { inputPath });
+    throw error;
+  }
 
   const targetRatio = w / h;
   const currentRatio = metadata.width / metadata.height;
@@ -37,4 +46,6 @@ export async function cropCover(
   await sharp(inputPath)
     .extract({ left, top, width: extractWidth, height: extractHeight })
     .toFile(outputPath);
+    
+  logger.info(`Cover cropped successfully: ${extractWidth}x${extractHeight}`, { outputPath });
 }

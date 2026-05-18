@@ -2,6 +2,11 @@ import { Logger } from './Logger';
 
 const logger = new Logger('FailureCoordinator');
 
+/** 时间窗口：30 分钟内的失败计数 */
+const FAILURE_WINDOW_MS = 30 * 60 * 1000;
+/** 触发停止的失败次数阈值 */
+const MAX_FAILURES_THRESHOLD = 3;
+
 interface FailureRecord {
   platform: string;
   accountId: string;
@@ -24,9 +29,9 @@ export class FailureCoordinator {
     const key = `${platform}:${accountId}`;
     const history = this.failureHistory.get(key) ?? [];
     const recentFailures = history.filter(
-      (f) => Date.now() - new Date(f.timestamp).getTime() < 30 * 60 * 1000
+      (f) => Date.now() - new Date(f.timestamp).getTime() < FAILURE_WINDOW_MS
     );
-    return recentFailures.length >= 3;
+    return recentFailures.length >= MAX_FAILURES_THRESHOLD;
   }
 
   markSkipped(platform: string, accountId: string, reason: string): { status: 'skipped'; error: string } {
