@@ -140,6 +140,14 @@
   --transition-base: 200ms ease;
   --transition-slow: 350ms ease;
 
+  /* ── CSS 变量别名 (兼容旧命名) ── */
+  --border-radius-xs: var(--radius-xs);
+  --border-radius-sm: var(--radius-sm);
+  --border-radius-md: var(--radius-md);
+  --border-radius-lg: var(--radius-lg);
+  --border-radius-xl: var(--radius-xl);
+  --border-radius-full: var(--radius-full);
+
   /* ── Element Plus 主题覆盖 ── */
   --el-color-primary: var(--color-primary);
   --el-color-primary-light-3: var(--color-primary-light);

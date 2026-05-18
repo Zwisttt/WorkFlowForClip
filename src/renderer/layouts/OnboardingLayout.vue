@@ -104,7 +104,7 @@ defineEmits<{
   justify-content: center;
   min-height: 100vh;
   background: var(--color-bg-page);
-  overflow: hidden;
+  overflow: auto;
 }
 
 .onboarding-layout__decor {
