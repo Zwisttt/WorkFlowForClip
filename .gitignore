@@ -54,8 +54,8 @@ test-video.mp4
 # Serena
 .serena/
 
-# Runtime data
-data/
+# Runtime data (root level only)
+/data/
 
 # Generated screenshots
 screenshots/
