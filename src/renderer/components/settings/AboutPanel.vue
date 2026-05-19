@@ -55,17 +55,27 @@
 import { ref, onMounted } from 'vue';
 import { Link, Document, Memo } from '@element-plus/icons-vue';
 
-const version = ref('0.1.0');
-const buildDate = ref('2026-05-16');
-const electronVersion = ref('33.0.0');
-const chromeVersion = ref('130.0.0');
+const version = ref('');
+const buildDate = ref('');
+const electronVersion = ref('');
+const chromeVersion = ref('');
 const dataDir = ref('');
 
 onMounted(async () => {
   if (!window.matrixflow) return;
   try {
-    const dir = await window.matrixflow.settings.get('dataDir');
-    if (dir) dataDir.value = String(dir);
+    const [ver, build, electron, chrome, dir] = await Promise.all([
+      window.matrixflow.app.getVersion(),
+      window.matrixflow.app.getBuildDate(),
+      window.matrixflow.app.getElectronVersion(),
+      window.matrixflow.app.getChromeVersion(),
+      window.matrixflow.settings.get('dataDir'),
+    ]);
+    version.value = ver || '0.0.0';
+    buildDate.value = build || '';
+    electronVersion.value = electron || '';
+    chromeVersion.value = chrome || '';
+    dataDir.value = String(dir || '');
   } catch {
     /* ignore */
   }
