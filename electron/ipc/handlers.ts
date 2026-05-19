@@ -78,6 +78,10 @@ const CHANNEL = {
   PLATFORMS_GET_CAPABILITIES: 'platforms:getCapabilities',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
+  APP_GET_VERSION: 'app:getVersion',
+  APP_GET_ELECTRON_VERSION: 'app:getElectronVersion',
+  APP_GET_CHROME_VERSION: 'app:getChromeVersion',
+  APP_GET_BUILD_DATE: 'app:getBuildDate',
   STATS_OVERVIEW: 'stats:overview',
   STATS_PLATFORM: 'stats:platform',
   STATS_TREND: 'stats:trend',
@@ -530,6 +534,24 @@ export function registerIpcHandlers(): void {
     } catch (error) {
       return { success: false, message: `${error}` };
     }
+  });
+
+  // ─── App Info ──────────────────────────────────────────
+
+  ipcMain.handle(CHANNEL.APP_GET_VERSION, async () => {
+    return process.env.npm_package_version || '0.0.0';
+  });
+
+  ipcMain.handle(CHANNEL.APP_GET_ELECTRON_VERSION, async () => {
+    return process.versions.electron || '';
+  });
+
+  ipcMain.handle(CHANNEL.APP_GET_CHROME_VERSION, async () => {
+    return process.versions.chrome || '';
+  });
+
+  ipcMain.handle(CHANNEL.APP_GET_BUILD_DATE, async () => {
+    return process.env.BUILD_DATE || new Date().toISOString().split('T')[0];
   });
 
   ipcMain.handle(CHANNEL.STATS_OVERVIEW, async (_, { range }: { range?: string }) => {

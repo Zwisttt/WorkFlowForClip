@@ -94,6 +94,13 @@ interface MatrixFlowAPI {
     set: (key: string, value: any) => Promise<any>;
   };
 
+  app: {
+    getVersion: () => Promise<string>;
+    getElectronVersion: () => Promise<string>;
+    getChromeVersion: () => Promise<string>;
+    getBuildDate: () => Promise<string>;
+  };
+
   ai: {
     prePublishCheck: (context: any) => Promise<any>;
     optimizeRule: (context: any) => Promise<any>;

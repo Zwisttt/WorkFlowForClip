@@ -38,9 +38,16 @@ async function createWindow() {
     show: false,
   });
 
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+    callback({ requestHeaders: { ...details.requestHeaders, 'Cache-Control': 'no-cache' } });
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
   });
+
+  await mainWindow.webContents.session.clearCache();
+  await mainWindow.webContents.session.clearStorageData({ storages: ['cachestorage'] });
 
   autoUpdaterService.initialize(mainWindow);
   multiPanelService.setMainWindow(mainWindow);

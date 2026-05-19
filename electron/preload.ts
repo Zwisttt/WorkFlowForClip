@@ -120,6 +120,13 @@ const api = {
       ipcRenderer.invoke('settings:set', key, value),
   },
 
+  app: {
+    getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
+    getElectronVersion: (): Promise<string> => ipcRenderer.invoke('app:getElectronVersion'),
+    getChromeVersion: (): Promise<string> => ipcRenderer.invoke('app:getChromeVersion'),
+    getBuildDate: (): Promise<string> => ipcRenderer.invoke('app:getBuildDate'),
+  },
+
   stats: {
     getOverview: (range?: string) => ipcRenderer.invoke('stats:overview', { range }),
     getPlatformStats: (platform: string, range?: string) =>
@@ -245,6 +252,16 @@ const api = {
       ipcRenderer.invoke('fingerprint:update', { id, data }),
     delete: (id: string) =>
       ipcRenderer.invoke('fingerprint:delete', { id }),
+  },
+
+  browser: {
+    validatePath: (filePath: string): Promise<{ valid: boolean; version?: string; error?: string }> =>
+      ipcRenderer.invoke('browser:validatePath', filePath),
+  },
+
+  dialog: {
+    openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> =>
+      ipcRenderer.invoke('dialog:openFile', options),
   },
 
   update: {
