@@ -15,7 +15,6 @@ export interface AppSettings {
   chromePath: string;
   fingerprintBrowserPath: string;
   cdpEndpoint: string;
-  onboardingCompleted: boolean;
   notificationEnabled: boolean;
   notificationSound: boolean;
   notificationMonitorAlerts: boolean;
@@ -37,7 +36,6 @@ const defaultSettings: AppSettings = {
   chromePath: '',
   fingerprintBrowserPath: '',
   cdpEndpoint: '',
-  onboardingCompleted: false,
   notificationEnabled: true,
   notificationSound: true,
   notificationMonitorAlerts: true,
