@@ -22,9 +22,9 @@
   /* ── 中性色 ── */
   --color-bg-page: #f8fafc;
   --color-bg-card: #ffffff;
-  --color-bg-sidebar: #0f172a;
-  --color-bg-sidebar-hover: rgba(37, 99, 235, 0.08);
-  --color-bg-sidebar-active: rgba(37, 99, 235, 0.15);
+  --color-bg-sidebar: #ffffff;
+  --color-bg-sidebar-hover: rgba(37, 99, 235, 0.06);
+  --color-bg-sidebar-active: rgba(37, 99, 235, 0.10);
   --color-bg-header: #ffffff;
   --color-bg-elevated: #ffffff;
 
@@ -32,8 +32,8 @@
   --color-text-regular: #334155;
   --color-text-secondary: #64748b;
   --color-text-placeholder: #94a3b8;
-  --color-text-sidebar: #94a3b8;
-  --color-text-sidebar-active: #ffffff;
+  --color-text-sidebar: #64748b;
+  --color-text-sidebar-active: #2563eb;
 
   --color-border: #e2e8f0;
   --color-border-light: #f1f5f9;
@@ -76,7 +76,7 @@
   --space-12: 48px;
 
   /* ── 布局 ── */
-  --sidebar-width: 220px;
+  --sidebar-width: 150px;
   --sidebar-collapsed-width: 64px;
   --header-height: 56px;
 

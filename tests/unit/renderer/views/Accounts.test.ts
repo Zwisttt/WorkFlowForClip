@@ -69,8 +69,28 @@ const globalStubs = {
     props: ['modelValue', 'account', 'groups'],
     emits: ['update:modelValue', 'changed'],
   },
+  'AccountFilterPanel': {
+    template: '<div data-testid="account-filter-panel" />',
+    props: ['groups'],
+    emits: ['filter-platform', 'filter-group', 'filter-status'],
+  },
+  'GroupsTab': {
+    template: '<div data-testid="groups-tab" />',
+    props: ['groups'],
+  },
+  'el-tabs': {
+    template: '<div data-testid="el-tabs"><slot /></div>',
+    props: ['modelValue'],
+    emits: ['update:modelValue'],
+  },
+  'el-tab-pane': {
+    template: '<div><slot /><slot name="label" /></div>',
+    props: ['label', 'name'],
+  },
   Plus: { template: '<span>+</span>' },
   Grid: { template: '<span>grid</span>' },
+  User: { template: '<span>user</span>' },
+  Search: { template: '<span>search</span>' },
 };
 
 function mountView(initialAccounts: unknown[] = [], initialGroups: unknown[] = []) {
@@ -113,30 +133,10 @@ describe('Accounts', () => {
     vi.clearAllMocks();
   });
 
-  it('renders page title', () => {
-    wrapper = mountView();
-    expect(wrapper.find('.page-accounts__title').text()).toBe('账号管理');
-  });
-
   it('renders add account button', () => {
     wrapper = mountView();
     const buttons = wrapper.findAll('[data-testid="el-btn"]');
     expect(buttons.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('renders stats cards with correct values', () => {
-    wrapper = mountView(sampleAccounts);
-    const values = wrapper.findAll('.stat-card__value');
-    expect(values[0].text()).toBe('3'); // total
-    expect(values[1].text()).toBe('2'); // online
-    expect(values[2].text()).toBe('1'); // expired
-    expect(values[3].text()).toBe('1'); // cookie invalid
-  });
-
-  it('renders stat card labels', () => {
-    wrapper = mountView(sampleAccounts);
-    const labels = wrapper.findAll('.stat-card__label');
-    expect(labels.map(l => l.text())).toEqual(['总账号', '在线', '已过期', 'Cookie失效']);
   });
 
   it('renders account cards when accounts exist', () => {

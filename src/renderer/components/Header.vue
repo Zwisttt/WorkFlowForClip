@@ -1,8 +1,6 @@
 <template>
   <header class="header">
     <div class="header__left">
-      <span class="header__brand">星枢智联</span>
-      <el-divider direction="vertical" />
       <h1 class="header__title">{{ currentTitle }}</h1>
     </div>
 
@@ -57,14 +55,6 @@ const currentTitle = computed(() => {
   gap: var(--space-2);
   overflow: hidden;
   min-width: 0;
-}
-
-.header__brand {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-primary);
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .header__title {

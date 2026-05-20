@@ -142,11 +142,13 @@ describe('GroupService', () => {
     });
 
     it('creates a group with default color and emits event', async () => {
+      const checkNameStmt = { get: vi.fn().mockReturnValue(null) };
       const insertStmt = { run: vi.fn() };
       const getGroupStmt = { get: vi.fn().mockReturnValue(createGroupRow()) };
       const countStmt = { get: vi.fn().mockReturnValue({ cnt: 0 }) };
 
       mockDb.prepare
+        .mockReturnValueOnce(checkNameStmt)
         .mockReturnValueOnce(insertStmt)
         .mockReturnValueOnce(getGroupStmt)
         .mockReturnValueOnce(countStmt);
@@ -166,11 +168,13 @@ describe('GroupService', () => {
     });
 
     it('creates a group with custom color and description', async () => {
+      const checkNameStmt = { get: vi.fn().mockReturnValue(null) };
       const insertStmt = { run: vi.fn() };
       const getGroupStmt = { get: vi.fn().mockReturnValue(createGroupRow()) };
       const countStmt = { get: vi.fn().mockReturnValue({ cnt: 0 }) };
 
       mockDb.prepare
+        .mockReturnValueOnce(checkNameStmt)
         .mockReturnValueOnce(insertStmt)
         .mockReturnValueOnce(getGroupStmt)
         .mockReturnValueOnce(countStmt);

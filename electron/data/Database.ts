@@ -94,6 +94,40 @@ function runMigrations(database: BetterSqlite3Database): void {
   } catch (error) {
     logger.error('迁移执行失败:', error);
   }
+
+  fixSchema(database);
+}
+
+function fixSchema(database: BetterSqlite3Database): void {
+  try {
+    const columns = database
+      .prepare("PRAGMA table_info(comment_templates)")
+      .all() as { name: string }[];
+    const columnNames = new Set(columns.map((c) => c.name));
+
+    const missingColumns: string[] = [];
+    if (!columnNames.has('trigger_condition')) {
+      missingColumns.push(
+        "ALTER TABLE comment_templates ADD COLUMN trigger_condition TEXT NOT NULL DEFAULT 'after_publish'"
+      );
+    }
+    if (!columnNames.has('threshold')) {
+      missingColumns.push('ALTER TABLE comment_templates ADD COLUMN threshold TEXT');
+    }
+    if (!columnNames.has('delay')) {
+      missingColumns.push('ALTER TABLE comment_templates ADD COLUMN delay INTEGER');
+    }
+
+    for (const sql of missingColumns) {
+      database.exec(sql);
+    }
+
+    if (missingColumns.length > 0) {
+      logger.info(`Schema fix: added ${missingColumns.length} missing column(s) to comment_templates`);
+    }
+  } catch (error) {
+    logger.warn('Schema fix check failed:', error);
+  }
 }
 
 export function getDatabase(): BetterSqlite3Database {

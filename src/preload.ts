@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld('matrixflow', {
     update: (id: string, data: Record<string, unknown>) =>
       ipcRenderer.invoke('groups:update', id, data),
     delete: (id: string) => ipcRenderer.invoke('groups:delete', id),
+    sort: (orderedIds: string[]) => ipcRenderer.invoke('groups:sort', orderedIds),
     bindAccounts: (groupId: string, accountIds: string[]) =>
       ipcRenderer.invoke('groups:bindAccounts', groupId, accountIds),
   },

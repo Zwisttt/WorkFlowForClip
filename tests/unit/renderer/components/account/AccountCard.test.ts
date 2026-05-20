@@ -189,28 +189,9 @@ describe('AccountCard', () => {
     wrapper = mountCard();
     const actions = wrapper.find('.account-card__actions');
     const buttons = actions.findAll('[data-testid="el-btn"]');
-    // First button is detail (设置 icon)
     await buttons[0].trigger('click');
     expect(wrapper.emitted('detail')).toBeTruthy();
     expect(wrapper.emitted('detail')![0]).toEqual(['acc-1']);
-  });
-
-  it('emits validate when validate button clicked', async () => {
-    wrapper = mountCard();
-    const actions = wrapper.find('.account-card__actions');
-    const buttons = actions.findAll('[data-testid="el-btn"]');
-    await buttons[1].trigger('click');
-    expect(wrapper.emitted('validate')).toBeTruthy();
-    expect(wrapper.emitted('validate')![0]).toEqual(['acc-1']);
-  });
-
-  it('emits login when login button clicked', async () => {
-    wrapper = mountCard();
-    const actions = wrapper.find('.account-card__actions');
-    const buttons = actions.findAll('[data-testid="el-btn"]');
-    await buttons[2].trigger('click');
-    expect(wrapper.emitted('login')).toBeTruthy();
-    expect(wrapper.emitted('login')![0]).toEqual(['acc-1']);
   });
 
   it('renders lastLogin time', () => {

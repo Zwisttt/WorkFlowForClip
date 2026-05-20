@@ -95,10 +95,26 @@ const form = reactive({
   accountIds: [] as string[],
 });
 
+const validateUniqueName = async (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+  if (!value) {
+    callback(new Error('请输入分组名称'));
+    return;
+  }
+  const existing = groupStore.groups.find(
+    (g) => g.name === value && g.id !== props.group?.id
+  );
+  if (existing) {
+    callback(new Error('分组名称已存在'));
+    return;
+  }
+  callback();
+};
+
 const rules: FormRules = {
   name: [
     { required: true, message: '请输入分组名称', trigger: 'blur' },
     { min: 1, max: 20, message: '长度在 1 到 20 个字符', trigger: 'blur' },
+    { validator: validateUniqueName, trigger: 'blur' },
   ],
 };
 
@@ -109,6 +125,18 @@ watch(
       form.name = props.group.name;
       form.color = props.group.color;
       form.accountIds = [...props.group.accountIds];
+    }
+  },
+);
+
+// Also watch group prop for case where group is set after dialog is already open
+watch(
+  () => props.group,
+  (group) => {
+    if (props.modelValue && group) {
+      form.name = group.name;
+      form.color = group.color;
+      form.accountIds = [...group.accountIds];
     }
   },
 );
@@ -139,13 +167,24 @@ async function handleSubmit() {
   submitting.value = true;
   try {
     if (isEdit.value && props.group) {
-      await groupStore.updateGroup(props.group.id, {
+      console.log('[GroupEditDialog] updateGroup payload:', {
+        id: props.group.id,
         name: form.name,
         color: form.color,
         accountIds: form.accountIds,
       });
+      const result = await groupStore.updateGroup(props.group.id, {
+        name: form.name,
+        color: form.color,
+        accountIds: form.accountIds,
+      });
+      console.log('[GroupEditDialog] updateGroup result:', result);
       ElMessage.success('分组已更新');
     } else {
+      console.log('[GroupEditDialog] createGroup payload:', {
+        name: form.name,
+        accountIds: form.accountIds,
+      });
       await groupStore.createGroup({
         name: form.name,
         accountIds: form.accountIds,
@@ -154,7 +193,8 @@ async function handleSubmit() {
     }
     emit('update:modelValue', false);
     emit('saved');
-  } catch {
+  } catch (err) {
+    console.error('[GroupEditDialog] submit error:', err);
     ElMessage.error('操作失败，请重试');
   } finally {
     submitting.value = false;

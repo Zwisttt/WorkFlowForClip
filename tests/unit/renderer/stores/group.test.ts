@@ -72,17 +72,20 @@ describe('useGroupStore', () => {
   describe('actions', () => {
     describe('fetchGroups', () => {
       it('calls groups.list and populates state', async () => {
-        const groups = [
-          makeGroup({ id: '1', name: '分组A' }),
-          makeGroup({ id: '2', name: '分组B' }),
+        const backendGroups = [
+          { id: '1', name: '分组A', color: '#db4b4b', accountCount: 2, sortOrder: 0, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z') },
+          { id: '2', name: '分组B', color: '#e8993d', accountCount: 0, sortOrder: 1, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-01T00:00:00Z') },
         ];
-        mock.groups.list.mockResolvedValue(groups);
+        mock.groups.list.mockResolvedValue(backendGroups);
 
         const store = useGroupStore();
         await store.fetchGroups();
 
         expect(mock.groups.list).toHaveBeenCalledOnce();
-        expect(store.groups).toEqual(groups);
+        expect(store.groups).toHaveLength(2);
+        expect(store.groups[0].id).toBe('1');
+        expect(store.groups[0].name).toBe('分组A');
+        expect(store.groups[0].accountIds).toEqual([]);
       });
 
       it('sets loading=true during fetch and loading=false after', async () => {
@@ -121,9 +124,9 @@ describe('useGroupStore', () => {
     });
 
     describe('createGroup', () => {
-      it('calls groups.create with generated color and default publishRule', async () => {
+      it('calls groups.create with name and color, unwraps IpcResult', async () => {
         const newGroup = makeGroup({ id: 'new_1', name: '新分组' });
-        mock.groups.create.mockResolvedValue(newGroup);
+        mock.groups.create.mockResolvedValue({ success: true, data: newGroup });
 
         const store = useGroupStore();
         const result = await store.createGroup({ name: '新分组' });
@@ -131,24 +134,35 @@ describe('useGroupStore', () => {
         expect(mock.groups.create).toHaveBeenCalledOnce();
         const createArg = mock.groups.create.mock.calls[0][0];
         expect(createArg.name).toBe('新分组');
-        expect(createArg.accountIds).toEqual([]);
         expect(createArg.color).toBeTruthy();
-        expect(createArg.publishRule).toBeDefined();
-        expect(createArg.publishRule.dailyCount).toBe(3);
         expect(store.groups).toHaveLength(1);
         expect(store.groups[0]).toEqual(newGroup);
         expect(result).toEqual(newGroup);
       });
 
-      it('passes accountIds when provided', async () => {
-        const newGroup = makeGroup({ id: 'new_2', accountIds: ['acc_1'] });
+      it('appends to existing groups', async () => {
+        const existingGroup = makeGroup({ id: 'existing_1', name: '已有分组' });
+        const newGroup = makeGroup({ id: 'new_1', name: '新分组' });
+        mock.groups.create.mockResolvedValue({ success: true, data: newGroup });
+
+        const store = useGroupStore();
+        store.groups = [existingGroup];
+
+        await store.createGroup({ name: '新分组' });
+
+        expect(store.groups).toHaveLength(2);
+        expect(store.groups[1]).toEqual(newGroup);
+      });
+
+      it('handles plain object response (backward compat)', async () => {
+        const newGroup = makeGroup({ id: 'new_1', name: '新分组' });
         mock.groups.create.mockResolvedValue(newGroup);
 
         const store = useGroupStore();
-        await store.createGroup({ name: '带账号分组', accountIds: ['acc_1'] });
+        const result = await store.createGroup({ name: '新分组' });
 
-        const createArg = mock.groups.create.mock.calls[0][0];
-        expect(createArg.accountIds).toEqual(['acc_1']);
+        expect(store.groups).toHaveLength(1);
+        expect(result).toEqual(newGroup);
       });
 
       it('does nothing when window.matrixflow is undefined', async () => {
@@ -258,6 +272,38 @@ describe('useGroupStore', () => {
         await store.bindAccounts('1', ['acc_1']);
 
         expect(store.groups[0].accountIds).toEqual([]);
+      });
+    });
+
+    describe('sortGroups', () => {
+      it('calls groups.sort with ordered ids', async () => {
+        mock.groups.sort.mockResolvedValue({ success: true });
+
+        const store = useGroupStore();
+        store.groups = [
+          makeGroup({ id: '3' }),
+          makeGroup({ id: '1' }),
+          makeGroup({ id: '2' }),
+        ];
+
+        await store.sortGroups(['1', '2', '3']);
+
+        expect(mock.groups.sort).toHaveBeenCalledWith(['1', '2', '3']);
+      });
+
+      it('updates local sortOrder', async () => {
+        mock.groups.sort.mockResolvedValue({ success: true });
+
+        const store = useGroupStore();
+        store.groups = [
+          makeGroup({ id: '2', sortOrder: 1 }),
+          makeGroup({ id: '1', sortOrder: 0 }),
+        ];
+
+        await store.sortGroups(['1', '2']);
+
+        expect(store.groups.find((g) => g.id === '1')?.sortOrder).toBe(0);
+        expect(store.groups.find((g) => g.id === '2')?.sortOrder).toBe(1);
       });
     });
 

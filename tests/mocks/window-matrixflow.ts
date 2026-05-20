@@ -67,6 +67,7 @@ export interface MatrixflowMock {
     create: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
+    sort: ReturnType<typeof vi.fn>;
     bindAccounts: ReturnType<typeof vi.fn>;
   };
   settings: {
@@ -252,6 +253,7 @@ export function createMatrixflowMock(): MatrixflowMock {
       create: fn({ success: true, data: {} }),
       update: fn({ success: true }),
       delete: fn({ success: true }),
+      sort: fn({ success: true }),
       bindAccounts: fn({ success: true }),
     },
 

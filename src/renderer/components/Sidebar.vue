@@ -115,7 +115,7 @@ function isActive(path: string): boolean {
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   white-space: nowrap;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 .sidebar__nav {

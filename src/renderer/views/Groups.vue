@@ -130,48 +130,54 @@ function onSaved() {
 .page-groups {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-4);
 }
 
 .page-groups__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-card);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
 }
 
 .page-groups__title {
-  font-size: var(--font-size-2xl);
+  font-size: var(--font-size-xl);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
   margin: 0;
 }
 
 .page-groups__stats {
-  display: flex;
-  gap: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
 }
 
 .stat-card {
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-4);
   background: var(--color-bg-card);
-  border-radius: var(--border-radius-md);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-light);
   box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--transition-fast);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
 
 .stat-card:hover {
   box-shadow: var(--shadow-md);
+  border-color: var(--color-primary-light);
 }
 
 .stat-card__value {
-  font-size: var(--font-size-3xl);
-  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
   color: var(--color-text-primary);
+  line-height: 1.2;
 }
 
 .stat-card--success .stat-card__value {
@@ -183,15 +189,21 @@ function onSaved() {
 }
 
 .stat-card__label {
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  margin-top: var(--space-1);
+  margin-top: var(--space-2);
 }
 
 .page-groups__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: var(--space-4);
+}
+
+@media (max-width: 1024px) {
+  .page-groups__stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 @media (max-width: 768px) {
@@ -202,11 +214,16 @@ function onSaved() {
   }
 
   .page-groups__stats {
-    flex-wrap: wrap;
+    grid-template-columns: 1fr;
   }
 
   .stat-card {
-    min-width: calc(50% - var(--space-3));
+    flex-direction: row;
+    justify-content: space-between;
+  }
+
+  .stat-card__value {
+    font-size: var(--font-size-xl);
   }
 
   .page-groups__grid {

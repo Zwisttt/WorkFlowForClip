@@ -27,11 +27,6 @@
         <transition name="fade-text">
           <span v-if="!collapsed" class="sidebar__nav-label">{{ item.label }}</span>
         </transition>
-        <span
-          v-if="item.children && !collapsed"
-          class="sidebar__expand-arrow"
-          :class="{ 'sidebar__expand-arrow--open': expandedId === item.id }"
-        />
       </div>
     </nav>
 
@@ -89,8 +84,7 @@ const menuItems: NavItem[] = [
     label: '账号',
     icon: User,
     children: [
-      { id: 'accounts-bind', label: '授权账号', path: '/accounts' },
-      { id: 'accounts-list', label: '账号列表', path: '/accounts' },
+      { id: 'accounts-manage', label: '账号管理', path: '/accounts' },
       { id: 'accounts-groups', label: '分组管理', path: '/groups' },
     ],
   },
@@ -179,6 +173,7 @@ function isItemActive(item: NavItem): boolean {
   width: var(--sidebar-width);
   transition: width var(--transition-base);
   overflow: hidden;
+  border-right: 1px solid var(--color-border-light);
 }
 
 .sidebar.sidebar--collapsed {
@@ -197,7 +192,7 @@ function isItemActive(item: NavItem): boolean {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .sidebar.sidebar--collapsed .sidebar__brand {
@@ -219,11 +214,11 @@ function isItemActive(item: NavItem): boolean {
 }
 
 .sidebar__title {
-  color: var(--color-text-sidebar-active);
+  color: var(--color-text-primary);
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   white-space: nowrap;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 .sidebar__nav {
@@ -253,17 +248,17 @@ function isItemActive(item: NavItem): boolean {
 }
 
 .sidebar__nav-item:hover {
-  color: var(--color-text-sidebar-active);
+  color: var(--color-primary);
   background: var(--color-bg-sidebar-hover);
 }
 
 .sidebar__nav-item--active {
-  color: var(--color-primary-light);
+  color: var(--color-primary);
   background: var(--color-bg-sidebar-active);
 }
 
 .sidebar__nav-item--expanded {
-  color: var(--color-primary-light);
+  color: var(--color-primary);
   background: var(--color-bg-sidebar-active);
 }
 
@@ -272,24 +267,9 @@ function isItemActive(item: NavItem): boolean {
   flex: 1;
 }
 
-.sidebar__expand-arrow {
-  width: 0;
-  height: 0;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 5px solid var(--color-text-sidebar);
-  transition: transform var(--transition-fast);
-  flex-shrink: 0;
-}
-
-.sidebar__expand-arrow--open {
-  transform: rotate(90deg);
-  border-left-color: var(--color-primary-light);
-}
-
 .sidebar__footer {
   padding: var(--space-3) var(--space-4);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--color-border-light);
 }
 
 .sidebar__toggle {
@@ -307,8 +287,8 @@ function isItemActive(item: NavItem): boolean {
 }
 
 .sidebar__toggle:hover {
-  color: var(--color-text-sidebar-active);
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-primary);
+  background: var(--color-bg-sidebar-hover);
 }
 
 .fade-text-enter-active,

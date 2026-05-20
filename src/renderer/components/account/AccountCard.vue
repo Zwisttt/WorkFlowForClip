@@ -55,25 +55,13 @@
     <div class="account-card__footer">
       <span class="account-card__time">{{ account.lastLogin || '未登录' }}</span>
       <div class="account-card__actions" @click.stop>
-        <el-tooltip content="详情配置" placement="top">
-          <el-button text size="small" @click="$emit('detail', account.id)">
-            <el-icon><Setting /></el-icon>
-          </el-button>
-        </el-tooltip>
-        <el-tooltip content="检测Cookie" placement="top">
-          <el-button text size="small" @click="$emit('validate', account.id)">
-            <el-icon><CircleCheck /></el-icon>
-          </el-button>
-        </el-tooltip>
-        <el-tooltip content="重新登录" placement="top">
-          <el-button text size="small" @click="$emit('login', account.id)">
-            <el-icon><RefreshRight /></el-icon>
-          </el-button>
-        </el-tooltip>
+        <el-button text size="small" type="primary" @click="$emit('detail', account.id)">
+          设置
+        </el-button>
         <el-popconfirm title="确定删除该账号？" @confirm="$emit('delete', account.id)">
           <template #reference>
             <el-button text size="small" type="danger">
-              <el-icon><Delete /></el-icon>
+              删除
             </el-button>
           </template>
         </el-popconfirm>
@@ -84,7 +72,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { FolderOpened, CircleCheck, RefreshRight, Delete, Setting } from '@element-plus/icons-vue';
+import { FolderOpened } from '@element-plus/icons-vue';
 import type { Account } from '@/renderer/stores/account';
 
 const props = defineProps<{

@@ -66,6 +66,7 @@ const CHANNEL = {
   GROUPS_CREATE: 'groups:create',
   GROUPS_UPDATE: 'groups:update',
   GROUPS_DELETE: 'groups:delete',
+  GROUPS_SORT: 'groups:sort',
   GROUPS_BIND_ACCOUNTS: 'groups:bindAccounts',
   PUBLISH_CREATE_TASK: 'publish:createTask',
   PUBLISH_UPDATE_TASK: 'publish:updateTask',
@@ -421,7 +422,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNEL.GROUPS_UPDATE, async (_e, id: string, data: any) => {
     try {
       await groupService.updateGroup(id, data);
-      return { success: true };
+      if (Array.isArray(data.accountIds)) {
+        await groupService.clearGroupAccounts(id);
+        if (data.accountIds.length > 0) {
+          await groupService.addAccountsToGroup(id, data.accountIds);
+        }
+      }
+      const updated = await groupService.getGroup(id);
+      return { success: true, data: updated };
     } catch (error) {
       return { success: false, message: `${error}` };
     }
@@ -430,6 +438,15 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNEL.GROUPS_DELETE, async (_e, id: string) => {
     try {
       await groupService.deleteGroup(id);
+      return { success: true };
+    } catch (error) {
+      return { success: false, message: `${error}` };
+    }
+  });
+
+  ipcMain.handle(CHANNEL.GROUPS_SORT, async (_e, orderedIds: string[]) => {
+    try {
+      await groupService.sortGroups(orderedIds);
       return { success: true };
     } catch (error) {
       return { success: false, message: `${error}` };

@@ -146,6 +146,7 @@ export interface IGroupService {
   // 账号绑定
   addAccountsToGroup(groupId: string, accountIds: string[]): Promise<void>;
   removeAccountsFromGroup(groupId: string, accountIds: string[]): Promise<void>;
+  clearGroupAccounts(groupId: string): Promise<void>;
   getGroupAccounts(groupId: string): Promise<Account[]>;
 
   // 发布规则

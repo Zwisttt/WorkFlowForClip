@@ -74,6 +74,7 @@ interface MatrixFlowAPI {
     create: (data: any) => Promise<any>;
     update: (id: string, data: any) => Promise<any>;
     delete: (id: string) => Promise<any>;
+    sort: (orderedIds: string[]) => Promise<any>;
     bindAccounts: (groupId: string, accountIds: string[]) => Promise<any>;
   };
 

@@ -64,6 +64,11 @@ export class GroupService implements IGroupService {
     this.ensureInitialized();
     const db = this.requireDatabase();
 
+    const existing = db.prepare('SELECT id FROM groups WHERE name = ?').get(name);
+    if (existing) {
+      throw new Error(`分组 "${name}" 已存在`);
+    }
+
     const id = generateId();
     const now = nowISO();
 
@@ -79,6 +84,20 @@ export class GroupService implements IGroupService {
 
     logger.info(`分组已创建: id=${id}, name=${name}`);
     return group!;
+  }
+
+  async sortGroups(orderedIds: string[]): Promise<void> {
+    this.ensureInitialized();
+    const db = this.requireDatabase();
+    const now = nowISO();
+    const stmt = db.prepare('UPDATE groups SET sort_order = ?, updated_at = ? WHERE id = ?');
+    const transaction = db.transaction(() => {
+      orderedIds.forEach((id, index) => {
+        stmt.run(index, now, id);
+      });
+    });
+    transaction();
+    logger.info(`分组排序已更新: ${orderedIds.length} 个分组`);
   }
 
   async updateGroup(groupId: string, data: Partial<Group>): Promise<void> {
@@ -217,6 +236,21 @@ export class GroupService implements IGroupService {
     }
 
     logger.info(`账号已加入分组: groupId=${groupId}, count=${accountIds.length}`);
+  }
+
+  async clearGroupAccounts(groupId: string): Promise<void> {
+    this.ensureInitialized();
+    const db = this.requireDatabase();
+
+    const existing = await this.getGroup(groupId);
+    if (!existing) {
+      throw new Error(`分组不存在: ${groupId}`);
+    }
+
+    const now = nowISO();
+    db.prepare('UPDATE accounts SET group_id = NULL, updated_at = ? WHERE group_id = ?').run(now, groupId);
+
+    logger.info(`分组账号绑定已清空: groupId=${groupId}`);
   }
 
   async removeAccountsFromGroup(groupId: string, accountIds: string[]): Promise<void> {

@@ -21,11 +21,24 @@ export interface PublishRule {
 export interface Group {
   id: string;
   name: string;
+  description?: string;
   color: string;
   accountIds: string[];
   publishRule: PublishRule;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
+}
+
+interface GroupFromBackend {
+  id: string;
+  name: string;
+  description?: string;
+  color: string;
+  accountCount: number;
+  sortOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const defaultPublishRule: PublishRule = {
@@ -120,7 +133,18 @@ export const useGroupStore = defineStore('group', () => {
     loading.value = true;
     try {
       const list = await window.matrixflow.groups.list();
-      groups.value = list as Group[];
+      const backendGroups = list as GroupFromBackend[];
+      groups.value = backendGroups.map((g) => ({
+        id: g.id,
+        name: g.name,
+        description: g.description,
+        color: g.color,
+        accountIds: [],
+        publishRule: defaultPublishRule,
+        sortOrder: g.sortOrder,
+        createdAt: g.createdAt instanceof Date ? g.createdAt.toISOString() : String(g.createdAt),
+        updatedAt: g.updatedAt instanceof Date ? g.updatedAt.toISOString() : String(g.updatedAt),
+      }));
     } finally {
       loading.value = false;
     }
@@ -128,30 +152,52 @@ export const useGroupStore = defineStore('group', () => {
 
   async function createGroup(data: { name: string; accountIds?: string[] }) {
     if (!window.matrixflow) return;
-    const group = await window.matrixflow.groups.create({
+    const result = await window.matrixflow.groups.create({
       name: data.name,
-      accountIds: data.accountIds || [],
+      description: '',
       color: getRandomColor(),
-      publishRule: { ...defaultPublishRule },
     });
-    groups.value.push(group as Group);
+    const group = (result as any)?.data ?? result;
+    if (group) {
+      groups.value.push(group as Group);
+    }
     return group;
   }
 
   async function updateGroup(id: string, data: Partial<Group>) {
     if (!window.matrixflow) return;
-    const updated = await window.matrixflow.groups.update(id, data);
-    const idx = groups.value.findIndex((g) => g.id === id);
-    if (idx >= 0) {
-      groups.value[idx] = { ...groups.value[idx], ...updated } as Group;
+    const plainData = JSON.parse(JSON.stringify(data));
+    console.log('[groupStore] updateGroup called:', { id, data: plainData });
+    try {
+      const result = await window.matrixflow.groups.update(id, plainData);
+      console.log('[groupStore] updateGroup IPC result:', result);
+      const updated = (result as any)?.data ?? result;
+      const idx = groups.value.findIndex((g) => g.id === id);
+      if (idx >= 0 && updated) {
+        groups.value[idx] = { ...groups.value[idx], ...updated } as Group;
+      } else if (idx >= 0) {
+        groups.value[idx] = { ...groups.value[idx], ...plainData } as Group;
+      }
+      return updated;
+    } catch (err) {
+      console.error('[groupStore] updateGroup error:', err);
+      throw err;
     }
-    return updated;
   }
 
   async function deleteGroup(id: string) {
     if (!window.matrixflow) return;
     await window.matrixflow.groups.delete(id);
     groups.value = groups.value.filter((g) => g.id !== id);
+  }
+
+  async function sortGroups(orderedIds: string[]) {
+    if (!window.matrixflow) return;
+    orderedIds.forEach((id, index) => {
+      const group = groups.value.find((g) => g.id === id);
+      if (group) group.sortOrder = index;
+    });
+    await window.matrixflow.groups.sort(orderedIds);
   }
 
   async function bindAccounts(groupId: string, accountIds: string[]) {
@@ -180,6 +226,7 @@ export const useGroupStore = defineStore('group', () => {
     createGroup,
     updateGroup,
     deleteGroup,
+    sortGroups,
     bindAccounts,
     getGroupById,
     getGroupAccountCount,

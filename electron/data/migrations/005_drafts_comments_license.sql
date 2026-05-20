@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS comment_templates (
   platform TEXT NOT NULL,
   name TEXT NOT NULL,
   content TEXT NOT NULL,
-  trigger_condition TEXT NOT NULL CHECK(trigger_condition IN ('after_publish', 'threshold')),
+  trigger_condition TEXT NOT NULL DEFAULT 'after_publish' CHECK(trigger_condition IN ('after_publish', 'threshold')),
   threshold TEXT,
   delay INTEGER,
   created_at TEXT NOT NULL,
