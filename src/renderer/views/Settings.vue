@@ -5,26 +5,38 @@
     <el-tabs v-model="activeTab" class="settings-tabs">
       <el-tab-pane label="基本设置" name="general">
         <div class="settings-card">
+          <div class="theme-section">
+            <div class="theme-section__label">外观</div>
+            <el-radio-group
+              v-model="settings.settings.theme"
+              size="large"
+              class="theme-selector"
+              @change="(v: string | number | boolean) => onThemeChange(v as AppSettings['theme'])"
+            >
+              <el-radio-button value="light">
+                <div class="theme-option">
+                  <el-icon :size="18"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64c-247.4 0-448 200.6-448 448s200.6 448 448 448 448-200.6 448-448-200.6-448-448-448zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z" fill="currentColor"/><path d="M512 192v640M192 512h640" stroke="currentColor" stroke-width="40" stroke-linecap="round"/></svg></el-icon>
+                  <span>浅色</span>
+                </div>
+              </el-radio-button>
+              <el-radio-button value="dark">
+                <div class="theme-option">
+                  <el-icon :size="18"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M582.5 382.5c-99.6 0-180.5 80.9-180.5 180.5s80.9 180.5 180.5 180.5c11.7 0 23.2-1.1 34.3-3.3-32.5 23.1-72.3 36.8-115.3 36.8-110.5 0-200-89.5-200-200s89.5-200 200-200c43 0 82.8 13.7 115.3 36.8-11.1-2.2-22.6-3.3-34.3-3.3z" fill="currentColor"/><path d="M512 64v64M512 896v64M896 512h64M64 512h64M796.2 227.8l-45.3 45.3M273.1 750.9l-45.3 45.3M796.2 796.2l-45.3-45.3M273.1 273.1l-45.3-45.3" stroke="currentColor" stroke-width="40" stroke-linecap="round"/></svg></el-icon>
+                  <span>深色</span>
+                </div>
+              </el-radio-button>
+              <el-radio-button value="auto">
+                <div class="theme-option">
+                  <el-icon :size="18"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z" fill="currentColor"/><path d="M512 140v772M140 512h772" stroke="currentColor" stroke-width="30"/></svg></el-icon>
+                  <span>跟随系统</span>
+                </div>
+              </el-radio-button>
+            </el-radio-group>
+          </div>
+
+          <el-divider content-position="left">任务设置</el-divider>
+
           <el-form label-width="140px" class="settings-form">
-            <el-divider content-position="left">基本设置</el-divider>
-
-            <el-form-item label="主题">
-              <el-select v-model="settings.settings.theme" @change="(v: string) => settings.updateSetting('theme', v as any)">
-                <el-option label="浅色" value="light" />
-                <el-option label="深色" value="dark" />
-                <el-option label="跟随系统" value="auto" />
-              </el-select>
-            </el-form-item>
-
-            <el-form-item label="语言">
-              <el-select v-model="settings.settings.language" @change="(v: string) => settings.updateSetting('language', v as any)">
-                <el-option label="简体中文" value="zh-CN" />
-                <el-option label="English" value="en-US" />
-              </el-select>
-            </el-form-item>
-
-            <el-divider content-position="left">任务设置</el-divider>
-
             <el-form-item label="并发任务数">
               <el-input-number
                 v-model="settings.settings.concurrentTasks"
@@ -275,6 +287,35 @@ async function selectFingerprintPath() {
     settings.updateSetting('fingerprintBrowserPath', filePath);
   }
 }
+
+function onThemeChange(theme: AppSettings['theme']) {
+  settings.updateSetting('theme', theme);
+  applyTheme(theme);
+}
+
+function applyTheme(theme: AppSettings['theme']) {
+  const html = document.documentElement;
+  const isDark = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+  if (isDark) {
+    html.classList.add('dark');
+  } else {
+    html.classList.remove('dark');
+  }
+}
+
+onMounted(() => {
+  settings.fetchSettings().then(() => {
+    applyTheme(settings.settings.theme);
+  });
+
+  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  mediaQuery.addEventListener('change', (e) => {
+    if (settings.settings.theme === 'auto') {
+      applyTheme('auto');
+    }
+  });
+});
 </script>
 
 <style scoped>
@@ -472,5 +513,53 @@ async function selectFingerprintPath() {
 
 .mode-config-panel .settings-form {
   margin-top: 0;
+}
+
+.theme-section {
+  margin-bottom: var(--space-6);
+}
+
+.theme-section__label {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-4);
+}
+
+.theme-selector {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.theme-selector :deep(.el-radio-button) {
+  flex: 1;
+}
+
+.theme-selector :deep(.el-radio-button__inner) {
+  width: 100%;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-lg) !important;
+  border: 2px solid var(--color-border) !important;
+  box-shadow: none;
+  transition: all var(--transition-fast);
+}
+
+.theme-selector :deep(.el-radio-button__inner:hover) {
+  border-color: var(--color-primary-light) !important;
+  color: var(--color-primary);
+}
+
+.theme-selector :deep(.el-radio-button.is-active .el-radio-button__inner) {
+  border-color: var(--color-primary) !important;
+  background: var(--color-primary-lighter);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
 }
 </style>
