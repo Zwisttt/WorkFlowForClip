@@ -17,6 +17,13 @@ const ALLOWED_CHANNELS = new Set([
   'task:progress',
   'task:status-change',
   'account:login-status-updated',
+  'account:login-success',
+  'account:login-failed',
+  'account:login-timeout',
+  'account:login-cancelled',
+  'account:login-blocked',
+  'account:login-queued',
+  'account:network-slow',
   'update:status',
   'update:progress',
 ]);
@@ -75,6 +82,9 @@ const api = {
       ipcRenderer.invoke('accounts:checkCookie', accountId),
     getQRCode: (accountId: string) =>
       ipcRenderer.invoke('accounts:getQRCode', accountId),
+    startLogin: (data: { platform: string; browserConfig: Record<string, unknown>; existingAccountId?: string }) =>
+      ipcRenderer.invoke('accounts:startLogin', data),
+    cancelLogin: () => ipcRenderer.invoke('accounts:cancelLogin'),
   },
 
   content: {
@@ -240,6 +250,18 @@ const api = {
       ipcRenderer.invoke('proxy:delete', { id }),
     check: (id: string) =>
       ipcRenderer.invoke('proxy:check', { id }),
+    batchCheck: (ids: string[]) =>
+      ipcRenderer.invoke('proxy:batchCheck', { ids }),
+    import: (content: string, format: 'csv' | 'txt') =>
+      ipcRenderer.invoke('proxy:import', { content, format }),
+    export: (scope: 'all' | 'available' | 'selected', ids?: string[]) =>
+      ipcRenderer.invoke('proxy:export', { scope, ids }),
+    getBoundAccounts: (proxyId: string) =>
+      ipcRenderer.invoke('proxy:getBoundAccounts', { proxyId }),
+    setAccounts: (proxyId: string, accountIds: string[]) =>
+      ipcRenderer.invoke('proxy:setAccounts', { proxyId, accountIds }),
+    unbindAccount: (proxyId: string, accountId: string) =>
+      ipcRenderer.invoke('proxy:unbindAccount', { proxyId, accountId }),
   },
 
   fingerprint: {
@@ -253,6 +275,14 @@ const api = {
       ipcRenderer.invoke('fingerprint:update', { id, data }),
     delete: (id: string) =>
       ipcRenderer.invoke('fingerprint:delete', { id }),
+    generateSeed: () =>
+      ipcRenderer.invoke('fingerprint:generateSeed'),
+    getDefaults: () =>
+      ipcRenderer.invoke('fingerprint:getDefaults'),
+    generateHardware: (seed: number, platform: string, brand?: string) =>
+      ipcRenderer.invoke('fingerprint:generateHardware', { seed, platform, brand }),
+    generateFromSeed: (seed: number) =>
+      ipcRenderer.invoke('fingerprint:generateFromSeed', { seed }),
   },
 
   browser: {

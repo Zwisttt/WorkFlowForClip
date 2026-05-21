@@ -1,51 +1,52 @@
 <template>
   <div class="about-panel">
-    <div class="about-panel__logo">
-      <span class="about-panel__logo-icon">M</span>
-      <span class="about-panel__logo-text">MatrixFlow</span>
-    </div>
-
-    <div class="about-panel__info">
-      <div class="about-panel__row">
-        <span class="about-panel__label">版本</span>
-        <span class="about-panel__value">{{ version }}</span>
-      </div>
-      <div class="about-panel__row">
-        <span class="about-panel__label">构建日期</span>
-        <span class="about-panel__value">{{ buildDate }}</span>
-      </div>
-      <div class="about-panel__row">
-        <span class="about-panel__label">Electron</span>
-        <span class="about-panel__value">{{ electronVersion }}</span>
-      </div>
-      <div class="about-panel__row">
-        <span class="about-panel__label">Chrome</span>
-        <span class="about-panel__value">{{ chromeVersion }}</span>
-      </div>
-      <div class="about-panel__row">
-        <span class="about-panel__label">数据目录</span>
-        <span class="about-panel__value about-panel__path">{{ dataDir }}</span>
+    <div class="about-hero">
+      <div class="about-hero__icon">M</div>
+      <div class="about-hero__text">
+        <div class="about-hero__name">MatrixFlow</div>
+        <div class="about-hero__tagline">AI Native 多平台矩阵式内容分发系统</div>
       </div>
     </div>
 
-    <el-divider />
+    <div class="about-info-card">
+      <div class="about-info-row">
+        <div class="about-info-row__label">版本</div>
+        <div class="about-info-row__value">{{ version }}</div>
+      </div>
+      <div class="about-info-row">
+        <div class="about-info-row__label">构建日期</div>
+        <div class="about-info-row__value">{{ buildDate }}</div>
+      </div>
+      <div class="about-info-row">
+        <div class="about-info-row__label">Electron</div>
+        <div class="about-info-row__value">{{ electronVersion }}</div>
+      </div>
+      <div class="about-info-row">
+        <div class="about-info-row__label">Chromium</div>
+        <div class="about-info-row__value">{{ chromeVersion }}</div>
+      </div>
+      <div class="about-info-row">
+        <div class="about-info-row__label">数据目录</div>
+        <div class="about-info-row__value about-info-row__mono">{{ dataDir }}</div>
+      </div>
+    </div>
 
-    <div class="about-panel__links">
-      <el-button text @click="openLink('https://github.com/matrixflow')">
+    <div class="about-links">
+      <el-button @click="openLink('https://github.com/matrixflow')">
         <el-icon><Link /></el-icon>
         GitHub
       </el-button>
-      <el-button text @click="openLink('https://matrixflow.dev/docs')">
+      <el-button @click="openLink('https://matrixflow.dev/docs')">
         <el-icon><Document /></el-icon>
         文档
       </el-button>
-      <el-button text @click="openLink('https://matrixflow.dev/changelog')">
+      <el-button @click="openLink('https://matrixflow.dev/changelog')">
         <el-icon><Memo /></el-icon>
         更新日志
       </el-button>
     </div>
 
-    <div class="about-panel__copyright">
+    <div class="about-copyright">
       &copy; {{ new Date().getFullYear() }} MatrixFlow. All rights reserved.
     </div>
   </div>
@@ -91,81 +92,101 @@ function openLink(url: string) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-5);
-  padding: var(--space-6) 0;
+  gap: var(--space-6);
+  padding: var(--space-8) 0;
 }
 
-.about-panel__logo {
+.about-hero {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 
-.about-panel__logo-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--border-radius-lg);
+.about-hero__icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-xl);
   background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
-  color: var(--color-bg-card);
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: var(--font-size-3xl);
-  font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-bold);
+  box-shadow: var(--shadow-md);
+  flex-shrink: 0;
 }
 
-.about-panel__logo-text {
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.about-panel__info {
-  width: 100%;
-  max-width: 400px;
+.about-hero__text {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
-.about-panel__row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--border-radius-sm);
+.about-hero__name {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+  line-height: 1.2;
 }
 
-.about-panel__row:nth-child(odd) {
-  background: var(--color-bg-page);
-}
-
-.about-panel__label {
+.about-hero__tagline {
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
 
-.about-panel__value {
+.about-info-card {
+  width: 100%;
+  max-width: 480px;
+  background: var(--color-bg-page, #f8fafc);
+  border: 1px solid var(--color-border-light, #f1f5f9);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+}
+
+.about-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+.about-info-row:hover {
+  background: var(--color-bg-card);
+}
+
+.about-info-row__label {
   font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   font-weight: var(--font-weight-medium);
 }
 
-.about-panel__path {
-  font-family: monospace;
+.about-info-row__value {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.about-info-row__mono {
+  font-family: var(--font-family-mono);
   font-size: var(--font-size-xs);
-  max-width: 240px;
+  font-weight: var(--font-weight-normal);
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.about-panel__links {
+.about-links {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
-.about-panel__copyright {
+.about-copyright {
   font-size: var(--font-size-xs);
   color: var(--color-text-placeholder);
 }

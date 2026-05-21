@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, dialog } from 'electron';
 import { PlatformRegistry } from '../platform/base/PlatformRegistry';
 import { EventBus } from '../core/EventBus';
 import { Logger } from '../core/Logger';
@@ -19,6 +19,16 @@ import { commentService } from '../services/CommentService';
 import { licenseService } from '../services/LicenseService';
 import { proxyService } from '../services/ProxyService';
 import { fingerprintTemplateRepo } from '../data/repositories/FingerprintTemplateRepository';
+import {
+  generateFingerprintSeed,
+  getDefaultPlatform,
+  getDefaultTimezone,
+  getDefaultLang,
+  getDefaultAcceptLang,
+  createDefaultTemplate,
+  generateHardwareFromSeed,
+  generateTemplateFromSeed,
+} from '../services/FingerprintService';
 import { autoUpdaterService } from '../core/AutoUpdater';
 import { notificationService } from '../core/NotificationService';
 import type { PrePublishContext, RuleOptimizationContext } from '../ai/types';
@@ -127,12 +137,22 @@ const CHANNEL = {
   PROXY_UPDATE: 'proxy:update',
   PROXY_DELETE: 'proxy:delete',
   PROXY_CHECK: 'proxy:check',
+  PROXY_BATCH_CHECK: 'proxy:batchCheck',
+  PROXY_IMPORT: 'proxy:import',
+  PROXY_EXPORT: 'proxy:export',
+  PROXY_GET_BOUND_ACCOUNTS: 'proxy:getBoundAccounts',
+  PROXY_SET_ACCOUNTS: 'proxy:setAccounts',
+  PROXY_UNBIND_ACCOUNT: 'proxy:unbindAccount',
 
   FINGERPRINT_LIST: 'fingerprint:list',
   FINGERPRINT_GET: 'fingerprint:get',
   FINGERPRINT_CREATE: 'fingerprint:create',
   FINGERPRINT_UPDATE: 'fingerprint:update',
   FINGERPRINT_DELETE: 'fingerprint:delete',
+  FINGERPRINT_GENERATE_SEED: 'fingerprint:generateSeed',
+  FINGERPRINT_GET_DEFAULTS: 'fingerprint:getDefaults',
+  FINGERPRINT_GENERATE_HARDWARE: 'fingerprint:generateHardware',
+  FINGERPRINT_GENERATE_FROM_SEED: 'fingerprint:generateFromSeed',
 
   ACCOUNT_SET_FINGERPRINT: 'account:setFingerprint',
   ACCOUNT_SET_PROXY: 'account:setProxy',
@@ -155,6 +175,8 @@ const CHANNEL = {
   PUBLISH_PRE_CHECK: 'publish:preCheck',
   PUBLISH_HISTORY: 'publish:history',
   PLATFORM_COVER_RATIOS: 'platform:coverRatios',
+
+  DIALOG_OPEN_FILE: 'dialog:openFile',
 } as const;
 
 export interface IpcResult<T = unknown> {
@@ -822,6 +844,36 @@ export function registerIpcHandlers(): void {
     return wrap(() => proxyService.checkProxy(id));
   });
 
+  ipcMain.handle(CHANNEL.PROXY_BATCH_CHECK, async (_, { ids }: { ids: string[] }) => {
+    return wrap(() => proxyService.batchCheck(ids));
+  });
+
+  ipcMain.handle(CHANNEL.PROXY_IMPORT, async (_, { content, format }: { content: string; format: 'csv' | 'txt' }) => {
+    return wrap(() => proxyService.importProxies(content, format));
+  });
+
+  ipcMain.handle(CHANNEL.PROXY_EXPORT, async (_, { scope, ids }: { scope: 'all' | 'available' | 'selected'; ids?: string[] }) => {
+    return wrap(() => proxyService.exportProxies(scope, ids));
+  });
+
+  ipcMain.handle(CHANNEL.PROXY_GET_BOUND_ACCOUNTS, async (_, { proxyId }: { proxyId: string }) => {
+    return wrap(() => proxyService.getBoundAccounts(proxyId));
+  });
+
+  ipcMain.handle(CHANNEL.PROXY_SET_ACCOUNTS, async (_, { proxyId, accountIds }: { proxyId: string; accountIds: string[] }) => {
+    return wrap(async () => {
+      await proxyService.setAccounts(proxyId, accountIds);
+      return undefined;
+    });
+  });
+
+  ipcMain.handle(CHANNEL.PROXY_UNBIND_ACCOUNT, async (_, { proxyId, accountId }: { proxyId: string; accountId: string }) => {
+    return wrap(async () => {
+      await proxyService.unbindAccount(proxyId, accountId);
+      return undefined;
+    });
+  });
+
   ipcMain.handle(CHANNEL.FINGERPRINT_LIST, async () => {
     const result = await fingerprintTemplateRepo.findAll();
     return ok(result.data);
@@ -841,6 +893,22 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.FINGERPRINT_DELETE, async (_, { id }: { id: string }) => {
     return wrap(() => fingerprintTemplateRepo.deleteById(id));
+  });
+
+  ipcMain.handle(CHANNEL.FINGERPRINT_GENERATE_SEED, async () => {
+    return ok(generateFingerprintSeed());
+  });
+
+  ipcMain.handle(CHANNEL.FINGERPRINT_GET_DEFAULTS, async () => {
+    return ok(createDefaultTemplate());
+  });
+
+  ipcMain.handle(CHANNEL.FINGERPRINT_GENERATE_HARDWARE, async (_, { seed, platform, brand }: { seed: number; platform: string; brand?: string }) => {
+    return ok(generateHardwareFromSeed(seed, platform as 'windows' | 'linux' | 'macos', brand as 'Chrome' | 'Edge' | 'Opera' | 'Vivaldi' | undefined));
+  });
+
+  ipcMain.handle(CHANNEL.FINGERPRINT_GENERATE_FROM_SEED, async (_, { seed }: { seed: number }) => {
+    return ok(generateTemplateFromSeed(seed));
   });
 
   ipcMain.handle(CHANNEL.ACCOUNT_SET_FINGERPRINT, async (_, { accountId, fingerprintId }: { accountId: string; fingerprintId: string | null }) => {
@@ -922,6 +990,19 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.PUBLISH_HISTORY, async (_e, filters: { platform?: string; accountId?: string; startDate?: string; endDate?: string }) => {
     return wrap(() => publishService.getPublishHistory(filters));
+  });
+
+  // ─── 原生对话框 ──────────────────────────────────────
+
+  ipcMain.handle(CHANNEL.DIALOG_OPEN_FILE, async (_e, options?: { title?: string; properties?: Electron.OpenDialogOptions['properties']; filters?: Electron.FileFilter[] }) => {
+    const win = getMainWindow();
+    const result = await dialog.showOpenDialog(win!, {
+      title: options?.title,
+      properties: options?.properties ?? ['openFile'],
+      filters: options?.filters,
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
   });
 
   logger.info('IPC 处理器已注册');

@@ -59,6 +59,8 @@ interface MatrixFlowAPI {
     login: (accountId: string) => Promise<any>;
     checkCookie: (accountId: string) => Promise<any>;
     getQRCode: (accountId: string) => Promise<any>;
+    startLogin: (data: { platform: string; browserConfig: Record<string, unknown>; existingAccountId?: string }) => Promise<IpcResult<any>>;
+    cancelLogin: () => Promise<IpcResult<void>>;
   };
 
   content: {
@@ -187,6 +189,10 @@ interface MatrixFlowAPI {
     create: (data: any) => Promise<IpcResult<any>>;
     update: (id: string, data: any) => Promise<IpcResult<any>>;
     delete: (id: string) => Promise<IpcResult<void>>;
+    generateSeed: () => Promise<IpcResult<number>>;
+    getDefaults: () => Promise<IpcResult<any>>;
+    generateHardware: (seed: number, platform: string, brand?: string) => Promise<IpcResult<{ hardware_concurrency: number; gpu_vendor: string; gpu_renderer: string; platform_version: string; brand_version: string }>>;
+    generateFromSeed: (seed: number) => Promise<IpcResult<Partial<FingerprintTemplate>>>;
   };
 
   proxy: {
@@ -196,6 +202,10 @@ interface MatrixFlowAPI {
     update: (id: string, data: any) => Promise<IpcResult<any>>;
     delete: (id: string) => Promise<IpcResult<void>>;
     check: (id: string) => Promise<IpcResult<{ success: boolean; message: string; latency?: number }>>;
+  };
+
+  dialog: {
+    openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
   };
 
   runPoc: (type: string) => Promise<unknown>;
