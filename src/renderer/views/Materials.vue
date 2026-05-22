@@ -79,12 +79,12 @@
     <el-dialog v-model="previewVisible" title="素材预览" width="800px">
       <img
         v-if="previewMaterial?.type === 'image'"
-        :src="`file://${previewMaterial?.filePath}`"
+        :src="`local-file://${encodeURIComponent(previewMaterial?.filePath || '')}`"
         style="width: 100%"
       />
       <video
         v-else
-        :src="`file://${previewMaterial?.filePath}`"
+        :src="`local-file://${encodeURIComponent(previewMaterial?.filePath || '')}`"
         controls
         style="width: 100%"
       />

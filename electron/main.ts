@@ -1,7 +1,7 @@
 import { initSentryMain } from './core/SentryInit';
 initSentryMain();
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, net } from 'electron';
 import * as path from 'path';
 import { AppLifecycle } from './core/AppLifecycle';
 import { ConfigManager } from './core/ConfigManager';
@@ -66,6 +66,11 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  protocol.handle('local-file', (request) => {
+    const filePath = decodeURIComponent(request.url.replace('local-file://', ''));
+    return net.fetch(`file://${filePath}`);
+  });
+
   logger.info('MatrixFlow 启动中...');
 
   initDatabase();

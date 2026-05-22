@@ -77,10 +77,10 @@ const emit = defineEmits<{
 
 const thumbnailUrl = computed(() => {
   if (props.material.thumbnailPath) {
-    return `file://${props.material.thumbnailPath}`;
+    return `local-file://${encodeURIComponent(props.material.thumbnailPath)}`;
   }
   if (props.material.type === 'image') {
-    return `file://${props.material.filePath}`;
+    return `local-file://${encodeURIComponent(props.material.filePath)}`;
   }
   return '';
 });
