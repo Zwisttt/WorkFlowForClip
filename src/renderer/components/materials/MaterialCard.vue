@@ -24,7 +24,7 @@
           <el-icon><VideoPlay /></el-icon>
         </div>
         <div class="material-card__video-duration">
-          {{ formatDuration(material.duration) }}
+          {{ formatDuration((material.metadata as any)?.duration) }}
         </div>
       </div>
 
@@ -43,10 +43,7 @@
         {{ material.title }}
       </div>
       <div class="material-card__meta">
-        <span>{{ formatFileSize(material.fileSize) }}</span>
-        <span v-if="material.width && material.height">
-          {{ material.width }}×{{ material.height }}
-        </span>
+        <span>{{ material.type === 'image' ? '图片' : '视频' }}</span>
       </div>
     </div>
 
@@ -113,13 +110,6 @@ function handleDelete() {
 function handleImageError(e: Event) {
   const target = e.target as HTMLImageElement;
   target.style.display = 'none';
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 function formatDuration(seconds?: number): string {

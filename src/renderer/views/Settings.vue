@@ -279,7 +279,7 @@ async function selectChromePath() {
     properties: ['openFile'],
     filters: [{ name: '应用程序', extensions: ['app', 'exe'] }],
   });
-  if (filePath) {
+  if (filePath && typeof filePath === 'string') {
     settings.updateSetting('chromePath', filePath);
   }
 }
@@ -290,7 +290,7 @@ async function selectFingerprintPath() {
     properties: ['openFile'],
     filters: [{ name: '应用程序', extensions: ['app', 'exe'] }],
   });
-  if (filePath) {
+  if (filePath && typeof filePath === 'string') {
     settings.updateSetting('fingerprintBrowserPath', filePath);
   }
 }

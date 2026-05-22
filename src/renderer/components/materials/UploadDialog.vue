@@ -5,26 +5,25 @@
     width="560px"
     @close="handleClose"
   >
-    <el-upload
-      ref="uploadRef"
-      :auto-upload="false"
-      :on-change="handleFileChange"
-      :on-remove="handleFileRemove"
-      :before-upload="beforeUpload"
-      accept="image/*,video/*"
-      drag
-      multiple
-    >
-      <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-      <div class="el-upload__text">
-        拖拽文件到此处，或<em>点击上传</em>
+    <div class="upload-drop-zone" @click="pickFiles">
+      <el-icon class="upload-drop-zone__icon"><UploadFilled /></el-icon>
+      <div class="upload-drop-zone__text">
+        点击选择文件，或将文件拖拽到此处
       </div>
-      <template #tip>
-        <div class="el-upload__tip">
-          支持 JPG、PNG、GIF、WebP、MP4、MOV 格式，单文件不超过 500MB
-        </div>
-      </template>
-    </el-upload>
+      <div class="upload-drop-zone__tip">
+        支持 JPG、PNG、GIF、WebP、MP4、MOV 格式，单文件不超过 500MB
+      </div>
+    </div>
+
+    <div v-if="selectedFiles.length > 0" class="upload-file-list">
+      <div v-for="(f, idx) in selectedFiles" :key="idx" class="upload-file-item">
+        <span class="upload-file-item__name">{{ f.name }}</span>
+        <span class="upload-file-item__size">{{ formatSize(f.size) }}</span>
+        <el-button link type="danger" size="small" @click="removeFile(idx)">
+          <el-icon><Close /></el-icon>
+        </el-button>
+      </div>
+    </div>
 
     <el-form :model="form" label-width="80px" class="upload-form">
       <el-form-item label="目标分组">
@@ -47,8 +46,8 @@
 
     <template #footer>
       <el-button @click="handleClose">取消</el-button>
-      <el-button type="primary" :loading="uploading" :disabled="fileList.length === 0" @click="handleUpload">
-        上传 ({{ fileList.length }})
+      <el-button type="primary" :loading="uploading" :disabled="selectedFiles.length === 0" @click="handleUpload">
+        上传 ({{ selectedFiles.length }})
       </el-button>
     </template>
   </el-dialog>
@@ -57,9 +56,14 @@
 <script setup lang="ts">
 import { ref, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { UploadFilled } from '@element-plus/icons-vue';
-import type { UploadFile } from 'element-plus';
+import { UploadFilled, Close } from '@element-plus/icons-vue';
 import type { MaterialGroup } from '../../stores/materials';
+
+interface SelectedFile {
+  path: string;
+  name: string;
+  size: number;
+}
 
 const props = defineProps<{
   groups: MaterialGroup[];
@@ -72,9 +76,8 @@ const emit = defineEmits<{
 
 const visible = defineModel<boolean>({ default: false });
 
-const uploadRef = ref();
 const uploading = ref(false);
-const fileList = ref<UploadFile[]>([]);
+const selectedFiles = ref<SelectedFile[]>([]);
 
 const form = reactive({
   groupId: '' as string,
@@ -82,48 +85,58 @@ const form = reactive({
   description: '',
 });
 
-const MAX_FILE_SIZE = 500 * 1024 * 1024;
-const ALLOWED_TYPES = [
-  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-  'video/mp4', 'video/quicktime',
-];
-
 watch(visible, (newVal) => {
   if (newVal && props.currentGroupId) {
     form.groupId = props.currentGroupId;
   }
 });
 
-function beforeUpload(file: File) {
-  if (file.size > MAX_FILE_SIZE) {
-    ElMessage.error(`文件 ${file.name} 超过 500MB 限制`);
-    return false;
+async function pickFiles() {
+  if (!window.matrixflow?.dialog?.openFile) {
+    ElMessage.error('文件选择功能不可用');
+    return;
   }
-  return true;
+
+  const filePath = await window.matrixflow.dialog.openFile({
+    title: '选择素材文件',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '图片和视频', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi'] },
+      { name: '图片', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] },
+      { name: '视频', extensions: ['mp4', 'mov', 'avi'] },
+    ],
+  });
+
+  if (!filePath) return;
+
+  // dialog.openFile returns string | null for single, or we handle string[]
+  // The IPC wraps it, so we get the raw return
+  const paths = Array.isArray(filePath) ? filePath : [filePath];
+
+  for (const p of paths) {
+    if (!p) continue;
+    // Avoid duplicates
+    if (selectedFiles.value.some(f => f.path === p)) continue;
+    const name = p.split(/[\\/]/).pop() || p;
+    selectedFiles.value.push({ path: p, name, size: 0 });
+  }
 }
 
-function handleFileChange(file: UploadFile) {
-  fileList.value.push(file);
-}
-
-function handleFileRemove(file: UploadFile) {
-  fileList.value = fileList.value.filter(f => f.uid !== file.uid);
+function removeFile(idx: number) {
+  selectedFiles.value.splice(idx, 1);
 }
 
 async function handleUpload() {
-  if (fileList.value.length === 0) {
+  if (selectedFiles.value.length === 0) {
     ElMessage.warning('请选择要上传的文件');
     return;
   }
 
   uploading.value = true;
 
-  for (const file of fileList.value) {
-    const filePath = (file.raw as any)?.path;
-    if (!filePath) continue;
-
+  for (const file of selectedFiles.value) {
     emit('upload', {
-      filePath,
+      filePath: file.path,
       groupId: form.groupId || undefined,
       title: form.title || undefined,
       description: form.description || undefined,
@@ -141,20 +154,83 @@ function handleClose() {
 }
 
 function resetForm() {
-  fileList.value = [];
+  selectedFiles.value = [];
   form.groupId = '';
   form.title = '';
   form.description = '';
 }
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
 </script>
 
 <style scoped>
-.upload-form {
-  margin-top: 16px;
+.upload-drop-zone {
+  border: 2px dashed var(--el-border-color);
+  border-radius: 8px;
+  padding: 32px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s;
 }
 
-.el-upload__tip {
+.upload-drop-zone:hover {
+  border-color: var(--el-color-primary);
+}
+
+.upload-drop-zone__icon {
+  font-size: 48px;
+  color: var(--el-text-color-placeholder);
+  margin-bottom: 8px;
+}
+
+.upload-drop-zone__text {
+  color: var(--el-text-color-regular);
+  font-size: 14px;
+}
+
+.upload-drop-zone__tip {
   color: var(--el-text-color-secondary);
   font-size: 12px;
+  margin-top: 8px;
+}
+
+.upload-file-list {
+  margin-top: 12px;
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 4px;
+}
+
+.upload-file-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.upload-file-item:not(:last-child) {
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.upload-file-item__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-file-item__size {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.upload-form {
+  margin-top: 16px;
 }
 </style>

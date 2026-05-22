@@ -3,18 +3,15 @@ import { ref, computed } from 'vue';
 
 export interface Material {
   id: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'article';
   title: string;
   description?: string;
   filePath: string;
-  fileSize: number;
-  mimeType: string;
-  width?: number;
-  height?: number;
-  duration?: number;
   thumbnailPath?: string;
+  platform?: string;
   groupId?: string;
-  tags?: string[];
+  metadata?: Record<string, unknown>;
+  status?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -54,8 +51,7 @@ export const useMaterialsStore = defineStore('materials', () => {
       const query = searchQuery.value.toLowerCase();
       result = result.filter(m =>
         m.title.toLowerCase().includes(query) ||
-        m.description?.toLowerCase().includes(query) ||
-        m.tags?.some(t => t.toLowerCase().includes(query))
+        m.description?.toLowerCase().includes(query)
       );
     }
     return result;
@@ -66,7 +62,7 @@ export const useMaterialsStore = defineStore('materials', () => {
   );
 
   const totalSize = computed(() =>
-    materials.value.reduce((sum, m) => sum + m.fileSize, 0)
+    materials.value.length
   );
 
   async function fetchMaterials() {

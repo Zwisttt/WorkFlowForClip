@@ -316,10 +316,12 @@ const api = {
       ipcRenderer.invoke('browser:validatePath', filePath),
     openUrl: (url: string): Invoke<void> =>
       ipcRenderer.invoke('browser:openUrl', url),
+    openAccountBrowser: (accountId: string, url: string): Invoke<void> =>
+      ipcRenderer.invoke('account:openBrowser', accountId, url),
   },
 
   dialog: {
-    openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> =>
+    openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }): Promise<string | string[] | null> =>
       ipcRenderer.invoke('dialog:openFile', options),
   },
 

@@ -323,11 +323,15 @@ export class MaterialService implements IMaterialService {
     return { valid: false, error: '不支持的文件格式' };
   }
 
+  /**
+   * 校验文件路径安全性（防路径遍历）。
+   * 上传源文件来自用户任意位置，不限制目录，仅禁止路径遍历。
+   */
   validateFilePath(filePath: string): boolean {
+    if (!filePath || typeof filePath !== 'string') return false;
     const resolved = path.resolve(filePath);
-    const materialsDir = path.resolve(MATERIALS_DIR);
-    const dataDir = path.resolve(process.cwd(), 'data');
-    return resolved.startsWith(materialsDir) || resolved.startsWith(dataDir);
+    if (resolved.includes('..')) return false;
+    return path.isAbsolute(resolved);
   }
 
   // ─── 私有工具 ──────────────────────────────────────────

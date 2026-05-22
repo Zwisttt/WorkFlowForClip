@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron';
 import { execFile } from 'child_process';
 import * as fs from 'fs';
+import * as path from 'path';
 import { PlatformRegistry } from '../platform/base/PlatformRegistry';
 import { EventBus } from '../core/EventBus';
 import { Logger } from '../core/Logger';
@@ -200,6 +201,7 @@ const CHANNEL = {
 
   DIALOG_OPEN_FILE: 'dialog:openFile',
   BROWSER_OPEN_URL: 'browser:openUrl',
+  ACCOUNT_OPEN_BROWSER: 'account:openBrowser',
 } as const;
 
 export interface IpcResult<T = unknown> {
@@ -271,6 +273,10 @@ export interface PlatformInfo {
 }
 
 export function registerIpcHandlers(): void {
+  materialService.initialize().catch(err => {
+    console.error('[MaterialService] 初始化失败:', err);
+  });
+
   let mainWindow: BrowserWindow | null = null;
 
   const getMainWindow = (): BrowserWindow | null => {
@@ -1116,15 +1122,16 @@ export function registerIpcHandlers(): void {
 
   // ─── 原生对话框 ──────────────────────────────────────
 
-  ipcMain.handle(CHANNEL.DIALOG_OPEN_FILE, async (_e, options?: { title?: string; properties?: Electron.OpenDialogOptions['properties']; filters?: Electron.FileFilter[] }) => {
+  ipcMain.handle(CHANNEL.DIALOG_OPEN_FILE, async (_e, options?: { title?: string; properties?: string[]; filters?: Electron.FileFilter[] }) => {
     const win = getMainWindow();
+    const props = (options?.properties ?? ['openFile']) as Electron.OpenDialogOptions['properties'];
     const result = await dialog.showOpenDialog(win!, {
       title: options?.title,
-      properties: options?.properties ?? ['openFile'],
+      properties: props,
       filters: options?.filters,
     });
     if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0];
+    return result.filePaths.length === 1 ? result.filePaths[0] : result.filePaths;
   });
 
   ipcMain.handle(CHANNEL.BROWSER_OPEN_URL, async (_e, url: string): Promise<IpcResult<null>> => {
@@ -1227,6 +1234,116 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('ai-risk:assess', async (_, context: RiskContext) => {
     const service = getAIRiskSettingsService();
     return service.assess(context);
+  });
+
+  // ─── 账号浏览器 ──────────────────────────────────────────
+
+  ipcMain.handle(CHANNEL.ACCOUNT_OPEN_BROWSER, async (_e, accountId: string, url: string): Promise<IpcResult<null>> => {
+    try {
+      const db = getDatabase();
+      const row = db.prepare('SELECT browser_mode FROM accounts WHERE id = ?').get(accountId) as any;
+      const browserMode = row?.browser_mode || 'embedded';
+
+      if (browserMode === 'embedded') {
+        const { BrowserWindow, BrowserView, session } = await import('electron');
+        const partition = `persist:${accountId}`;
+        const ses = session.fromPartition(partition);
+
+        const win = new BrowserWindow({
+          width: 1200,
+          height: 900,
+          minWidth: 800,
+          minHeight: 600,
+          title: `MatrixFlow - 账号浏览器`,
+          autoHideMenuBar: true,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            partition,
+          },
+        });
+
+        const addressBarPath = path.join(__dirname, '..', 'browser-ui', 'address-bar.html');
+        const addressBarView = new BrowserView({
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, '..', 'browser-ui', 'address-bar-preload.js'),
+          },
+        });
+        await addressBarView.webContents.loadFile(addressBarPath);
+
+        const contentView = new BrowserView({
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            partition,
+          },
+        });
+
+        contentView.webContents.on('did-navigate', (_, navUrl) => {
+          addressBarView.webContents.send('browser-address:url-change', navUrl);
+        });
+        contentView.webContents.on('did-navigate-in-page', (_, navUrl) => {
+          addressBarView.webContents.send('browser-address:url-change', navUrl);
+        });
+        contentView.webContents.on('did-start-loading', () => {
+          addressBarView.webContents.send('browser-address:loading-state', true);
+        });
+        contentView.webContents.on('did-stop-loading', () => {
+          addressBarView.webContents.send('browser-address:loading-state', false);
+        });
+        contentView.webContents.on('did-finish-load', () => {
+          addressBarView.webContents.send('browser-address:navigation-state',
+            contentView.webContents.canGoBack(),
+            contentView.webContents.canGoForward()
+          );
+        });
+
+        await contentView.webContents.loadURL(url);
+
+        win.addBrowserView(addressBarView);
+        win.addBrowserView(contentView);
+
+        addressBarView.setBounds({ x: 0, y: 0, width: win.getBounds().width, height: 48 });
+        contentView.setBounds({ x: 0, y: 48, width: win.getBounds().width, height: win.getBounds().height - 48 });
+        addressBarView.webContents.send('browser-address:url-change', url);
+
+        win.on('resize', () => {
+          const bounds = win.getBounds();
+          addressBarView.setBounds({ x: 0, y: 0, width: bounds.width, height: 48 });
+          contentView.setBounds({ x: 0, y: 48, width: bounds.width, height: bounds.height - 48 });
+        });
+
+        return { success: true };
+      } else {
+        // chrome / fingerprint 模式走 browser:openUrl
+        let chromePath: string | null = null;
+        try {
+          const stmt = db.prepare('SELECT value FROM platform_configs WHERE key = ?');
+          const cfgRow = stmt.get('chromePath') as any;
+          if (cfgRow?.value) {
+            try { chromePath = JSON.parse(cfgRow.value); } catch { chromePath = cfgRow.value; }
+          }
+        } catch {}
+        if (!chromePath || !fs.existsSync(chromePath)) {
+          const defaults: Record<string, string> = {
+            darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            win32: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            linux: '/usr/bin/google-chrome',
+          };
+          const d = defaults[process.platform];
+          if (d && fs.existsSync(d)) chromePath = d;
+        }
+        if (chromePath && fs.existsSync(chromePath)) {
+          execFile(chromePath, [url]);
+          return { success: true };
+        }
+        return { success: false, message: '未找到 Chrome 浏览器' };
+      }
+    } catch (e) {
+      return { success: false, message: `打开浏览器失败: ${e}` };
+    }
   });
 
   logger.info('IPC 处理器已注册');

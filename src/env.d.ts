@@ -220,11 +220,12 @@ interface MatrixFlowAPI {
 
   browser: {
     openUrl: (url: string) => Promise<IpcResult<void>>;
+    openAccountBrowser: (accountId: string, url: string) => Promise<IpcResult<void>>;
     validatePath: (filePath: string) => Promise<{ valid: boolean; version?: string; error?: string }>;
   };
 
   dialog: {
-    openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
+    openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }) => Promise<string | string[] | null>;
   };
 
   material: {
