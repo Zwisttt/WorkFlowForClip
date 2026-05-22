@@ -9,6 +9,7 @@ import type {
 } from './services/types/publish';
 import type { PlatformConfig, PlatformCapabilities, CookieResult } from './platform/base/types';
 import type { PrePublishContext, PrePublishCheckResult, RuleOptimizationContext, RuleOptimizationResult, CostRecord } from './ai/types';
+import type { Material, MaterialGroup, ListQuery, ListResult, BatchDeleteResult } from './services/types/material';
 
 type Invoke<T> = Promise<IpcResult<T>>;
 
@@ -16,6 +17,7 @@ const ALLOWED_CHANNELS = new Set([
   'publish:status',
   'task:progress',
   'task:status-change',
+  'account:login-status',
   'account:login-status-updated',
   'account:login-success',
   'account:login-failed',
@@ -24,8 +26,12 @@ const ALLOWED_CHANNELS = new Set([
   'account:login-blocked',
   'account:login-queued',
   'account:network-slow',
+  'browser-address:url-change',
+  'browser-address:loading-state',
+  'browser-address:navigation-state',
   'update:status',
   'update:progress',
+  'material:upload-progress',
 ]);
 
 const api = {
@@ -77,6 +83,8 @@ const api = {
     create: (data: { platform: string; groupId?: string }) =>
       ipcRenderer.invoke('accounts:create', data),
     delete: (id: string) => ipcRenderer.invoke('accounts:delete', id),
+    updateRemark: (id: string, remark: string) => ipcRenderer.invoke('accounts:updateRemark', id, remark),
+    setGroup: (accountId: string, groupId: string, action: 'add' | 'remove') => ipcRenderer.invoke('accounts:setGroup', { accountId, groupId, action }),
     login: (accountId: string) => ipcRenderer.invoke('accounts:login', accountId),
     checkCookie: (accountId: string) =>
       ipcRenderer.invoke('accounts:checkCookie', accountId),
@@ -285,14 +293,58 @@ const api = {
       ipcRenderer.invoke('fingerprint:generateFromSeed', { seed }),
   },
 
+  ipLimit: {
+    get: () =>
+      ipcRenderer.invoke('ipLimit:get'),
+    save: (settings: Record<string, unknown>) =>
+      ipcRenderer.invoke('ipLimit:save', settings),
+    check: (platform: string) =>
+      ipcRenderer.invoke('ipLimit:check', { platform }),
+  },
+
+  aiRisk: {
+    getSettings: () =>
+      ipcRenderer.invoke('ai-risk:getSettings'),
+    updateSettings: (settings: Record<string, unknown>) =>
+      ipcRenderer.invoke('ai-risk:updateSettings', settings),
+    assess: (context: { platform: string; sameIPCount: number; limit: number; failedLogins?: number; accountAgeDays?: number }) =>
+      ipcRenderer.invoke('ai-risk:assess', context),
+  },
+
   browser: {
     validatePath: (filePath: string): Promise<{ valid: boolean; version?: string; error?: string }> =>
       ipcRenderer.invoke('browser:validatePath', filePath),
+    openUrl: (url: string): Invoke<void> =>
+      ipcRenderer.invoke('browser:openUrl', url),
   },
 
   dialog: {
     openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> =>
       ipcRenderer.invoke('dialog:openFile', options),
+  },
+
+  material: {
+    list: (query?: ListQuery): Invoke<ListResult> =>
+      ipcRenderer.invoke('material:list', query),
+    get: (id: string): Invoke<Material | null> =>
+      ipcRenderer.invoke('material:get', id),
+    upload: (filePath: string, groupId?: string, title?: string, description?: string): Invoke<Material> =>
+      ipcRenderer.invoke('material:upload', { filePath, groupId, title, description }),
+    delete: (id: string): Invoke<void> =>
+      ipcRenderer.invoke('material:delete', id),
+    batchDelete: (ids: string[]): Invoke<BatchDeleteResult> =>
+      ipcRenderer.invoke('material:batchDelete', ids),
+    download: (ids: string[], targetDir: string): Invoke<void> =>
+      ipcRenderer.invoke('material:download', ids, targetDir),
+  },
+
+  materialGroup: {
+    list: (): Invoke<MaterialGroup[]> =>
+      ipcRenderer.invoke('materialGroup:list'),
+    create: (name: string, color?: string): Invoke<MaterialGroup> =>
+      ipcRenderer.invoke('materialGroup:create', name, color),
+    delete: (id: string): Invoke<void> =>
+      ipcRenderer.invoke('materialGroup:delete', id),
   },
 
   update: {

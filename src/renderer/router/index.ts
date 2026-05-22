@@ -26,6 +26,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '内容库', icon: 'Folder' },
       },
       {
+        path: 'materials',
+        name: 'Materials',
+        component: () => import('@/renderer/views/Materials.vue'),
+        meta: { title: '素材管理', icon: 'Picture' },
+      },
+      {
         path: 'publish',
         name: 'Publish',
         component: () => import('@/renderer/views/Publish.vue'),

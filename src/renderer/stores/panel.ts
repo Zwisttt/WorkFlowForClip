@@ -1,32 +1,70 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 
+export type BrowserMode = 'embedded' | 'external_chrome' | 'external_fingerprint';
+
 interface PanelInfo {
   id: string;
   accountId: string;
   platform: string;
   nickname: string;
+  browser_mode?: BrowserMode;
 }
 
 interface Account {
   id: string;
   platform: string;
   nickname?: string;
+  avatar?: string;
+  status?: 'online' | 'offline' | 'expired';
+  browser_mode?: BrowserMode;
+  cookieValid?: boolean;
 }
 
 export const usePanelStore = defineStore('panel', () => {
   const panels = ref<PanelInfo[]>([]);
   const availableAccounts = ref<Account[]>([]);
   const focusedPanelId = ref<string | null>(null);
+  const loading = ref(false);
   const maxPanels = 10;
 
+  function getAccountBrowserType(account: Account): BrowserMode {
+    return account.browser_mode ?? 'embedded';
+  }
+
+  function isExternalBrowser(account: Account): boolean {
+    return getAccountBrowserType(account) !== 'embedded';
+  }
+
+  const openedAccountIds = computed(() => panels.value.map(p => p.accountId));
+
+  const accountsByPlatform = computed(() => {
+    const groups: Record<string, Account[]> = {
+      douyin: [],
+      xiaohongshu: [],
+      wechat: [],
+      kuaishou: [],
+    };
+
+    availableAccounts.value.forEach((account) => {
+      if (groups[account.platform]) {
+        groups[account.platform].push(account);
+      }
+    });
+
+    return groups;
+  });
+
   async function loadAvailableAccounts() {
+    loading.value = true;
     try {
       const accounts = await window.matrixflow.accounts.list();
       availableAccounts.value = accounts || [];
     } catch (error) {
       console.error('加载账号列表失败:', error);
       availableAccounts.value = [];
+    } finally {
+      loading.value = false;
     }
   }
 
@@ -35,14 +73,25 @@ export const usePanelStore = defineStore('panel', () => {
       return null;
     }
 
+    const existing = panels.value.find(p => p.accountId === accountId);
+    if (existing) {
+      focusedPanelId.value = existing.id;
+      return existing;
+    }
+
+    const account = availableAccounts.value.find(a => a.id === accountId);
+    const browserMode = account ? getAccountBrowserType(account) : 'embedded';
+
     try {
       const result = await window.matrixflow.panel.open(accountId);
+
       if (result.success && result.data) {
         const panel: PanelInfo = {
           id: result.data.id,
           accountId: result.data.accountId,
           platform: result.data.platform,
           nickname: result.data.nickname,
+          browser_mode: browserMode,
         };
         panels.value.push(panel);
         focusedPanelId.value = panel.id;
@@ -58,6 +107,7 @@ export const usePanelStore = defineStore('panel', () => {
   async function closePanel(panelId: string) {
     try {
       await window.matrixflow.panel.close(panelId);
+
       panels.value = panels.value.filter(p => p.id !== panelId);
       if (focusedPanelId.value === panelId) {
         focusedPanelId.value = panels.value.length > 0 ? panels.value[0].id : null;
@@ -67,9 +117,20 @@ export const usePanelStore = defineStore('panel', () => {
     }
   }
 
+  async function closeAllPanels() {
+    for (const panel of panels.value) {
+      await closePanel(panel.id);
+    }
+  }
+
   async function focusPanel(panelId: string) {
     try {
-      await window.matrixflow.panel.focus(panelId);
+      const panel = panels.value.find(p => p.id === panelId);
+
+      if (panel?.browser_mode === 'embedded') {
+        await window.matrixflow.panel.focus(panelId);
+      }
+
       focusedPanelId.value = panelId;
     } catch (error) {
       console.error('聚焦面板失败:', error);
@@ -77,6 +138,7 @@ export const usePanelStore = defineStore('panel', () => {
   }
 
   async function loadPanels() {
+    loading.value = true;
     try {
       const result = await window.matrixflow.panel.list();
       if (result.success && result.data) {
@@ -85,6 +147,7 @@ export const usePanelStore = defineStore('panel', () => {
           accountId: p.accountId,
           platform: p.platform,
           nickname: p.nickname,
+          browser_mode: p.browser_mode ?? 'embedded',
         }));
         if (panels.value.length > 0) {
           focusedPanelId.value = panels.value[0].id;
@@ -92,6 +155,8 @@ export const usePanelStore = defineStore('panel', () => {
       }
     } catch (error) {
       console.error('加载面板列表失败:', error);
+    } finally {
+      loading.value = false;
     }
   }
 
@@ -99,10 +164,16 @@ export const usePanelStore = defineStore('panel', () => {
     panels,
     availableAccounts,
     focusedPanelId,
+    loading,
     maxPanels,
+    openedAccountIds,
+    accountsByPlatform,
+    getAccountBrowserType,
+    isExternalBrowser,
     loadAvailableAccounts,
     openPanel,
     closePanel,
+    closeAllPanels,
     focusPanel,
     loadPanels,
   };

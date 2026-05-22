@@ -56,6 +56,8 @@ interface MatrixFlowAPI {
     list: () => Promise<any[]>;
     create: (data: any) => Promise<any>;
     delete: (id: string) => Promise<any>;
+    updateRemark: (id: string, remark: string) => Promise<IpcResult<void>>;
+    setGroup: (accountId: string, groupId: string, action: 'add' | 'remove') => Promise<{ success: boolean; message?: string }>;
     login: (accountId: string) => Promise<any>;
     checkCookie: (accountId: string) => Promise<any>;
     getQRCode: (accountId: string) => Promise<any>;
@@ -195,6 +197,12 @@ interface MatrixFlowAPI {
     generateFromSeed: (seed: number) => Promise<IpcResult<Partial<FingerprintTemplate>>>;
   };
 
+  ipLimit: {
+    get: () => Promise<IpcResult<any>>;
+    save: (settings: Record<string, unknown>) => Promise<IpcResult<null>>;
+    check: (platform: string) => Promise<IpcResult<{ platformCount: number; platformLimit: number; exceeded: boolean }>>;
+  };
+
   proxy: {
     list: () => Promise<IpcResult<any[]>>;
     get: (id: string) => Promise<IpcResult<any>>;
@@ -204,8 +212,34 @@ interface MatrixFlowAPI {
     check: (id: string) => Promise<IpcResult<{ success: boolean; message: string; latency?: number }>>;
   };
 
+  aiRisk: {
+    getSettings: () => Promise<any>;
+    updateSettings: (settings: any) => Promise<{ success: boolean }>;
+    assess: (context: { platform: string; sameIPCount: number; limit: number }) => Promise<any>;
+  };
+
+  browser: {
+    openUrl: (url: string) => Promise<IpcResult<void>>;
+    validatePath: (filePath: string) => Promise<{ valid: boolean; version?: string; error?: string }>;
+  };
+
   dialog: {
     openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
+  };
+
+  material: {
+    list: (query?: any) => Promise<IpcResult<any>>;
+    get: (id: string) => Promise<IpcResult<any>>;
+    upload: (filePath: string, groupId?: string, title?: string, description?: string) => Promise<IpcResult<any>>;
+    delete: (id: string) => Promise<IpcResult<void>>;
+    batchDelete: (ids: string[]) => Promise<IpcResult<{ success: string[]; failed: string[] }>>;
+    download: (ids: string[], targetDir: string) => Promise<IpcResult<void>>;
+  };
+
+  materialGroup: {
+    list: () => Promise<IpcResult<any[]>>;
+    create: (name: string, color?: string) => Promise<IpcResult<any>>;
+    delete: (id: string) => Promise<IpcResult<void>>;
   };
 
   runPoc: (type: string) => Promise<unknown>;

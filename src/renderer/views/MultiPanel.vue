@@ -1,311 +1,187 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
+import { Monitor } from '@element-plus/icons-vue';
 import { usePanelStore } from '@/stores/panel';
+import PanelSidebar from '@/renderer/components/panel/PanelSidebar.vue';
+import BrowserTabs from '@/renderer/components/panel/BrowserTabs.vue';
+import BrowserContent from '@/renderer/components/panel/BrowserContent.vue';
+import Loading from '@/renderer/components/common/Loading.vue';
+import Empty from '@/renderer/components/common/Empty.vue';
 
 const panelStore = usePanelStore();
 
 const activePanels = computed(() => panelStore.panels);
-const selectedAccountId = ref<string>('');
+const activePanelId = computed(() => panelStore.focusedPanelId);
+const activePanel = computed(() => 
+  activePanels.value.find(p => p.id === activePanelId.value) || null
+);
 
 onMounted(async () => {
   await panelStore.loadAvailableAccounts();
   await panelStore.loadPanels();
 });
 
-async function openPanel() {
-  if (!selectedAccountId.value) {
-    ElMessage.warning('请选择账号');
-    return;
-  }
-
-  if (activePanels.value.length >= panelStore.maxPanels) {
-    ElMessage.warning(`最多同时打开 ${panelStore.maxPanels} 个面板`);
-    return;
-  }
-
-  const result = await panelStore.openPanel(selectedAccountId.value);
+async function handleSelectAccount(accountId: string) {
+  const result = await panelStore.openPanel(accountId);
   if (result) {
     ElMessage.success(`已打开 ${result.nickname} 的面板`);
-    selectedAccountId.value = '';
-  } else {
-    ElMessage.error('打开面板失败');
+  } else if (panelStore.panels.length >= panelStore.maxPanels) {
+    ElMessage.warning(`最多同时打开 ${panelStore.maxPanels} 个面板`);
   }
 }
 
-function closePanel(panelId: string) {
+function handleCloseTab(panelId: string) {
   panelStore.closePanel(panelId);
 }
 
-function focusPanel(panelId: string) {
+function handleCloseAllTabs() {
+  panelStore.panels.forEach(p => panelStore.closePanel(p.id));
+}
+
+function handleSelectTab(panelId: string) {
   panelStore.focusPanel(panelId);
 }
 
-function getPlatformLabel(platform: string): string {
-  const labels: Record<string, string> = {
-    douyin: '抖音',
-    xiaohongshu: '小红书',
-    wechat: '视频号',
-    kuaishou: '快手',
-  };
-  return labels[platform] || platform;
+function handleRefresh() {
+  panelStore.loadAvailableAccounts();
+}
+
+function handleAddAccount() {
+  ElMessage.info('请在账号管理页面添加账号');
+}
+
+function handleOpenDevTools() {
+  if (activePanelId.value) {
+    ElMessage.info('开发者工具功能开发中');
+  }
 }
 </script>
 
 <template>
   <div class="multi-panel-view">
-    <div class="panel-toolbar">
-      <el-select v-model="selectedAccountId" placeholder="选择账号" style="width: 200px">
-        <el-option
-          v-for="account in panelStore.availableAccounts"
-          :key="account.id"
-          :label="`${account.nickname || account.platform} (${getPlatformLabel(account.platform)})`"
-          :value="account.id"
+    <!-- 左侧账号面板 -->
+    <PanelSidebar
+      :accounts="panelStore.availableAccounts"
+      :active-panel-ids="panelStore.panels.map(p => p.accountId)"
+      :loading="false"
+      @refresh="handleRefresh"
+      @add-account="handleAddAccount"
+      @select-account="handleSelectAccount"
+    />
+
+    <!-- 右侧浏览器区域 -->
+    <div class="multi-panel-view__main">
+      <!-- 有打开的面板 -->
+      <template v-if="activePanels.length > 0">
+        <!-- 标签栏 -->
+        <BrowserTabs
+          :panels="activePanels"
+          :active-panel-id="activePanelId"
+          @select="handleSelectTab"
+          @close="handleCloseTab"
+          @close-all="handleCloseAllTabs"
         />
-      </el-select>
 
-      <el-button type="primary" @click="openPanel" :disabled="!selectedAccountId">
-        打开面板
-      </el-button>
+        <!-- 内容区 -->
+        <BrowserContent
+          :panel="activePanel"
+          @open-dev-tools="handleOpenDevTools"
+        />
+      </template>
 
-      <span class="panel-count">
-        已打开 {{ activePanels.length }} / {{ panelStore.maxPanels }} 个面板
-      </span>
-    </div>
-
-    <div class="panel-tabs" v-if="activePanels.length > 0">
-      <div
-        v-for="panel in activePanels"
-        :key="panel.id"
-        class="panel-tab"
-        :class="{ active: panel.id === panelStore.focusedPanelId }"
-        @click="focusPanel(panel.id)"
-      >
-        <span class="platform-icon">{{ panel.platform.slice(0, 2).toUpperCase() }}</span>
-        <span class="nickname">{{ panel.nickname }}</span>
-        <el-button
-          type="text"
-          size="small"
-          @click.stop="closePanel(panel.id)"
-          class="close-btn"
-        >
-          ×
-        </el-button>
-      </div>
-    </div>
-
-    <div class="panel-content" v-if="activePanels.length > 0">
-      <div class="browser-placeholder">
-        <div class="placeholder-icon">
-          <el-icon size="48"><Monitor /></el-icon>
-        </div>
-        <p class="placeholder-title">多开面板已启动</p>
-        <p class="placeholder-hint">
-          当前已打开 {{ activePanels.length }} 个面板，面板内容在独立浏览器窗口中展示
-        </p>
-        <div class="panel-list">
-          <div
-            v-for="panel in activePanels"
-            :key="panel.id"
-            class="panel-item"
-            :class="{ active: panel.id === panelStore.focusedPanelId }"
-            @click="focusPanel(panel.id)"
-          >
-            <span class="platform-badge">{{ getPlatformLabel(panel.platform) }}</span>
-            <span class="panel-name">{{ panel.nickname }}</span>
+      <!-- 空状态 -->
+      <template v-else>
+        <div class="multi-panel-view__empty">
+          <div class="empty-illustration">
+            <el-icon :size="80"><Monitor /></el-icon>
+          </div>
+          <h3 class="empty-title">选择账号开始矩阵管理</h3>
+          <p class="empty-hint">从左侧面板选择账号，打开创作者中心</p>
+          <div class="empty-features">
+            <div class="feature-item">
+              <span class="feature-dot" />
+              <span>支持抖音、小红书、视频号、快手四大平台</span>
+            </div>
+            <div class="feature-item">
+              <span class="feature-dot" />
+              <span>内嵌浏览器与外部浏览器自由切换</span>
+            </div>
+            <div class="feature-item">
+              <span class="feature-dot" />
+              <span>最多同时管理 10 个账号面板</span>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-
-    <div class="panel-empty" v-else>
-      <div class="empty-icon">
-        <el-icon size="64"><Grid /></el-icon>
-      </div>
-      <p>暂无打开的面板</p>
-      <p class="hint">选择账号后点击"打开面板"开始多开操作</p>
-      <p class="hint-secondary">支持同时打开最多 10 个账号面板</p>
+      </template>
     </div>
   </div>
 </template>
 
-<script lang="ts">
-import { Monitor, Grid } from '@element-plus/icons-vue';
-
-export default {
-  components: {
-    Monitor,
-    Grid,
-  },
-};
-</script>
-
 <style scoped>
 .multi-panel-view {
-  padding: 20px;
+  display: flex;
   height: 100%;
+  background: var(--color-bg-page);
+}
+
+.multi-panel-view__main {
+  flex: 1;
   display: flex;
   flex-direction: column;
-}
-
-.panel-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 16px;
-  flex-shrink: 0;
-}
-
-.panel-count {
-  color: var(--el-text-color-secondary);
-  font-size: var(--font-size-base);
-}
-
-.panel-tabs {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-  flex-shrink: 0;
-}
-
-.panel-tab {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.panel-tab:hover {
-  border-color: var(--el-color-primary);
-}
-
-.panel-tab.active {
-  background: var(--el-color-primary-light-9);
-  border-color: var(--el-color-primary);
-}
-
-.platform-icon {
-  font-size: var(--font-size-xs);
-  font-weight: bold;
-  color: var(--el-color-primary);
-}
-
-.nickname {
-  font-size: var(--font-size-base);
-}
-
-.close-btn {
-  padding: 0;
-  width: 20px;
-  height: 20px;
-}
-
-.panel-content {
-  flex: 1;
-  min-height: 0;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
+  min-width: 0;
   overflow: hidden;
-  background: var(--el-bg-color);
 }
 
-.browser-placeholder {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
-  text-align: center;
-}
-
-.placeholder-icon {
-  color: var(--el-color-primary);
-  margin-bottom: 16px;
-}
-
-.placeholder-title {
-  font-size: var(--font-size-xl);
-  font-weight: 500;
-  margin-bottom: 8px;
-}
-
-.placeholder-hint {
-  color: var(--el-text-color-secondary);
-  margin-bottom: 24px;
-}
-
-.panel-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
-}
-
-.panel-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 12px 16px;
-  background: var(--el-bg-color-page);
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  min-width: 120px;
-}
-
-.panel-item:hover {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-}
-
-.panel-item.active {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 2px var(--el-color-primary-light-7);
-}
-
-.platform-badge {
-  font-size: var(--font-size-xs);
-  color: var(--el-color-primary);
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-
-.panel-name {
-  font-size: var(--font-size-base);
-  color: var(--el-text-color-primary);
-}
-
-.panel-empty {
+/* ── 空状态 ── */
+.multi-panel-view__empty {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  padding: var(--space-8);
   text-align: center;
-  color: var(--el-text-color-secondary);
 }
 
-.empty-icon {
-  color: var(--el-border-color);
-  margin-bottom: 16px;
+.empty-illustration {
+  color: var(--color-text-placeholder);
+  margin-bottom: var(--space-6);
 }
 
-.panel-empty .hint {
-  font-size: var(--font-size-xs);
-  margin-top: 8px;
+.empty-title {
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-2);
 }
 
-.hint-secondary {
-  font-size: var(--font-size-2xs);
-  color: var(--el-text-color-placeholder);
-  margin-top: 4px;
+.empty-hint {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-6);
+}
+
+.empty-features {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 320px;
+}
+
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.feature-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  flex-shrink: 0;
 }
 </style>

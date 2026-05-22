@@ -104,6 +104,7 @@ const menuItems: NavItem[] = [
     label: '素材',
     icon: Folder,
     children: [
+      { id: 'content-materials', label: '素材管理', path: '/materials' },
       { id: 'content-videos', label: '视频分组', path: '/content' },
       { id: 'content-images', label: '图文分组', path: '/content' },
     ],

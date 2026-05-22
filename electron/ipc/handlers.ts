@@ -1,4 +1,6 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron';
+import { execFile } from 'child_process';
+import * as fs from 'fs';
 import { PlatformRegistry } from '../platform/base/PlatformRegistry';
 import { EventBus } from '../core/EventBus';
 import { Logger } from '../core/Logger';
@@ -18,7 +20,11 @@ import { draftService } from '../services/DraftService';
 import { commentService } from '../services/CommentService';
 import { licenseService } from '../services/LicenseService';
 import { proxyService } from '../services/ProxyService';
+import { materialService } from '../services/MaterialService';
 import { fingerprintTemplateRepo } from '../data/repositories/FingerprintTemplateRepository';
+import { getIPLimitSettingsService } from '../services/ip-limit-settings';
+import { getAIRiskSettingsService } from '../services/ai-risk-settings';
+import type { RiskContext } from '../services/ai-risk-settings';
 import {
   generateFingerprintSeed,
   getDefaultPlatform,
@@ -33,6 +39,7 @@ import { autoUpdaterService } from '../core/AutoUpdater';
 import { notificationService } from '../core/NotificationService';
 import type { PrePublishContext, RuleOptimizationContext } from '../ai/types';
 import type { Account } from '../services/types/account';
+import type { Material, MaterialGroup, ListQuery, ListResult, BatchDeleteResult } from '../services/types/material';
 import type {
   PublishTask,
   PublishResult,
@@ -154,6 +161,10 @@ const CHANNEL = {
   FINGERPRINT_GENERATE_HARDWARE: 'fingerprint:generateHardware',
   FINGERPRINT_GENERATE_FROM_SEED: 'fingerprint:generateFromSeed',
 
+  IP_LIMIT_GET: 'ipLimit:get',
+  IP_LIMIT_SAVE: 'ipLimit:save',
+  IP_LIMIT_CHECK: 'ipLimit:check',
+
   ACCOUNT_SET_FINGERPRINT: 'account:setFingerprint',
   ACCOUNT_SET_PROXY: 'account:setProxy',
 
@@ -176,7 +187,19 @@ const CHANNEL = {
   PUBLISH_HISTORY: 'publish:history',
   PLATFORM_COVER_RATIOS: 'platform:coverRatios',
 
+  MATERIAL_LIST: 'material:list',
+  MATERIAL_GET: 'material:get',
+  MATERIAL_UPLOAD: 'material:upload',
+  MATERIAL_DELETE: 'material:delete',
+  MATERIAL_BATCH_DELETE: 'material:batchDelete',
+  MATERIAL_DOWNLOAD: 'material:download',
+
+  MATERIAL_GROUP_LIST: 'materialGroup:list',
+  MATERIAL_GROUP_CREATE: 'materialGroup:create',
+  MATERIAL_GROUP_DELETE: 'materialGroup:delete',
+
   DIALOG_OPEN_FILE: 'dialog:openFile',
+  BROWSER_OPEN_URL: 'browser:openUrl',
 } as const;
 
 export interface IpcResult<T = unknown> {
@@ -336,7 +359,51 @@ export function registerIpcHandlers(): void {
   // ─── 兼容旧频道 ────────────────────────────────────────
 
   ipcMain.handle(CHANNEL.ACCOUNTS_LIST, async () => {
-    return accountService.getAllAccounts();
+    const db = getDatabase();
+    const rows = db.prepare('SELECT * FROM accounts ORDER BY created_at DESC').all() as any[];
+    const proxyMap = new Map<string, any>();
+    try {
+      const proxies = db.prepare('SELECT id, name, protocol, host, port FROM proxies').all() as any[];
+      proxies.forEach(p => proxyMap.set(p.id, p));
+    } catch {}
+    const groupMap = new Map<string, any>();
+    try {
+      const groups = db.prepare('SELECT id, name, color FROM groups').all() as any[];
+      groups.forEach(g => groupMap.set(g.id, g));
+    } catch {}
+    const accountGroupMap = new Map<string, string[]>();
+    try {
+      const ags = db.prepare('SELECT account_id, group_id FROM account_groups').all() as any[];
+      ags.forEach((ag: any) => {
+        const list = accountGroupMap.get(ag.account_id) || [];
+        list.push(ag.group_id);
+        accountGroupMap.set(ag.account_id, list);
+      });
+    } catch {}
+    return rows.map(row => {
+      const gids = accountGroupMap.get(row.id) || [];
+      const gInfos = gids.map(gid => groupMap.get(gid)).filter(Boolean);
+      return {
+        id: row.id,
+        platform: row.platform,
+        nickname: row.nickname || row.name || '',
+        avatar: row.avatar_url || row.avatar || undefined,
+        cookieValid: row.cookie_valid === 1,
+        lastLogin: row.last_login || undefined,
+        groupId: row.group_id || undefined,
+        fingerprintId: row.fingerprint_id || undefined,
+        proxyId: row.proxy_id || undefined,
+        browserMode: row.browser_mode || 'embedded',
+        status: row.cookie_valid === 1 ? 'online' : 'offline',
+        remark: row.remark || undefined,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        proxyInfo: row.proxy_id ? proxyMap.get(row.proxy_id) || null : null,
+        groupIds: gids,
+        groupInfos: gInfos,
+        homepageUrl: row.homepage_url || undefined,
+      };
+    });
   });
 
   ipcMain.handle(CHANNEL.ACCOUNTS_CREATE, async (_e, data: { platform: string; groupId?: string }) => {
@@ -351,6 +418,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNEL.ACCOUNTS_DELETE, async (_e, id: string) => {
     try {
       await accountService.deleteAccount(id);
+      return { success: true };
+    } catch (error) {
+      return { success: false, message: `${error}` };
+    }
+  });
+
+  ipcMain.handle('accounts:updateRemark', async (_e, id: string, remark: string) => {
+    try {
+      const db = getDatabase();
+      db.prepare('UPDATE accounts SET remark = ?, updated_at = datetime(\'now\') WHERE id = ?').run(remark, id);
       return { success: true };
     } catch (error) {
       return { success: false, message: `${error}` };
@@ -554,7 +631,14 @@ export function registerIpcHandlers(): void {
       const db = getDatabase();
       const stmt = db.prepare('SELECT value FROM platform_configs WHERE key = ?');
       const row = stmt.get(key) as any;
-      return row?.value || null;
+      if (row?.value) {
+        try {
+          return JSON.parse(row.value);
+        } catch {
+          return row.value;
+        }
+      }
+      return null;
     } catch {
       return null;
     }
@@ -911,6 +995,30 @@ export function registerIpcHandlers(): void {
     return ok(generateTemplateFromSeed(seed));
   });
 
+  ipcMain.handle(CHANNEL.IP_LIMIT_GET, async () => {
+    const service = getIPLimitSettingsService();
+    const settings = await service.load();
+    return ok(settings);
+  });
+
+  ipcMain.handle(CHANNEL.IP_LIMIT_SAVE, async (_, settings: Record<string, unknown>) => {
+    const service = getIPLimitSettingsService();
+    await service.save(settings as any);
+    return ok(null);
+  });
+
+  ipcMain.handle(CHANNEL.IP_LIMIT_CHECK, async (_, { platform }: { platform: string }) => {
+    const service = getIPLimitSettingsService();
+    const limit = service.getLimit(platform);
+    const accounts = await accountService.getAllAccounts();
+    const platformAccounts = accounts.filter((a: Account) => a.platform === platform);
+    return ok({
+      platformCount: platformAccounts.length,
+      platformLimit: limit,
+      exceeded: platformAccounts.length >= limit,
+    });
+  });
+
   ipcMain.handle(CHANNEL.ACCOUNT_SET_FINGERPRINT, async (_, { accountId, fingerprintId }: { accountId: string; fingerprintId: string | null }) => {
     return wrap(async () => {
       await accountService.setFingerprint(accountId, fingerprintId);
@@ -923,6 +1031,20 @@ export function registerIpcHandlers(): void {
       await accountService.setProxy(accountId, proxyId);
       return undefined;
     });
+  });
+
+  ipcMain.handle('accounts:setGroup', async (_, { accountId, groupId, action }: { accountId: string; groupId: string; action: 'add' | 'remove' }) => {
+    try {
+      const db = getDatabase();
+      if (action === 'remove') {
+        db.prepare('DELETE FROM account_groups WHERE account_id = ? AND group_id = ?').run(accountId, groupId);
+      } else {
+        db.prepare('INSERT OR IGNORE INTO account_groups (account_id, group_id) VALUES (?, ?)').run(accountId, groupId);
+      }
+      return { success: true };
+    } catch (error) {
+      return { success: false, message: `${error}` };
+    }
   });
 
   ipcMain.handle(CHANNEL.UPDATE_CHECK, async () => {
@@ -1003,6 +1125,108 @@ export function registerIpcHandlers(): void {
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
+  });
+
+  ipcMain.handle(CHANNEL.BROWSER_OPEN_URL, async (_e, url: string): Promise<IpcResult<null>> => {
+    let chromePath: string | null = null;
+
+    try {
+      const db = getDatabase();
+      const stmt = db.prepare('SELECT value FROM platform_configs WHERE key = ?');
+      const row = stmt.get('chromePath') as any;
+      if (row?.value) {
+        try {
+          chromePath = JSON.parse(row.value);
+        } catch {
+          chromePath = row.value;
+        }
+      }
+    } catch {
+    }
+
+    if (!chromePath || !fs.existsSync(chromePath)) {
+      const defaultPath = (() => {
+        switch (process.platform) {
+          case 'darwin': return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+          case 'win32': return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+          case 'linux': return '/usr/bin/google-chrome';
+          default: return '';
+        }
+      })();
+
+      if (defaultPath && fs.existsSync(defaultPath)) {
+        chromePath = defaultPath;
+      }
+    }
+
+    if (chromePath && fs.existsSync(chromePath)) {
+      try {
+        execFile(chromePath, [url]);
+        return { success: true };
+      } catch (e) {
+        return { success: false, message: `启动 Chrome 失败: ${e}` };
+      }
+    }
+
+    return { success: false, message: 'Chrome 浏览器路径未配置，请在系统设置中配置' };
+  });
+
+  // ─── 素材管理 ──────────────────────────────────────────
+
+  ipcMain.handle(CHANNEL.MATERIAL_LIST, async (_e, query?: ListQuery): Promise<IpcResult<ListResult>> => {
+    return wrap(() => materialService.list(query));
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_GET, async (_e, id: string): Promise<IpcResult<Material | null>> => {
+    return wrap(() => materialService.get(id));
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_UPLOAD, async (_e, payload: { filePath: string; groupId?: string; title?: string; description?: string }): Promise<IpcResult<Material>> => {
+    return wrap(() => materialService.upload(payload.filePath, payload.groupId, payload.title, payload.description));
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_DELETE, async (_e, id: string): Promise<IpcResult<void>> => {
+    return wrap(async () => { await materialService.delete(id); });
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_BATCH_DELETE, async (_e, ids: string[]): Promise<IpcResult<BatchDeleteResult>> => {
+    return wrap(() => materialService.batchDelete(ids));
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_DOWNLOAD, async (_e, ids: string[], targetDir: string): Promise<IpcResult<void>> => {
+    return wrap(async () => { await materialService.download(ids, targetDir); });
+  });
+
+  // ─── 素材分组 ──────────────────────────────────────────
+
+  ipcMain.handle(CHANNEL.MATERIAL_GROUP_LIST, async (): Promise<IpcResult<MaterialGroup[]>> => {
+    return wrap(() => materialService.listGroups());
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_GROUP_CREATE, async (_e, name: string, color?: string): Promise<IpcResult<MaterialGroup>> => {
+    return wrap(() => materialService.createGroup(name, color));
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_GROUP_DELETE, async (_e, id: string): Promise<IpcResult<void>> => {
+    return wrap(async () => { await materialService.deleteGroup(id); });
+  });
+
+  // ─── AI 风险检测设置 ──────────────────────────────────────
+
+  ipcMain.handle('ai-risk:getSettings', async () => {
+    const service = getAIRiskSettingsService();
+    return service.get();
+  });
+
+  ipcMain.handle('ai-risk:updateSettings', async (_, settings: any) => {
+    const service = getAIRiskSettingsService();
+    await service.save(settings);
+    return { success: true };
+  });
+
+  ipcMain.handle('ai-risk:assess', async (_, context: RiskContext) => {
+    const service = getAIRiskSettingsService();
+    return service.assess(context);
   });
 
   logger.info('IPC 处理器已注册');
