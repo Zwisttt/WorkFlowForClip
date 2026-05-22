@@ -72,6 +72,7 @@
     <UploadDialog
       v-model="uploadDialogVisible"
       :groups="store.groups"
+      :current-group-id="store.currentGroupId"
       @upload="handleUpload"
     />
 
@@ -95,14 +96,14 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Upload } from '@element-plus/icons-vue';
-import { useMaterialsStore } from '../../stores/materials';
-import GroupSidebar from '../../components/materials/GroupSidebar.vue';
-import MaterialCard from '../../components/materials/MaterialCard.vue';
-import BatchActionBar from '../../components/materials/BatchActionBar.vue';
-import UploadDialog from '../../components/materials/UploadDialog.vue';
-import Loading from '../../components/common/Loading.vue';
-import Empty from '../../components/common/Empty.vue';
-import type { Material } from '../../stores/materials';
+import { useMaterialsStore } from '../stores/materials';
+import GroupSidebar from '../components/materials/GroupSidebar.vue';
+import MaterialCard from '../components/materials/MaterialCard.vue';
+import BatchActionBar from '../components/materials/BatchActionBar.vue';
+import UploadDialog from '../components/materials/UploadDialog.vue';
+import Loading from '../components/common/Loading.vue';
+import Empty from '../components/common/Empty.vue';
+import type { Material } from '../stores/materials';
 
 const store = useMaterialsStore();
 
@@ -162,6 +163,8 @@ async function handleUpload(payload: { filePath: string; groupId?: string; title
   const result = await store.uploadMaterial(payload.filePath, payload.groupId, payload.title, payload.description);
   if (result) {
     ElMessage.success('上传成功');
+    await store.fetchMaterials();
+    await store.fetchGroups();
   }
 }
 
