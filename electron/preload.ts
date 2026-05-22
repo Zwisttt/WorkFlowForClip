@@ -338,6 +338,8 @@ const api = {
       ipcRenderer.invoke('material:batchDelete', ids),
     download: (ids: string[], targetDir: string): Invoke<void> =>
       ipcRenderer.invoke('material:download', ids, targetDir),
+    moveToGroup: (ids: string[], groupId: string | null): Invoke<{ success: string[]; failed: string[] }> =>
+      ipcRenderer.invoke('material:moveToGroup', ids, groupId),
   },
 
   materialGroup: {

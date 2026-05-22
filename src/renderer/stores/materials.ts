@@ -154,6 +154,27 @@ export const useMaterialsStore = defineStore('materials', () => {
     }
   }
 
+  async function moveToGroup(ids: string[], groupId: string | null) {
+    if (!window.matrixflow) return { success: 0, failed: 0 };
+    try {
+      const result = await window.matrixflow.material.moveToGroup(ids, groupId);
+      if (result.success && result.data) {
+        const { success, failed } = result.data;
+        success.forEach((id: string) => {
+          const material = materials.value.find(m => m.id === id);
+          if (material) {
+            material.groupId = groupId || undefined;
+          }
+        });
+        return { success: success.length, failed: failed.length };
+      }
+      return { success: 0, failed: ids.length };
+    } catch (e) {
+      console.error('Move to group failed:', e);
+      return { success: 0, failed: ids.length };
+    }
+  }
+
   async function createGroup(name: string, color?: string) {
     if (!window.matrixflow) return null;
     try {
@@ -242,6 +263,7 @@ export const useMaterialsStore = defineStore('materials', () => {
     deleteMaterial,
     batchDelete,
     downloadMaterials,
+    moveToGroup,
     createGroup,
     deleteGroup,
     selectMaterial,

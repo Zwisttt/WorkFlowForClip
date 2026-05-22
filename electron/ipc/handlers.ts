@@ -194,6 +194,7 @@ const CHANNEL = {
   MATERIAL_DELETE: 'material:delete',
   MATERIAL_BATCH_DELETE: 'material:batchDelete',
   MATERIAL_DOWNLOAD: 'material:download',
+  MATERIAL_MOVE_TO_GROUP: 'material:moveToGroup',
 
   MATERIAL_GROUP_LIST: 'materialGroup:list',
   MATERIAL_GROUP_CREATE: 'materialGroup:create',
@@ -1201,7 +1202,11 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(CHANNEL.MATERIAL_DOWNLOAD, async (_e, ids: string[], targetDir: string): Promise<IpcResult<void>> => {
-    return wrap(async () => { await materialService.downloadMaterials(ids, targetDir); });
+    return wrap(async () => { await materialService.download(ids, targetDir); });
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_MOVE_TO_GROUP, async (_e, ids: string[], groupId: string | null): Promise<IpcResult<{ success: string[]; failed: string[] }>> => {
+    return wrap(() => materialService.moveToGroup(ids, groupId));
   });
 
   // ─── 素材分组 ──────────────────────────────────────────
@@ -1249,6 +1254,32 @@ export function registerIpcHandlers(): void {
         const partition = `persist:${accountId}`;
         const ses = session.fromPartition(partition);
 
+        const accountRow = db.prepare('SELECT platform FROM accounts WHERE id = ?').get(accountId) as any;
+        const platform = accountRow?.platform || '';
+        const cookiePath = path.join(process.cwd(), 'storage', 'cookies', `${platform}_${accountId}.json`);
+        try {
+          const raw = await fs.promises.readFile(cookiePath, 'utf-8');
+          const state = JSON.parse(raw);
+          if (Array.isArray(state.cookies)) {
+            for (const c of state.cookies) {
+              await ses.cookies.set({
+                url: c.secure ? `https://${c.domain.replace(/^\./, '')}` : `http://${c.domain.replace(/^\./, '')}`,
+                name: c.name,
+                value: c.value,
+                domain: c.domain,
+                path: c.path || '/',
+                secure: c.secure ?? false,
+                httpOnly: c.httpOnly ?? false,
+                sameSite: c.sameSite ?? 'lax',
+                expirationDate: c.expires > 0 ? c.expires : undefined,
+              });
+            }
+            logger.info(`已注入 ${state.cookies.length} 个 cookies 到 partition=${partition}`);
+          }
+        } catch (e) {
+          logger.warn(`注入 cookies 失败或文件不存在: ${cookiePath}`, e);
+        }
+
         const win = new BrowserWindow({
           width: 1200,
           height: 900,
@@ -1295,8 +1326,8 @@ export function registerIpcHandlers(): void {
         });
         contentView.webContents.on('did-finish-load', () => {
           addressBarView.webContents.send('browser-address:navigation-state',
-            contentView.webContents.canGoBack(),
-            contentView.webContents.canGoForward()
+            contentView.webContents.navigationHistory.canGoBack(),
+            contentView.webContents.navigationHistory.canGoForward()
           );
         });
 

@@ -238,12 +238,48 @@ export class MaterialService implements IMaterialService {
     return { success, failed };
   }
 
+  async moveToGroup(ids: string[], groupId: string | null): Promise<{ success: string[]; failed: string[] }> {
+    const success: string[] = [];
+    const failed: string[] = [];
+
+    const db = this.requireDatabase();
+    const now = new Date().toISOString();
+    const transaction = db.transaction(() => {
+      for (const id of ids) {
+        try {
+          db.prepare('UPDATE materials SET group_id = ?, updated_at = ? WHERE id = ?').run(groupId, now, id);
+          success.push(id);
+        } catch (err) {
+          logger.error(`移动素材失败: id=${id}`, err);
+          failed.push(id);
+        }
+      }
+    });
+
+    transaction();
+
+    logger.info(`批量移动完成: success=${success.length}, failed=${failed.length}`);
+    return { success, failed };
+  }
+
   // ─── 分组操作 ──────────────────────────────────────────
 
   async listGroups(): Promise<MaterialGroup[]> {
     const db = this.requireDatabase();
-    const rows = db.prepare('SELECT * FROM material_groups ORDER BY created_at ASC').all() as MaterialGroupRow[];
-    return rows.map((r) => this.rowToGroup(r));
+    const rows = db.prepare(`
+      SELECT g.*, COUNT(m.id) as count
+      FROM material_groups g
+      LEFT JOIN materials m ON m.group_id = g.id AND m.status = 'active'
+      GROUP BY g.id
+      ORDER BY g.created_at ASC
+    `).all() as (MaterialGroupRow & { count: number })[];
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      color: r.color || undefined,
+      count: r.count,
+      createdAt: new Date(r.created_at),
+    }));
   }
 
   async createGroup(name: string, color?: string): Promise<MaterialGroup> {

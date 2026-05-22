@@ -235,6 +235,7 @@ interface MatrixFlowAPI {
     delete: (id: string) => Promise<IpcResult<void>>;
     batchDelete: (ids: string[]) => Promise<IpcResult<{ success: string[]; failed: string[] }>>;
     download: (ids: string[], targetDir: string) => Promise<IpcResult<void>>;
+    moveToGroup: (ids: string[], groupId: string | null) => Promise<IpcResult<{ success: string[]; failed: string[] }>>;
   };
 
   materialGroup: {

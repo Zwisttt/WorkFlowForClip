@@ -173,7 +173,11 @@ async function handleBatchDownload() {
 }
 
 async function handleBatchMove(groupId: string | null) {
-  ElMessage.info('批量移动功能开发中');
+  const ids = Array.from(store.selectedIds);
+  const result = await store.moveToGroup(ids, groupId);
+  ElMessage.success(`成功移动 ${result.success} 个素材${result.failed > 0 ? `，${result.failed} 个失败` : ''}`);
+  store.clearSelection();
+  await store.fetchGroups();
 }
 
 async function handleBatchDelete() {
