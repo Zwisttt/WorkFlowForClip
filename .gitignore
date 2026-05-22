@@ -54,6 +54,15 @@ test-video.mp4
 # Serena
 .serena/
 
+# Sisyphus
+.sisyphus/
+
+# GStack
+.gstack/
+
+# Browser runtime data (Patchright)
+storage/
+
 # Runtime data (root level only)
 /data/
 
