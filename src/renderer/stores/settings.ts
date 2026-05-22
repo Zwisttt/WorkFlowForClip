@@ -14,7 +14,8 @@ export interface AppSettings {
   browserMode: 'embedded' | 'external_chrome' | 'external_fingerprint';
   chromePath: string;
   fingerprintBrowserPath: string;
-  cdpEndpoint: string;
+  chromeCdpEndpoint: string;
+  fingerprintCdpEndpoint: string;
   notificationEnabled: boolean;
   notificationSound: boolean;
   notificationMonitorAlerts: boolean;
@@ -35,7 +36,8 @@ const defaultSettings: AppSettings = {
   browserMode: 'embedded',
   chromePath: '',
   fingerprintBrowserPath: '',
-  cdpEndpoint: '',
+  chromeCdpEndpoint: '',
+  fingerprintCdpEndpoint: '',
   notificationEnabled: true,
   notificationSound: true,
   notificationMonitorAlerts: true,

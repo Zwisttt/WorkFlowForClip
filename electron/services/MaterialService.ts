@@ -307,7 +307,7 @@ export class MaterialService implements IMaterialService {
     const ext = path.extname(filePath).toLowerCase();
 
     for (const [type, config] of Object.entries(FILE_VALIDATION)) {
-      if (config.extensions.includes(ext)) {
+      if ((config.extensions as readonly string[]).includes(ext)) {
         const stats = fs.statSync(filePath);
         if (stats.size > config.maxSize) {
           return {
@@ -415,3 +415,5 @@ export class MaterialService implements IMaterialService {
     };
   }
 }
+
+export const materialService = MaterialService.getInstance();

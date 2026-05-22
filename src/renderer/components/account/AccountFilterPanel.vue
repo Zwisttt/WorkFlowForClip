@@ -3,7 +3,7 @@
     <!-- 平台筛选 -->
     <div class="filter-panel__section">
       <h4 class="filter-panel__title">平台</h4>
-      <ul class="filter-panel__tree">
+      <ul class="filter-panel__tree filter-panel__tree--scrollable">
         <li
           v-for="item in platformOptions"
           :key="item.value"
@@ -19,9 +19,9 @@
     </div>
 
     <!-- 分组筛选 -->
-    <div class="filter-panel__section">
+    <div class="filter-panel__section filter-panel__section--flex">
       <h4 class="filter-panel__title">分组</h4>
-      <ul class="filter-panel__tree">
+      <ul class="filter-panel__tree filter-panel__tree--scrollable filter-panel__tree--groups">
         <li
           class="filter-panel__item"
           :class="{ 'filter-panel__item--active': selectedGroup === '' }"
@@ -43,23 +43,6 @@
         </li>
       </ul>
     </div>
-
-    <!-- 状态筛选 -->
-    <div class="filter-panel__section">
-      <h4 class="filter-panel__title">状态</h4>
-      <ul class="filter-panel__tree">
-        <li
-          v-for="item in statusOptions"
-          :key="item.value"
-          class="filter-panel__item"
-          :class="{ 'filter-panel__item--active': selectedStatus === item.value }"
-          @click="handleStatusSelect(item.value)"
-        >
-          <span class="filter-panel__status-dot" :class="`filter-panel__status-dot--${item.value}`" />
-          <span class="filter-panel__label">{{ item.label }}</span>
-        </li>
-      </ul>
-    </div>
   </aside>
 </template>
 
@@ -75,12 +58,10 @@ const props = defineProps<{
 const emit = defineEmits<{
   'filter-platform': [value: string];
   'filter-group': [value: string];
-  'filter-status': [value: string];
 }>();
 
 const selectedPlatform = ref('');
 const selectedGroup = ref('');
-const selectedStatus = ref('');
 
 interface PlatformOption {
   value: string;
@@ -97,13 +78,6 @@ const platformOptions = computed<PlatformOption[]>(() => [
   { value: 'kuaishou', label: '快手', color: 'var(--color-plat-kuaishou)', count: props.platformCounts?.kuaishou },
 ]);
 
-const statusOptions = [
-  { value: '', label: '全部' },
-  { value: 'online', label: '在线' },
-  { value: 'offline', label: '离线' },
-  { value: 'expired', label: '已过期' },
-];
-
 function handlePlatformSelect(value: string) {
   selectedPlatform.value = value;
   emit('filter-platform', value);
@@ -112,11 +86,6 @@ function handlePlatformSelect(value: string) {
 function handleGroupSelect(value: string) {
   selectedGroup.value = value;
   emit('filter-group', value);
-}
-
-function handleStatusSelect(value: string) {
-  selectedStatus.value = value;
-  emit('filter-status', value);
 }
 </script>
 
@@ -129,15 +98,20 @@ function handleStatusSelect(value: string) {
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .filter-panel__section {
   padding: var(--space-4);
   border-bottom: 1px solid var(--color-border-light);
+  flex-shrink: 0;
 }
 
-.filter-panel__section:last-child {
+.filter-panel__section--flex {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border-bottom: none;
 }
 
@@ -148,6 +122,7 @@ function handleStatusSelect(value: string) {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0 0 var(--space-2) 0;
+  flex-shrink: 0;
 }
 
 .filter-panel__tree {
@@ -157,6 +132,35 @@ function handleStatusSelect(value: string) {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+.filter-panel__tree--scrollable {
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+}
+
+.filter-panel__tree--groups {
+  max-height: none;
+  flex: 1;
+}
+
+.filter-panel__tree--scrollable::-webkit-scrollbar {
+  width: 6px;
+}
+
+.filter-panel__tree--scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.filter-panel__tree--scrollable::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+.filter-panel__tree--scrollable::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-placeholder);
 }
 
 .filter-panel__item {
@@ -187,26 +191,6 @@ function handleStatusSelect(value: string) {
 
 .filter-panel__dot--all {
   background: var(--color-text-placeholder);
-}
-
-.filter-panel__status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.filter-panel__status-dot--online {
-  background: var(--color-success);
-  box-shadow: 0 0 4px var(--color-success);
-}
-
-.filter-panel__status-dot--offline {
-  background: var(--color-text-placeholder);
-}
-
-.filter-panel__status-dot--expired {
-  background: var(--color-danger);
 }
 
 .filter-panel__label {

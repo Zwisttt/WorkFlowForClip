@@ -1,4 +1,4 @@
-import type { Account, PublishTask } from '@electron/data/types';
+import type { Account, PublishTask, FingerprintTemplate } from '@electron/data/types';
 import type { ITask } from '@electron/core/types/task';
 
 export function createMockAccount(overrides?: Partial<Account>): Account {
@@ -51,6 +51,32 @@ export function createMockPublishTask(overrides?: Partial<PublishTask>): Publish
     error_message: null,
     retry_count: 0,
     max_retries: 3,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+export function createMockFingerprintTemplate(overrides?: Partial<FingerprintTemplate>): FingerprintTemplate {
+  return {
+    id: 'fp_001',
+    name: '默认模板',
+    seed: 123456789,
+    platform: 'windows',
+    platform_version: null,
+    brand: 'Chrome',
+    brand_version: null,
+    hardware_concurrency: 8,
+    gpu_vendor: 'Intel Inc.',
+    gpu_renderer: 'Intel Iris OpenGL Engine',
+    disable_non_proxied_udp: 1,
+    lang: 'zh-CN',
+    accept_lang: 'zh-CN,en-US',
+    timezone: 'Asia/Shanghai',
+    custom_params: '[]',
+    user_agent: null,
+    screen_width: 1920,
+    screen_height: 1080,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,

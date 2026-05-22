@@ -29,7 +29,6 @@
           :groups="groupStore.groups"
           @filter-platform="handlePlatformFilter"
           @filter-group="handleGroupFilter"
-          @filter-status="handleStatusFilter"
         />
 
         <!-- 右侧内容区 -->
@@ -55,33 +54,6 @@
             </div>
 
             <div class="page-accounts__toolbar-actions">
-              <!-- 批量操作栏 -->
-              <transition name="batch-slide">
-                <div v-if="selectedIds.length > 0" class="page-accounts__batch">
-                  <span class="page-accounts__batch-count">已选 {{ selectedIds.length }} 项</span>
-                  <el-select
-                    v-model="batchGroupId"
-                    placeholder="移入分组"
-                    size="small"
-                    clearable
-                    @change="handleBatchGroup"
-                  >
-                    <el-option
-                      v-for="g in groupStore.groups"
-                      :key="g.id"
-                      :label="g.name"
-                      :value="g.id"
-                    />
-                  </el-select>
-                  <el-popconfirm title="确定删除选中的账号？" @confirm="handleBatchDelete">
-                    <template #reference>
-                      <el-button type="danger" size="small">批量删除</el-button>
-                    </template>
-                  </el-popconfirm>
-                  <el-button size="small" @click="selectedIds = []">取消选择</el-button>
-                </div>
-              </transition>
-
               <!-- 视图切换 -->
               <div class="view-toggle">
                 <el-button
@@ -126,9 +98,7 @@
                   v-for="account in filteredAccounts"
                   :key="account.id"
                   :account="account"
-                  :selected="selectedIds.includes(account.id)"
                   :groups="groupStore.groups"
-                  @toggle-select="toggleSelect"
                   @detail="handleDetail"
                   @validate="handleCheckCookie"
                   @login="handleLogin"
@@ -141,9 +111,7 @@
                 v-else
                 :data="filteredAccounts"
                 class="page-accounts__table"
-                @selection-change="handleTableSelection"
               >
-                <el-table-column type="selection" width="40" />
                 <el-table-column label="账号" min-width="180">
                   <template #default="{ row }">
                     <div class="account-table-cell">
@@ -208,7 +176,7 @@
     </div>
 
     <!-- 绑定账号弹窗 -->
-    <BindAccountDialog
+    <BrowserLoginDialog
       v-model="bindDialogVisible"
       @success="handleRefresh"
     />
@@ -225,7 +193,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { User, Grid, List, Plus, Rank } from '@element-plus/icons-vue';
+import { User, Grid, List, Plus } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { useAccountStore } from '@/renderer/stores/account';
 import { useGroupStore } from '@/renderer/stores/group';
@@ -234,7 +202,7 @@ import Loading from '@/renderer/components/common/Loading.vue';
 import Empty from '@/renderer/components/common/Empty.vue';
 import AccountCard from '@/renderer/components/account/AccountCard.vue';
 import AccountFilterPanel from '@/renderer/components/account/AccountFilterPanel.vue';
-import BindAccountDialog from '@/renderer/components/account/BindAccountDialog.vue';
+import BrowserLoginDialog from '@/renderer/components/account/BrowserLoginDialog.vue';
 import AccountDetailDialog from '@/renderer/components/account/AccountDetailDialog.vue';
 import GroupsTab from '@/renderer/components/group/GroupsTab.vue';
 
@@ -255,8 +223,6 @@ const viewMode = ref<'grid' | 'list'>('grid');
 const bindDialogVisible = ref(false);
 const detailDialogVisible = ref(false);
 const selectedAccount = ref<Account | null>(null);
-const selectedIds = ref<string[]>([]);
-const batchGroupId = ref('');
 
 // 筛选后的账号列表
 const filteredAccounts = computed(() => {
@@ -341,19 +307,6 @@ function handleDetail(id: string) {
   detailDialogVisible.value = true;
 }
 
-function toggleSelect(id: string) {
-  const idx = selectedIds.value.indexOf(id);
-  if (idx >= 0) {
-    selectedIds.value.splice(idx, 1);
-  } else {
-    selectedIds.value.push(id);
-  }
-}
-
-function handleTableSelection(rows: Account[]) {
-  selectedIds.value = rows.map((r) => r.id);
-}
-
 async function handleLogin(id: string) {
   try {
     await accountStore.loginAccount(id);
@@ -374,29 +327,7 @@ async function handleCheckCookie(id: string) {
 
 async function handleDelete(id: string) {
   await accountStore.deleteAccount(id);
-  selectedIds.value = selectedIds.value.filter((sid) => sid !== id);
   ElMessage.success('已删除');
-}
-
-function handleBatchGroup(groupId: string) {
-  if (!groupId) return;
-  // 批量分组操作（通过 store 更新）
-  accountStore.accounts.forEach((a) => {
-    if (selectedIds.value.includes(a.id)) {
-      a.groupId = groupId;
-    }
-  });
-  ElMessage.success(`已将 ${selectedIds.value.length} 个账号移入分组`);
-  batchGroupId.value = '';
-  selectedIds.value = [];
-}
-
-async function handleBatchDelete() {
-  for (const id of selectedIds.value) {
-    await accountStore.deleteAccount(id);
-  }
-  ElMessage.success('批量删除完成');
-  selectedIds.value = [];
 }
 </script>
 
@@ -480,23 +411,6 @@ async function handleBatchDelete() {
   gap: var(--space-3);
 }
 
-/* ── 批量操作栏 ── */
-.page-accounts__batch {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--color-primary-lighter);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-primary-light);
-}
-
-.page-accounts__batch-count {
-  font-size: var(--font-size-sm);
-  color: var(--color-primary);
-  font-weight: var(--font-weight-medium);
-}
-
 /* ── 视图切换 ── */
 .view-toggle {
   display: flex;
@@ -516,7 +430,7 @@ async function handleBatchDelete() {
 /* ── 卡片网格 ── */
 .page-accounts__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: var(--space-4);
 }
 
@@ -605,18 +519,6 @@ async function handleBatchDelete() {
   align-items: center;
   justify-content: center;
   padding: var(--space-12);
-}
-
-/* ── 过渡动画 ── */
-.batch-slide-enter-active,
-.batch-slide-leave-active {
-  transition: all var(--transition-fast);
-}
-
-.batch-slide-enter-from,
-.batch-slide-leave-to {
-  opacity: 0;
-  transform: translateX(-8px);
 }
 
 /* ── 响应式 ── */

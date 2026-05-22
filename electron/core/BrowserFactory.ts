@@ -17,8 +17,10 @@ export interface BrowserFactoryConfig {
   chromePath?: string;
   /** 指纹浏览器路径（external_fingerprint 模式） */
   fingerprintBrowserPath?: string;
-  /** CDP WebSocket 端点（external_chrome / external_fingerprint 模式） */
-  cdpEndpoint?: string;
+  /** CDP WebSocket 端点（external_chrome 模式） */
+  chromeCdpEndpoint?: string;
+  /** CDP WebSocket 端点（external_fingerprint 模式） */
+  fingerprintCdpEndpoint?: string;
 }
 
 const DEFAULT_FACTORY_CONFIG: BrowserFactoryConfig = {
@@ -54,7 +56,7 @@ export class BrowserFactory {
   }
 
   private async connectExternalChrome(options?: LaunchOptions): Promise<Browser> {
-    const endpoint = this.config.cdpEndpoint;
+    const endpoint = this.config.chromeCdpEndpoint;
     if (endpoint) {
       logger.info(`Connecting to external Chrome via CDP: ${endpoint}`);
       return chromium.connectOverCDP(endpoint);
@@ -74,10 +76,10 @@ export class BrowserFactory {
   }
 
   private async connectFingerprintBrowser(): Promise<Browser> {
-    const endpoint = this.config.cdpEndpoint;
+    const endpoint = this.config.fingerprintCdpEndpoint;
     if (!endpoint) {
       throw new Error(
-        'Fingerprint browser CDP endpoint not configured. Please start the fingerprint browser first and set cdpEndpoint.',
+        'Fingerprint browser CDP endpoint not configured. Please start the fingerprint browser first and set fingerprintCdpEndpoint.',
       );
     }
 

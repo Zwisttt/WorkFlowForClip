@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createDatabaseMock } from '../../../mocks/Database';
+import { createMockFingerprintTemplate } from '../../../utils/factories';
 
 const mockDb = createDatabaseMock();
 
@@ -17,20 +18,7 @@ describe('FingerprintTemplateRepository', () => {
   let repo: FingerprintTemplateRepository;
   let stmt: ReturnType<typeof mockDb.prepare>;
 
-  const mockTemplate: FingerprintTemplate = {
-    id: 'fp-1',
-    name: 'Chrome Desktop',
-    user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0',
-    screen_width: 1920,
-    screen_height: 1080,
-    language: 'zh-CN',
-    platform: 'Win32',
-    webgl_vendor: 'Google Inc.',
-    webgl_renderer: 'ANGLE (Intel)',
-    extra_config: '{}',
-    created_at: '2025-01-01T00:00:00.000Z',
-    updated_at: '2025-01-01T00:00:00.000Z',
-  };
+  const mockTemplate: FingerprintTemplate = createMockFingerprintTemplate();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -104,7 +92,7 @@ describe('FingerprintTemplateRepository', () => {
     it('returns templates matching conditions', async () => {
       stmt.all.mockReturnValue([mockTemplate]);
 
-      const result = await repo.findWhere({ platform: 'Win32' });
+      const result = await repo.findWhere({ platform: 'windows' });
 
       expect(result).toEqual([mockTemplate]);
       expect(mockDb.prepare).toHaveBeenCalledWith(
@@ -120,16 +108,18 @@ describe('FingerprintTemplateRepository', () => {
       mockDb.prepare.mockReturnValueOnce(runStmt).mockReturnValueOnce(getStmt);
 
       const result = await repo.insert({
-        id: 'fp-1',
-        name: 'Chrome Desktop',
-        user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0',
+        id: 'fp_001',
+        name: '默认模板',
+        seed: 123456789,
+        platform: 'windows',
+        brand: 'Chrome',
+        disable_non_proxied_udp: 1,
+        lang: 'zh-CN',
+        accept_lang: 'zh-CN,en-US',
+        timezone: 'Asia/Shanghai',
+        custom_params: '[]',
         screen_width: 1920,
         screen_height: 1080,
-        language: 'zh-CN',
-        platform: 'Win32',
-        webgl_vendor: 'Google Inc.',
-        webgl_renderer: 'ANGLE (Intel)',
-        extra_config: '{}',
       });
 
       expect(result).toEqual(mockTemplate);

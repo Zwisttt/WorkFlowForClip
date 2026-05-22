@@ -14,6 +14,14 @@ const ALLOWED_CHANNELS = new Set([
   'task:status-change',
   'poc:status',
   'account:login-status-updated',
+  'account:login-status',
+  'account:login-success',
+  'account:login-failed',
+  'account:login-timeout',
+  'account:login-cancelled',
+  'account:login-blocked',
+  'account:login-queued',
+  'account:network-slow',
 ]);
 
 contextBridge.exposeInMainWorld('matrixflow', {
@@ -78,6 +86,9 @@ contextBridge.exposeInMainWorld('matrixflow', {
     login: (id: string) => ipcRenderer.invoke('accounts:login', id),
     checkCookie: (id: string) => ipcRenderer.invoke('accounts:checkCookie', id),
     getQRCode: (id: string) => ipcRenderer.invoke('accounts:getQRCode', id),
+    startLogin: (data: { platform: string; browserConfig: Record<string, unknown>; existingAccountId?: string }) =>
+      ipcRenderer.invoke('accounts:startLogin', data),
+    cancelLogin: () => ipcRenderer.invoke('accounts:cancelLogin'),
   },
 
   content: {

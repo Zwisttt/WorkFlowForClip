@@ -88,7 +88,7 @@
               @change="(v: string | number | boolean) => onBrowserModeChange(v as AppSettings['browserMode'])"
             >
               <el-radio-button value="embedded">
-                内嵌 Patchright（推荐）
+                内嵌浏览器
               </el-radio-button>
               <el-radio-button value="external_chrome">
                 外置 Chrome
@@ -100,13 +100,17 @@
           </div>
 
           <div class="browser-mode-section">
-            <div v-if="settings.settings.browserMode === 'embedded'" class="mode-status mode-status--success">
-              <div class="mode-status__icon">
-                <el-icon :size="20"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm193.5 301.7l-210.6 292a31.8 31.8 0 01-51.7 0L318.5 484.9c-3.8-5.3 0-12.7 6.5-12.7h46.9c10.3 0 19.9 5 25.9 13.3l71.2 99.8 157.2-218c6-8.4 15.7-13.3 25.9-13.3H699c6.5 0 9.9 7.4 6.5 12.7z" fill="currentColor"/></svg></el-icon>
+            <div v-if="settings.settings.browserMode === 'embedded'" class="mode-config-panel">
+              <div class="mode-config-panel__header">
+                <el-icon :size="18"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm193.5 301.7l-210.6 292a31.8 31.8 0 01-51.7 0L318.5 484.9c-3.8-5.3 0-12.7 6.5-12.7h46.9c10.3 0 19.9 5 25.9 13.3l71.2 99.8 157.2-218c6-8.4 15.7-13.3 25.9-13.3H699c6.5 0 9.9 7.4 6.5 12.7z" fill="currentColor"/></svg></el-icon>
+                <span>内嵌浏览器</span>
               </div>
-              <div class="mode-status__content">
-                <div class="mode-status__title">内嵌模式已启用</div>
-                <div class="mode-status__desc">开箱即用，反检测能力最强。外置模式适合已有指纹浏览器的用户。</div>
+              <div class="config-info">
+                <div class="config-info__icon"><el-icon :size="16"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm32 664c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V456c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v272zm-32-344c-26.5 0-48-21.5-48-48s21.5-48 48-48 48 21.5 48 48-21.5 48-48 48z" fill="currentColor"/></svg></el-icon></div>
+                <div class="config-info__body">
+                  <div class="config-info__title">无需额外配置，开箱即用</div>
+                  <div class="config-info__desc">内嵌 Patchright 使用本地真实指纹，防自动化检测能力强（CreepJS: 0% headless）。如需自定义 Canvas/WebGL 指纹，需通过 init scripts 配置。建议高风控平台（小红书、抖音）升级到指纹浏览器。</div>
+                </div>
               </div>
             </div>
 
@@ -115,7 +119,17 @@
                 <el-icon :size="18"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M928 160H96c-17.7 0-32 14.3-32 32v608c0 17.7 14.3 32 32 32h832c17.7 0 32-14.3 32-32V192c0-17.7-14.3-32-32-32zM338 620c-60.9 0-110-49.1-110-110s49.1-110 110-110 110 49.1 110 110-49.1 110-110 110zm202-26h-56c-4.4 0-8-3.6-8-8v-44c0-4.4 3.6-8 8-8h56c4.4 0 8 3.6 8 8v44c0 4.4-3.6 8-8 8zm0-116h-56c-4.4 0-8-3.6-8-8v-44c0-4.4 3.6-8 8-8h56c4.4 0 8 3.6 8 8v44c0 4.4-3.6 8-8 8zm190 116h-56c-4.4 0-8-3.6-8-8v-44c0-4.4 3.6-8 8-8h56c4.4 0 8 3.6 8 8v44c0 4.4-3.6 8-8 8zm0-116h-56c-4.4 0-8-3.6-8-8v-44c0-4.4 3.6-8 8-8h56c4.4 0 8 3.6 8 8v44c0 4.4-3.6 8-8 8z" fill="currentColor"/></svg></el-icon>
                 <span>Chrome 配置</span>
               </div>
-              <el-form label-width="140px" class="settings-form">
+              <div class="config-info">
+                <div class="config-info__icon"><el-icon :size="16"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm32 664c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V456c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v272zm-32-344c-26.5 0-48-21.5-48-48s21.5-48 48-48 48 21.5 48 48-21.5 48-48 48z" fill="currentColor"/></svg></el-icon></div>
+                <div class="config-info__body">
+                  <div class="config-info__title">建议安装指纹修改插件</div>
+                  <div class="config-info__desc">外置 Chrome 依赖浏览器插件来修改指纹参数。安装以下插件可有效降低平台关联风险：</div>
+                  <div class="config-info__links">
+                    <el-link type="primary" @click.prevent="openInChrome('https://chromewebstore.google.com/detail/webrtc-network-limiter/npeicpdbkakmehahjeeohfdhnlpdklia')" underline="never">WebRTC Leak Prevent →</el-link>
+                  </div>
+                </div>
+              </div>
+              <el-form label-width="120px" class="settings-form">
                 <el-form-item label="Chrome 路径">
                   <el-input
                     v-model="settings.settings.chromePath"
@@ -129,9 +143,9 @@
                 </el-form-item>
                 <el-form-item label="CDP 端点">
                   <el-input
-                    v-model="settings.settings.cdpEndpoint"
+                    v-model="settings.settings.chromeCdpEndpoint"
                     placeholder="ws://127.0.0.1:9222（留空则直接启动 Chrome）"
-                    @change="(v: string) => settings.updateSetting('cdpEndpoint', v)"
+                    @change="(v: string) => settings.updateSetting('chromeCdpEndpoint', v)"
                   />
                 </el-form-item>
               </el-form>
@@ -143,24 +157,22 @@
                 <span>指纹浏览器配置</span>
                 <el-link
                   type="primary"
-                  href="https://github.com/AdrYfish/fingerprint-chromium"
-                  target="_blank"
-                  :underline="false"
+                  @click.prevent="openInChrome('https://github.com/AdrYfish/fingerprint-chromium')"
+                  underline="never"
                   class="mode-config-panel__link"
                 >
-                  了解详情 →
+                  下载指纹浏览器 →
                 </el-link>
               </div>
-              <el-alert
-                type="warning"
-                :closable="false"
-                show-icon
-              >
-                <template #title>需要先下载指纹浏览器</template>
-                指纹浏览器基于 Chromium 定制，支持通过 --fingerprint 参数注入浏览器指纹。请先下载并安装，然后在下方配置路径。
-              </el-alert>
-              <el-form label-width="140px" class="settings-form">
-                <el-form-item label="指纹浏览器路径">
+              <div class="config-info">
+                <div class="config-info__icon"><el-icon :size="16"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm32 664c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V456c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v272zm-32-344c-26.5 0-48-21.5-48-48s21.5-48 48-48 48 21.5 48 48-21.5 48-48 48z" fill="currentColor"/></svg></el-icon></div>
+                <div class="config-info__body">
+                  <div class="config-info__title">需要先下载指纹浏览器</div>
+                  <div class="config-info__desc">指纹浏览器基于 Chromium 定制，支持通过 <code>--fingerprint</code> 参数注入浏览器指纹。请先下载并安装，然后在下方配置路径。</div>
+                </div>
+              </div>
+              <el-form label-width="120px" class="settings-form">
+                <el-form-item label="浏览器路径">
                   <el-input
                     v-model="settings.settings.fingerprintBrowserPath"
                     placeholder="选择 fingerprint-chromium 可执行文件"
@@ -173,13 +185,13 @@
                 </el-form-item>
                 <el-form-item label="CDP 端点">
                   <el-input
-                    v-model="settings.settings.cdpEndpoint"
+                    v-model="settings.settings.fingerprintCdpEndpoint"
                     placeholder="ws://127.0.0.1:9222（留空则直接启动指纹浏览器）"
-                    @change="(v: string) => settings.updateSetting('cdpEndpoint', v)"
+                    @change="(v: string) => settings.updateSetting('fingerprintCdpEndpoint', v)"
                   />
                 </el-form-item>
               </el-form>
-              <p class="settings-hint">请先启动指纹浏览器并开启远程调试端口，MatrixFlow 将通过 CDP 协议接管。</p>
+              <p class="config-footnote">请先启动指纹浏览器并开启远程调试端口，MatrixFlow 将通过 CDP 协议接管。</p>
             </div>
           </div>
         </div>
@@ -187,20 +199,7 @@
 
       <el-tab-pane label="指纹配置" name="fingerprint">
         <div class="settings-card">
-          <template v-if="settings.settings.browserMode === 'external_fingerprint'">
-            <FingerprintSettings />
-          </template>
-          <div v-else class="mode-status mode-status--info">
-            <div class="mode-status__icon">
-              <el-icon :size="20"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm32 664c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V456c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v272zm-32-344c-26.5 0-48-21.5-48-48s21.5-48 48-48 48 21.5 48 48-21.5 48-48 48z" fill="currentColor"/></svg></el-icon>
-            </div>
-            <div class="mode-status__content">
-              <div class="mode-status__title">指纹配置仅在「外置指纹浏览器」模式下生效</div>
-              <div class="mode-status__desc">
-                指纹模板依赖 fingerprint-chromium 的 <code style="background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; font-family: var(--font-family-mono); font-size: 12px;">--fingerprint</code> 系列参数，普通浏览器（Patchright / Chrome）不支持这些参数。请先在「浏览器配置」中将启动模式切换为「外置指纹浏览器」。
-              </div>
-            </div>
-          </div>
+          <FingerprintSettings />
         </div>
       </el-tab-pane>
 
@@ -213,6 +212,12 @@
       <el-tab-pane label="平台配置" name="platform">
         <div class="settings-card">
           <PlatformSettings />
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="AI 风险检测" name="ai-risk">
+        <div class="settings-card">
+          <AIRiskSettings />
         </div>
       </el-tab-pane>
 
@@ -245,8 +250,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { ElMessage } from 'element-plus';
 import { useSettingsStore } from '@/renderer/stores/settings';
 import type { AppSettings } from '@/renderer/stores/settings';
+import AIRiskSettings from '@/renderer/components/settings/AIRiskSettings.vue';
 import FingerprintSettings from '@/renderer/components/settings/FingerprintSettings.vue';
 import ProxySettings from '@/renderer/components/settings/ProxySettings.vue';
 import PlatformSettings from '@/renderer/components/settings/PlatformSettings.vue';
@@ -285,6 +292,13 @@ async function selectFingerprintPath() {
   });
   if (filePath) {
     settings.updateSetting('fingerprintBrowserPath', filePath);
+  }
+}
+
+async function openInChrome(url: string) {
+  const result = await window.matrixflow.browser.openUrl(url);
+  if (!result.success) {
+    ElMessage.warning(result.message || 'Chrome 浏览器路径未配置，请在系统设置中配置');
   }
 }
 
@@ -478,13 +492,14 @@ onMounted(() => {
 }
 
 .mode-config-panel {
-  background: var(--color-bg-page, #f8fafc);
-  border: 1px solid var(--color-border, #e2e8f0);
-  border-radius: var(--radius-lg);
-  padding: var(--space-5);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
+  box-shadow: var(--shadow-sm);
 }
 
 .mode-config-panel__header {
@@ -494,8 +509,8 @@ onMounted(() => {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .mode-config-panel__header .el-icon {
@@ -507,12 +522,87 @@ onMounted(() => {
   font-size: var(--font-size-sm);
 }
 
-.mode-config-panel .el-alert {
+.config-info {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  border-left: 3px solid var(--color-primary);
+}
+
+.config-info__icon {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary-lighter);
   border-radius: var(--radius-md);
+  color: var(--color-primary);
+}
+
+.config-info__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.config-info__title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.config-info__desc {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.config-info__desc code {
+  background: var(--color-bg-page);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-2xs);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-regular);
+}
+
+.config-info__links {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: var(--space-1);
+}
+
+.config-info__links .el-link {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
 }
 
 .mode-config-panel .settings-form {
   margin-top: 0;
+}
+
+.mode-config-panel .settings-form .el-form-item {
+  margin-bottom: var(--space-4);
+}
+
+.mode-config-panel .settings-form .el-form-item:last-child {
+  margin-bottom: 0;
+}
+
+.config-footnote {
+  margin: 0;
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-placeholder);
+  line-height: 1.5;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-light);
 }
 
 .theme-section {

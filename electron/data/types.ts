@@ -35,17 +35,33 @@ export interface GroupPublishRule {
   updated_at: string;
 }
 
+export type FingerprintPlatform = 'windows' | 'linux' | 'macos';
+export type FingerprintBrand = 'Chrome' | 'Edge' | 'Opera' | 'Vivaldi';
+
+export interface FingerprintCustomParam {
+  name: string;
+  value: string;
+}
+
 export interface FingerprintTemplate {
   id: string;
   name: string;
+  seed: number | null;
+  platform: FingerprintPlatform;
+  platform_version: string | null;
+  brand: FingerprintBrand;
+  brand_version: string | null;
+  hardware_concurrency: number | null;
+  gpu_vendor: string | null;
+  gpu_renderer: string | null;
+  disable_non_proxied_udp: number;
+  lang: string;
+  accept_lang: string;
+  timezone: string;
+  custom_params: string;
   user_agent: string | null;
   screen_width: number;
   screen_height: number;
-  language: string;
-  platform: string;
-  webgl_vendor: string | null;
-  webgl_renderer: string | null;
-  extra_config: string;
   created_at: string;
   updated_at: string;
 }
@@ -258,3 +274,13 @@ export type PaginatedResult<T> = {
   page: number;
   pageSize: number;
 };
+
+export interface AccountBinding {
+  accountId: string;
+  accountName: string;
+  accountAvatar?: string;
+  platform: string;
+  isShared: boolean;
+  groupName?: string;
+  boundAt: string;
+}

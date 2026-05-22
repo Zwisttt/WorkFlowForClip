@@ -76,7 +76,7 @@ const defaultSettings = {
   theme: 'light', language: 'zh-CN', concurrentTasks: 3, retryLimit: 3,
   autoCheckCookie: true, cookieCheckInterval: 60, proxyEnabled: false,
   proxyUrl: '', dataDir: '', browserMode: 'embedded', chromePath: '',
-  fingerprintBrowserPath: '', cdpEndpoint: '', notificationEnabled: true,
+  fingerprintBrowserPath: '', chromeCdpEndpoint: '', fingerprintCdpEndpoint: '', notificationEnabled: true,
   notificationSound: true, notificationMonitorAlerts: true,
   notificationAnomalyAlerts: true, notificationCriticalOnly: false,
 };

@@ -4,6 +4,9 @@ import { EventBus } from './EventBus';
 import { BrowserContext } from './BrowserContext';
 import { BrowserFactory } from './BrowserFactory';
 import type { BrowserFactoryConfig, BrowserMode } from './BrowserFactory';
+import { accountService } from '../services/AccountService';
+import { proxyService } from '../services/ProxyService';
+import type { Proxy } from '../data/types';
 import {
   DEFAULT_POOL_CONFIG,
   ContextState,
@@ -291,9 +294,27 @@ export class BrowserPool {
 
     logger.debug(`Creating new context for account=${accountId} on browser=${browserId}`);
 
-    const pwCtx = await pooled.browser.newContext({
+    const contextOptions: any = {
       viewport: this.config.launchOptions.viewport,
-    });
+    };
+
+    try {
+      const account = await accountService.getAccount(accountId);
+      if (account?.proxyId) {
+        const proxy = await proxyService.getProxyById(account.proxyId);
+        if (proxy) {
+          const proxyConfig = this.buildProxyConfig(proxy);
+          if (proxyConfig) {
+            contextOptions.proxy = proxyConfig;
+            logger.info(`Applying proxy ${proxy.name} for account=${accountId}`);
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn(`Failed to load proxy for account=${accountId}: ${err}`);
+    }
+
+    const pwCtx = await pooled.browser.newContext(contextOptions);
 
     const managed: ManagedContext = {
       context: pwCtx,
@@ -323,6 +344,26 @@ export class BrowserPool {
       }
     }
     return count;
+  }
+
+  private buildProxyConfig(proxy: Proxy): { server: string; username?: string; password?: string } | null {
+    let server: string;
+    if (proxy.protocol === 'socks5') {
+      server = `socks5://${proxy.host}:${proxy.port}`;
+    } else {
+      server = `${proxy.protocol}://${proxy.host}:${proxy.port}`;
+    }
+
+    const config: { server: string; username?: string; password?: string } = { server };
+
+    if (proxy.username) {
+      config.username = proxy.username;
+    }
+    if (proxy.password) {
+      config.password = proxy.password;
+    }
+
+    return config;
   }
 
   private async evictIdleContext(): Promise<void> {

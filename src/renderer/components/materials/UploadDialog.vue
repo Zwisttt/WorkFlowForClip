@@ -55,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue';
+import { ref, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { UploadFilled } from '@element-plus/icons-vue';
 import type { UploadFile } from 'element-plus';
@@ -63,6 +63,7 @@ import type { MaterialGroup } from '../../stores/materials';
 
 const props = defineProps<{
   groups: MaterialGroup[];
+  currentGroupId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -86,6 +87,12 @@ const ALLOWED_TYPES = [
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
   'video/mp4', 'video/quicktime',
 ];
+
+watch(visible, (newVal) => {
+  if (newVal && props.currentGroupId) {
+    form.groupId = props.currentGroupId;
+  }
+});
 
 function beforeUpload(file: File) {
   if (file.size > MAX_FILE_SIZE) {

@@ -11,6 +11,20 @@
       </el-button>
     </div>
 
+    <div class="fingerprint-mode-hint">
+      <div class="fingerprint-mode-hint__icon">
+        <el-icon :size="16"><InfoFilled /></el-icon>
+      </div>
+      <div class="fingerprint-mode-hint__content">
+        <p class="fingerprint-mode-hint__text">指纹配置仅在「外置指纹浏览器」模式下生效。指纹模板依赖 fingerprint-chromium 的 --fingerprint 系列参数，普通浏览器（Patchright / Chrome）不支持这些参数。</p>
+        <p class="fingerprint-mode-hint__action">
+          <el-link type="primary" @click.prevent="openInChrome('https://github.com/AdrYfish/fingerprint-chromium')" target="_blank" underline="never">
+            下载指纹浏览器 →
+          </el-link>
+        </p>
+      </div>
+    </div>
+
     <div class="search-bar">
       <el-input
         v-model="searchKeyword"
@@ -133,7 +147,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from 'vue';
-import { Search, Plus } from '@element-plus/icons-vue';
+import { Search, Plus, InfoFilled } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 
@@ -448,6 +462,13 @@ async function deleteTemplate(tpl: FingerprintTemplate) {
     // 用户取消
   }
 }
+
+async function openInChrome(url: string) {
+  const result = await window.matrixflow.browser.openUrl(url);
+  if (!result.success) {
+    ElMessage.warning(result.message || 'Chrome 浏览器路径未配置，请在系统设置中配置');
+  }
+}
 </script>
 
 <style scoped>
@@ -629,5 +650,41 @@ async function deleteTemplate(tpl: FingerprintTemplate) {
 
 .dialog-body :deep(.el-collapse) {
   border: none;
+}
+
+.fingerprint-mode-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #93c5fd;
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+}
+
+.fingerprint-mode-hint__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #1e40af;
+}
+
+.fingerprint-mode-hint__content {
+  flex: 1;
+}
+
+.fingerprint-mode-hint__text {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+  color: #1e40af;
+}
+
+.fingerprint-mode-hint__action {
+  margin: var(--space-1) 0 0 0;
+}
+
+.fingerprint-mode-hint__action .el-link {
+  font-size: var(--font-size-xs);
 }
 </style>

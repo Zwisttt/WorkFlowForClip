@@ -13,6 +13,7 @@ import { taskScheduler } from './core/TaskScheduler';
 import { selectorUpdateService } from './core/SelectorUpdateService';
 import { platformConfigLoader } from './core/PlatformConfigLoader';
 import { registerIpcHandlers } from './ipc/handlers';
+import { registerAccountLoginHandlers } from './services/ipc-handlers';
 import { autoUpdaterService } from './core/AutoUpdater';
 import { initDatabase, closeDatabase } from './data/Database';
 import { registerAllAdapters, PlatformRegistry } from './platform/adapter';
@@ -96,6 +97,7 @@ app.whenReady().then(async () => {
   logger.info(`已注册平台: ${PlatformRegistry.getSupportedPlatforms().join(', ')}`);
 
   registerIpcHandlers();
+  registerAccountLoginHandlers();
 
   await createWindow();
 

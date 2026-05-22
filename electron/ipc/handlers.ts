@@ -1174,27 +1174,27 @@ export function registerIpcHandlers(): void {
   // ─── 素材管理 ──────────────────────────────────────────
 
   ipcMain.handle(CHANNEL.MATERIAL_LIST, async (_e, query?: ListQuery): Promise<IpcResult<ListResult>> => {
-    return wrap(() => materialService.list(query));
+    return wrap(() => materialService.listMaterials(query));
   });
 
   ipcMain.handle(CHANNEL.MATERIAL_GET, async (_e, id: string): Promise<IpcResult<Material | null>> => {
-    return wrap(() => materialService.get(id));
+    return wrap(() => materialService.getMaterial(id));
   });
 
   ipcMain.handle(CHANNEL.MATERIAL_UPLOAD, async (_e, payload: { filePath: string; groupId?: string; title?: string; description?: string }): Promise<IpcResult<Material>> => {
-    return wrap(() => materialService.upload(payload.filePath, payload.groupId, payload.title, payload.description));
+    return wrap(() => materialService.uploadMaterial(payload));
   });
 
   ipcMain.handle(CHANNEL.MATERIAL_DELETE, async (_e, id: string): Promise<IpcResult<void>> => {
-    return wrap(async () => { await materialService.delete(id); });
+    return wrap(async () => { await materialService.deleteMaterial(id); });
   });
 
   ipcMain.handle(CHANNEL.MATERIAL_BATCH_DELETE, async (_e, ids: string[]): Promise<IpcResult<BatchDeleteResult>> => {
-    return wrap(() => materialService.batchDelete(ids));
+    return wrap(() => materialService.deleteMaterials(ids));
   });
 
   ipcMain.handle(CHANNEL.MATERIAL_DOWNLOAD, async (_e, ids: string[], targetDir: string): Promise<IpcResult<void>> => {
-    return wrap(async () => { await materialService.download(ids, targetDir); });
+    return wrap(async () => { await materialService.downloadMaterials(ids, targetDir); });
   });
 
   // ─── 素材分组 ──────────────────────────────────────────
