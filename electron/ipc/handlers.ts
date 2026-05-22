@@ -1202,7 +1202,7 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(CHANNEL.MATERIAL_DOWNLOAD, async (_e, ids: string[], targetDir: string): Promise<IpcResult<void>> => {
-    return wrap(async () => { await materialService.download(ids, targetDir); });
+    return wrap(async () => { await materialService.downloadMaterials(ids, targetDir); });
   });
 
   ipcMain.handle(CHANNEL.MATERIAL_MOVE_TO_GROUP, async (_e, ids: string[], groupId: string | null): Promise<IpcResult<{ success: string[]; failed: string[] }>> => {
