@@ -73,6 +73,21 @@
                 @change="(v: number | undefined) => v && settings.updateSetting('cookieCheckInterval', v)"
               />
             </el-form-item>
+
+            <el-divider content-position="left">素材存储</el-divider>
+
+            <el-form-item label="素材库地址">
+              <el-input
+                v-model="materialLibraryPath"
+                :placeholder="materialLibraryPathDefault"
+                @change="(v: string) => saveMaterialLibraryPath(v)"
+              >
+                <template #append>
+                  <el-button @click="selectMaterialLibraryPath">选择</el-button>
+                </template>
+              </el-input>
+              <div class="settings-hint">留空则使用默认路径: {{ materialLibraryPathDefault }}</div>
+            </el-form-item>
           </el-form>
         </div>
       </el-tab-pane>
@@ -249,7 +264,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useSettingsStore } from '@/renderer/stores/settings';
 import type { AppSettings } from '@/renderer/stores/settings';
@@ -264,9 +279,12 @@ import AboutPanel from '@/renderer/components/settings/AboutPanel.vue';
 
 const settings = useSettingsStore();
 const activeTab = ref('general');
+const materialLibraryPath = ref('');
+const materialLibraryPathDefault = ref('');
 
-onMounted(() => {
+onMounted(async () => {
   settings.fetchSettings();
+  await loadMaterialLibraryPath();
 });
 
 async function onBrowserModeChange(mode: AppSettings['browserMode']) {
@@ -315,6 +333,40 @@ function applyTheme(theme: AppSettings['theme']) {
     html.classList.add('dark');
   } else {
     html.classList.remove('dark');
+  }
+}
+
+async function loadMaterialLibraryPath() {
+  if (!window.matrixflow?.material) return;
+  const defaultResult = await window.matrixflow.material.getLibraryPath();
+  if (defaultResult.success && defaultResult.data) {
+    materialLibraryPathDefault.value = defaultResult.data;
+  }
+  const saved = await window.matrixflow.settings.get('materialLibraryPath');
+  if (saved) {
+    materialLibraryPath.value = saved as string;
+  }
+}
+
+async function selectMaterialLibraryPath() {
+  const dirPath = await window.matrixflow.dialog.openFile({
+    title: '选择素材库目录',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (dirPath && typeof dirPath === 'string') {
+    materialLibraryPath.value = dirPath;
+    await saveMaterialLibraryPath(dirPath);
+  }
+}
+
+async function saveMaterialLibraryPath(path: string) {
+  if (!window.matrixflow?.material) return;
+  const result = await window.matrixflow.material.setLibraryPath(path);
+  if (result.success) {
+    await window.matrixflow.settings.set('materialLibraryPath', path);
+    ElMessage.success('素材库路径已更新');
+  } else {
+    ElMessage.error(result.message || '设置素材库路径失败');
   }
 }
 

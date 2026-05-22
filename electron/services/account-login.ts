@@ -1,6 +1,4 @@
 import type { BrowserContext, Page } from 'patchright';
-import { BrowserWindow, BrowserView, session, ipcMain } from 'electron';
-import * as path from 'path';
 import type { 
   Platform, 
   BrowserConfig, 
@@ -113,11 +111,7 @@ export class AccountLoginService {
   private currentLauncher: IBrowserLauncher | null = null;
   private currentDetector: LoginDetector | null = null;
   private disconnectHandler: BrowserDisconnectHandler | null = null;
-  private embeddedWindow: BrowserWindow | null = null;
-  private addressBarView: BrowserView | null = null;
-  private contentView: BrowserView | null = null;
   private options: AccountLoginServiceOptions;
-  private ipcHandlersRegistered = false;
 
   constructor(options: AccountLoginServiceOptions) {
     this.options = options;
@@ -241,8 +235,29 @@ export class AccountLoginService {
 
   private async handleEmbeddedLogin(platform: Platform, accountId: string): Promise<{ storagePath: string; profile?: UserProfile }> {
     this.log('handleEmbeddedLogin start', { platform, accountId });
-    const result = await this.launchEmbeddedBrowser(platform, accountId);
-    this.embeddedWindow = result.window;
+
+    const config = PLATFORM_COOKIE_CONFIGS[platform];
+    this.currentLauncher = createBrowserLauncher({ type: 'embedded' });
+
+    const context = await this.currentLauncher.launch({ type: 'embedded' }, accountId);
+    const pages = context.pages();
+    const page = pages[0] || await context.newPage();
+
+    this.disconnectHandler = new BrowserDisconnectHandler({
+      accountId,
+      onDisconnect: () => {
+        this.options.sendIPC('account:login-cancelled', {
+          accountId,
+          reason: 'browser_disconnected',
+        });
+      },
+      onLog: this.options.onLog,
+    });
+
+    const browser = this.currentLauncher.getBrowser();
+    if (browser) {
+      this.disconnectHandler.attach(browser);
+    }
 
     this.options.sendIPC('account:login-status', { 
       status: 'detecting', 
@@ -251,7 +266,7 @@ export class AccountLoginService {
     });
 
     this.log('waitForEmbeddedLogin start', { platform, accountId });
-    const loginSuccess = await this.waitForEmbeddedLogin(result.window, platform, accountId);
+    const loginSuccess = await this.waitForEmbeddedLogin(page, context, platform, accountId);
     this.log('waitForEmbeddedLogin result', { loginSuccess });
 
     if (!loginSuccess) {
@@ -259,12 +274,12 @@ export class AccountLoginService {
     }
 
     this.log('reading cookies after login success');
-    const cookies = await result.cookies();
+    const cookies = await context.cookies(config.domains);
     this.log('cookies read', { count: cookies.length, cookieNames: cookies.map(c => c.name) });
     const storagePath = await this.sessionManager.saveFromCookies(cookies, accountId, platform);
     this.log('sessionSaved', { storagePath });
 
-    const profile = await this.extractProfileFromBrowser(platform);
+    const profile = await this.extractProfileFromBrowser(platform, page);
     this.log('profileExtracted', { profile: profile ? { nickname: profile.nickname, hasAvatar: !!profile.avatarUrl } : null });
 
     return { storagePath, profile };
@@ -317,71 +332,15 @@ export class AccountLoginService {
     return await this.sessionManager.save(context, accountId, platform);
   }
 
-  private async waitForEmbeddedLogin(window: BrowserWindow, platform: Platform, accountId: string): Promise<boolean> {
-    const config = PLATFORM_COOKIE_CONFIGS[platform];
-    const timeout = 300000;
-    const startTime = Date.now();
-    const pollInterval = 2000;
-    const ses = session.fromPartition(`persist:${accountId}`);
-    
-    this.log('waitForEmbeddedLogin config', { 
-      platform, 
-      requiredCookies: config.requiredCookies, 
-      loginUrl: config.loginUrl,
-      timeout,
-      partition: `persist:${accountId}`
-    });
+  private async waitForEmbeddedLogin(page: Page, context: BrowserContext, platform: Platform, accountId: string): Promise<boolean> {
+    this.currentDetector = new LoginDetector(
+      2000,
+      300000,
+      (data) => this.options.sendIPC('account:network-slow', data)
+    );
 
-    return new Promise((resolve) => {
-      const checkLogin = async () => {
-        if (window.isDestroyed()) {
-          this.log('waitForEmbeddedLogin: window destroyed');
-          resolve(false);
-          return;
-        }
-
-        const elapsed = Date.now() - startTime;
-        if (elapsed >= timeout) {
-          this.log('waitForEmbeddedLogin: timeout', { elapsed });
-          resolve(false);
-          return;
-        }
-
-        try {
-          const cookies = await ses.cookies.get({});
-          const matchedCookies = cookies.filter(c => 
-            config.requiredCookies.includes(c.name) && c.value && c.value.length > 0
-          );
-          const hasLoginCookie = matchedCookies.length > 0;
-          
-          if (elapsed % 10000 < pollInterval) {
-            this.log('waitForEmbeddedLogin polling', { 
-              elapsed: Math.round(elapsed / 1000) + 's',
-              totalCookies: cookies.length,
-              matchedCookies: matchedCookies.map(c => c.name),
-              requiredCookies: config.requiredCookies,
-              hasLoginCookie,
-              cookieNames: cookies.map(c => c.name).join(', ')
-            });
-          }
-
-          if (hasLoginCookie) {
-            this.log('waitForEmbeddedLogin: login detected', { 
-              matchedCookies: matchedCookies.map(c => ({ name: c.name, valueLength: c.value.length })),
-              elapsed: Math.round(elapsed / 1000) + 's'
-            });
-            resolve(true);
-            return;
-          }
-        } catch (err) {
-          this.log('waitForEmbeddedLogin: cookie check error', { error: String(err) });
-        }
-
-        setTimeout(checkLogin, pollInterval);
-      };
-
-      checkLogin();
-    });
+    const loginSuccess = await this.currentDetector.waitForLogin(context, platform, 300000);
+    return loginSuccess;
   }
 
   cancelLogin(): void {
@@ -390,142 +349,9 @@ export class AccountLoginService {
     }
   }
 
-  private registerBrowserAddressHandlers(): void {
-    if (this.ipcHandlersRegistered) return;
-
-    ipcMain.on('browser-address:navigate', (_, data: { url?: string }) => {
-      if (data.url && this.contentView) {
-        this.contentView.webContents.loadURL(data.url);
-      }
-    });
-
-    ipcMain.on('browser-address:back', () => {
-      this.contentView?.webContents.goBack();
-    });
-
-    ipcMain.on('browser-address:forward', () => {
-      this.contentView?.webContents.goForward();
-    });
-
-    ipcMain.on('browser-address:refresh', () => {
-      this.contentView?.webContents.reload();
-    });
-
-    ipcMain.on('browser-address:open-devtools', () => {
-      if (this.contentView) {
-        this.contentView.webContents.openDevTools({ mode: 'detach' });
-      }
-    });
-
-    this.ipcHandlersRegistered = true;
-  }
-
-  private async launchEmbeddedBrowser(
-    platform: Platform,
-    accountId: string
-  ): Promise<{ context: BrowserContext | null; window: BrowserWindow; page: Page | null; cookies: () => Promise<{ name: string; value: string; domain: string; path: string }[]> }> {
-    const config = PLATFORM_COOKIE_CONFIGS[platform];
-    const partition = `persist:${accountId}`;
-    const ses = session.fromPartition(partition);
-
-    this.registerBrowserAddressHandlers();
-
-    const window = new BrowserWindow({
-      width: 1200,
-      height: 900,
-      minWidth: 800,
-      minHeight: 600,
-      title: `登录 - ${platform}`,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        partition,
-      },
-      autoHideMenuBar: true,
-    });
-
-    window.on('closed', () => {
-      this.log('embeddedWindow closed', { accountId, reason: 'user_closed_window' });
-      this.options.sendIPC('account:login-cancelled', {
-        accountId,
-        reason: 'window_closed',
-      });
-    });
-
-    const addressBarPath = path.join(__dirname, '..', 'browser-ui', 'address-bar.html');
-
-    this.addressBarView = new BrowserView({
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        preload: path.join(__dirname, '..', 'browser-ui', 'address-bar-preload.js'),
-      },
-    });
-    await this.addressBarView.webContents.loadFile(addressBarPath);
-
-    this.contentView = new BrowserView({
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        partition,
-      },
-    });
-
-    this.contentView.webContents.on('did-navigate', (_, url) => {
-      this.addressBarView?.webContents.send('browser-address:url-change', url);
-    });
-
-    this.contentView.webContents.on('did-navigate-in-page', (_, url) => {
-      this.addressBarView?.webContents.send('browser-address:url-change', url);
-    });
-
-    this.contentView.webContents.on('did-start-loading', () => {
-      this.addressBarView?.webContents.send('browser-address:loading-state', true);
-    });
-
-    this.contentView.webContents.on('did-stop-loading', () => {
-      this.addressBarView?.webContents.send('browser-address:loading-state', false);
-    });
-
-    this.contentView.webContents.on('did-finish-load', () => {
-      this.addressBarView?.webContents.send('browser-address:navigation-state', 
-        this.contentView?.webContents.canGoBack() || false,
-        this.contentView?.webContents.canGoForward() || false
-      );
-    });
-
-    await this.contentView.webContents.loadURL(config.loginUrl);
-
-    window.addBrowserView(this.addressBarView);
-    window.addBrowserView(this.contentView);
-
-    this.addressBarView.setBounds({ x: 0, y: 0, width: window.getBounds().width, height: 48 });
-    this.contentView.setBounds({ x: 0, y: 48, width: window.getBounds().width, height: window.getBounds().height - 48 });
-
-    this.addressBarView.webContents.send('browser-address:url-change', config.loginUrl);
-
-    window.on('resize', () => {
-      const bounds = window.getBounds();
-      this.addressBarView?.setBounds({ x: 0, y: 0, width: bounds.width, height: 48 });
-      this.contentView?.setBounds({ x: 0, y: 48, width: bounds.width, height: bounds.height - 48 });
-    });
-
-    const getCookies = async () => {
-      const cookies = await ses.cookies.get({});
-      return cookies.map(c => ({
-        name: c.name,
-        value: c.value,
-        domain: c.domain || '',
-        path: c.path || '/',
-      }));
-    };
-
-    return { context: null, window, page: null, cookies: getCookies };
-  }
-
-  private async extractProfileFromBrowser(platform: Platform): Promise<UserProfile | undefined> {
-    if (!this.contentView || this.embeddedWindow?.isDestroyed()) {
-      this.log('extractProfile skipped', { reason: 'no contentView or window destroyed' });
+  private async extractProfileFromBrowser(platform: Platform, page: Page): Promise<UserProfile | undefined> {
+    if (!page) {
+      this.log('extractProfile skipped', { reason: 'no page' });
       return undefined;
     }
 
@@ -540,7 +366,7 @@ export class AccountLoginService {
       const avatarSelectors = selectors.avatar.map(s => `'${s}'`).join(', ');
       const homepageSelectors = (selectors.homepage || []).map(s => `'${s}'`).join(', ');
 
-      const result = await this.contentView.webContents.executeJavaScript(`
+      const result = await page.evaluate<{ nickname: string; avatarUrl: string; homepageUrl: string }>(`
         (function() {
           var nicknameSelectors = [${nicknameSelectors}];
           var avatarSelectors = [${avatarSelectors}];
@@ -604,19 +430,6 @@ export class AccountLoginService {
     if (this.currentLauncher) {
       await this.currentLauncher.close();
       this.currentLauncher = null;
-    }
-
-    if (this.embeddedWindow) {
-      if (this.addressBarView) {
-        this.embeddedWindow.removeBrowserView(this.addressBarView);
-        this.addressBarView = null;
-      }
-      if (this.contentView) {
-        this.embeddedWindow.removeBrowserView(this.contentView);
-        this.contentView = null;
-      }
-      this.embeddedWindow.close();
-      this.embeddedWindow = null;
     }
 
     this.currentDetector = null;

@@ -7,6 +7,7 @@ export interface Material {
   title: string;
   description?: string;
   filePath: string;
+  fileSize: number;
   thumbnailPath?: string;
   platform?: string;
   groupId?: string;

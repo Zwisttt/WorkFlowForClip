@@ -39,7 +39,7 @@
         >
           <span class="filter-panel__dot" :style="{ background: group.color }" />
           <span class="filter-panel__label">{{ group.name }}</span>
-          <span class="filter-panel__count">{{ group.accountIds?.length || 0 }}</span>
+          <span class="filter-panel__count">{{ group.accountCount ?? group.accountIds?.length ?? 0 }}</span>
         </li>
       </ul>
     </div>

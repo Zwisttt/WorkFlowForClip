@@ -22,6 +22,7 @@ import { commentService } from '../services/CommentService';
 import { licenseService } from '../services/LicenseService';
 import { proxyService } from '../services/ProxyService';
 import { materialService } from '../services/MaterialService';
+import { SessionManager } from '../services/session-manager';
 import { fingerprintTemplateRepo } from '../data/repositories/FingerprintTemplateRepository';
 import { getIPLimitSettingsService } from '../services/ip-limit-settings';
 import { getAIRiskSettingsService } from '../services/ai-risk-settings';
@@ -51,7 +52,14 @@ import type {
 import type { PlatformConfig, PlatformCapabilities, CookieResult } from '../platform/base/types';
 import type { PublishEvent } from '../core/types/eventbus';
 
+import { createBrowserLauncher } from '../services/browser-launcher';
+import type { IBrowserLauncher, BrowserType } from '../services/types';
+import type { BrowserContext } from 'patchright';
+
 const logger = new Logger('IPC');
+
+// Module-level map for concurrent embedded browser contexts
+const embeddedContexts = new Map<string, { launcher: IBrowserLauncher; context: BrowserContext }>();
 
 const CHANNEL = {
   ACCOUNT_LIST: 'account:list',
@@ -195,6 +203,10 @@ const CHANNEL = {
   MATERIAL_BATCH_DELETE: 'material:batchDelete',
   MATERIAL_DOWNLOAD: 'material:download',
   MATERIAL_MOVE_TO_GROUP: 'material:moveToGroup',
+  MATERIAL_GET_LIBRARY_PATH: 'material:getLibraryPath',
+  MATERIAL_SET_LIBRARY_PATH: 'material:setLibraryPath',
+  MATERIAL_REGENERATE_THUMBNAILS: 'material:regenerateThumbnails',
+  MATERIAL_OPEN_IN_FOLDER: 'material:openInFolder',
 
   MATERIAL_GROUP_LIST: 'materialGroup:list',
   MATERIAL_GROUP_CREATE: 'materialGroup:create',
@@ -1209,6 +1221,25 @@ export function registerIpcHandlers(): void {
     return wrap(() => materialService.moveToGroup(ids, groupId));
   });
 
+  ipcMain.handle(CHANNEL.MATERIAL_GET_LIBRARY_PATH, async (): Promise<IpcResult<string>> => {
+    return ok(materialService.getMaterialLibraryPath());
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_SET_LIBRARY_PATH, async (_e, path: string): Promise<IpcResult<void>> => {
+    return wrap(async () => { await materialService.setMaterialLibraryPath(path); });
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_REGENERATE_THUMBNAILS, async (): Promise<IpcResult<{ success: number; failed: number }>> => {
+    return wrap(() => materialService.regenerateThumbnails());
+  });
+
+  ipcMain.handle(CHANNEL.MATERIAL_OPEN_IN_FOLDER, async (_e, filePath: string): Promise<IpcResult<void>> => {
+    return wrap(async () => {
+      const { shell } = await import('electron');
+      await shell.showItemInFolder(filePath);
+    });
+  });
+
   // ─── 素材分组 ──────────────────────────────────────────
 
   ipcMain.handle(CHANNEL.MATERIAL_GROUP_LIST, async (): Promise<IpcResult<MaterialGroup[]>> => {
@@ -1250,101 +1281,46 @@ export function registerIpcHandlers(): void {
       const browserMode = row?.browser_mode || 'embedded';
 
       if (browserMode === 'embedded') {
-        const { BrowserWindow, BrowserView, session } = await import('electron');
-        const partition = `persist:${accountId}`;
-        const ses = session.fromPartition(partition);
-
-        const accountRow = db.prepare('SELECT platform FROM accounts WHERE id = ?').get(accountId) as any;
-        const platform = accountRow?.platform || '';
-        const cookiePath = path.join(process.cwd(), 'storage', 'cookies', `${platform}_${accountId}.json`);
-        try {
-          const raw = await fs.promises.readFile(cookiePath, 'utf-8');
-          const state = JSON.parse(raw);
-          if (Array.isArray(state.cookies)) {
-            for (const c of state.cookies) {
-              await ses.cookies.set({
-                url: c.secure ? `https://${c.domain.replace(/^\./, '')}` : `http://${c.domain.replace(/^\./, '')}`,
-                name: c.name,
-                value: c.value,
-                domain: c.domain,
-                path: c.path || '/',
-                secure: c.secure ?? false,
-                httpOnly: c.httpOnly ?? false,
-                sameSite: c.sameSite ?? 'lax',
-                expirationDate: c.expires > 0 ? c.expires : undefined,
-              });
-            }
-            logger.info(`已注入 ${state.cookies.length} 个 cookies 到 partition=${partition}`);
-          }
-        } catch (e) {
-          logger.warn(`注入 cookies 失败或文件不存在: ${cookiePath}`, e);
+        const existing = embeddedContexts.get(accountId);
+        if (existing) {
+          const page = existing.context.pages()[0] || await existing.context.newPage();
+          await page.goto(url, { waitUntil: 'domcontentloaded' });
+          return { success: true };
         }
 
-        const win = new BrowserWindow({
-          width: 1200,
-          height: 900,
-          minWidth: 800,
-          minHeight: 600,
-          title: `MatrixFlow - 账号浏览器`,
-          autoHideMenuBar: true,
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            partition,
-          },
+        const launcher = createBrowserLauncher({ type: 'embedded' as BrowserType });
+        const context = await launcher.launch({ type: 'embedded' as BrowserType, headless: false }, accountId);
+
+        const sessionManager = new SessionManager();
+        const state = await sessionManager.load(accountId);
+        if (state && Array.isArray(state.cookies)) {
+          const patchrightCookies: Array<{
+            name: string; value: string; domain?: string; path?: string;
+            expires?: number; httpOnly?: boolean; secure?: boolean; sameSite?: 'Strict' | 'Lax' | 'None'
+          }> = (state.cookies as Array<{
+            name: string; value: string; domain: string; path?: string;
+            secure?: boolean; httpOnly?: boolean; sameSite?: string; expires?: number
+          }>).map(c => ({
+            name: c.name,
+            value: c.value,
+            domain: c.domain,
+            path: c.path || '/',
+            secure: c.secure ?? false,
+            httpOnly: c.httpOnly ?? false,
+            sameSite: ((c.sameSite as string || 'Lax').charAt(0).toUpperCase() + (c.sameSite as string || 'Lax').slice(1).toLowerCase()) as 'Strict' | 'Lax' | 'None',
+            expires: c.expires ?? -1,
+          }));
+          await context.addCookies(patchrightCookies);
+        }
+
+        embeddedContexts.set(accountId, { launcher, context });
+
+        context.on('close', () => {
+          embeddedContexts.delete(accountId);
         });
 
-        const addressBarPath = path.join(__dirname, '..', 'browser-ui', 'address-bar.html');
-        const addressBarView = new BrowserView({
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            preload: path.join(__dirname, '..', 'browser-ui', 'address-bar-preload.js'),
-          },
-        });
-        await addressBarView.webContents.loadFile(addressBarPath);
-
-        const contentView = new BrowserView({
-          webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            partition,
-          },
-        });
-
-        contentView.webContents.on('did-navigate', (_, navUrl) => {
-          addressBarView.webContents.send('browser-address:url-change', navUrl);
-        });
-        contentView.webContents.on('did-navigate-in-page', (_, navUrl) => {
-          addressBarView.webContents.send('browser-address:url-change', navUrl);
-        });
-        contentView.webContents.on('did-start-loading', () => {
-          addressBarView.webContents.send('browser-address:loading-state', true);
-        });
-        contentView.webContents.on('did-stop-loading', () => {
-          addressBarView.webContents.send('browser-address:loading-state', false);
-        });
-        contentView.webContents.on('did-finish-load', () => {
-          addressBarView.webContents.send('browser-address:navigation-state',
-            contentView.webContents.navigationHistory.canGoBack(),
-            contentView.webContents.navigationHistory.canGoForward()
-          );
-        });
-
-        await contentView.webContents.loadURL(url);
-
-        win.addBrowserView(addressBarView);
-        win.addBrowserView(contentView);
-
-        addressBarView.setBounds({ x: 0, y: 0, width: win.getBounds().width, height: 48 });
-        contentView.setBounds({ x: 0, y: 48, width: win.getBounds().width, height: win.getBounds().height - 48 });
-        addressBarView.webContents.send('browser-address:url-change', url);
-
-        win.on('resize', () => {
-          const bounds = win.getBounds();
-          addressBarView.setBounds({ x: 0, y: 0, width: bounds.width, height: 48 });
-          contentView.setBounds({ x: 0, y: 48, width: bounds.width, height: bounds.height - 48 });
-        });
+        const page = context.pages()[0] || await context.newPage();
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
 
         return { success: true };
       } else {

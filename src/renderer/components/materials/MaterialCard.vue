@@ -2,34 +2,28 @@
   <div
     class="material-card"
     :class="{ 'material-card--selected': selected }"
-    @click="handleClick"
+    @click="handlePreview"
   >
     <div class="material-card__preview">
       <img
-        v-if="material.type === 'image'"
+        v-if="thumbnailUrl"
         :src="thumbnailUrl"
         :alt="material.title"
-        class="material-card__image"
+        class="material-card__thumb"
         @error="handleImageError"
       />
-      <div v-else class="material-card__video">
-        <img
-          v-if="material.thumbnailPath"
-          :src="thumbnailUrl"
-          :alt="material.title"
-          class="material-card__video-thumb"
-          @error="handleImageError"
-        />
-        <div v-else class="material-card__video-placeholder">
-          <el-icon><VideoPlay /></el-icon>
-        </div>
-        <div class="material-card__video-duration">
-          {{ formatDuration((material.metadata as any)?.duration) }}
+      <div v-else class="material-card__placeholder">
+        <el-icon :size="32"><VideoCamera /></el-icon>
+      </div>
+
+      <div v-if="material.type === 'video'" class="material-card__play-overlay">
+        <div class="material-card__play-btn">
+          <el-icon :size="28"><VideoPlay /></el-icon>
         </div>
       </div>
 
-      <div class="material-card__checkbox">
-        <el-checkbox :model-value="selected" @change="handleSelect" @click.stop />
+      <div class="material-card__checkbox" @click.stop>
+        <el-checkbox :model-value="selected" @change="handleSelect" />
       </div>
 
       <div class="material-card__type-badge">
@@ -44,24 +38,15 @@
       </div>
       <div class="material-card__meta">
         <span>{{ material.type === 'image' ? '图片' : '视频' }}</span>
+        <span v-if="material.fileSize">{{ formatSize(material.fileSize) }}</span>
       </div>
-    </div>
-
-    <div class="material-card__actions" @click.stop>
-      <el-button text size="small" @click="handlePreview">
-        <el-icon><View /></el-icon>
-      </el-button>
-      <el-button text size="small" @click="handleDelete">
-        <el-icon><Delete /></el-icon>
-      </el-button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { ElMessageBox } from 'element-plus';
-import { VideoPlay, Picture, VideoCamera, View, Delete } from '@element-plus/icons-vue';
+import { VideoPlay, Picture, VideoCamera } from '@element-plus/icons-vue';
 import type { Material } from '../../stores/materials';
 
 const props = defineProps<{
@@ -72,22 +57,17 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [id: string, selected: boolean];
   preview: [material: Material];
-  delete: [id: string];
 }>();
 
 const thumbnailUrl = computed(() => {
   if (props.material.thumbnailPath) {
-    return `local-file://${encodeURIComponent(props.material.thumbnailPath)}`;
+    return `local-file://${props.material.thumbnailPath}`;
   }
   if (props.material.type === 'image') {
-    return `local-file://${encodeURIComponent(props.material.filePath)}`;
+    return `local-file://${props.material.filePath}`;
   }
   return '';
 });
-
-function handleClick() {
-  emit('select', props.material.id, !props.selected);
-}
 
 function handleSelect(selected: boolean) {
   emit('select', props.material.id, selected);
@@ -97,26 +77,15 @@ function handlePreview() {
   emit('preview', props.material);
 }
 
-function handleDelete() {
-  ElMessageBox.confirm(
-    `确定删除素材「${props.material.title}」吗？`,
-    '删除素材',
-    { type: 'warning' }
-  ).then(() => {
-    emit('delete', props.material.id);
-  }).catch(() => {});
-}
-
 function handleImageError(e: Event) {
-  const target = e.target as HTMLImageElement;
-  target.style.display = 'none';
+  (e.target as HTMLImageElement).style.display = 'none';
 }
 
-function formatDuration(seconds?: number): string {
-  if (!seconds) return '0:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+function formatSize(bytes: number): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 </script>
 
@@ -148,38 +117,44 @@ function formatDuration(seconds?: number): string {
   background: var(--el-fill-color-light);
 }
 
-.material-card__image,
-.material-card__video-thumb {
+.material-card__thumb {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.material-card__video {
-  width: 100%;
-  height: 100%;
-  position: relative;
-}
-
-.material-card__video-placeholder {
+.material-card__placeholder {
   width: 100%;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 32px;
   color: var(--el-text-color-placeholder);
 }
 
-.material-card__video-duration {
+.material-card__play-overlay {
   position: absolute;
-  bottom: 4px;
-  right: 4px;
-  background: rgba(0, 0, 0, 0.7);
-  color: white;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.material-card__play-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.material-card:hover .material-card__play-btn {
+  background: rgba(0, 0, 0, 0.75);
+  transform: scale(1.1);
 }
 
 .material-card__checkbox {
@@ -217,17 +192,5 @@ function formatDuration(seconds?: number): string {
   margin-top: 4px;
   font-size: 11px;
   color: var(--el-text-color-secondary);
-}
-
-.material-card__actions {
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px 8px 8px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.material-card:hover .material-card__actions {
-  opacity: 1;
 }
 </style>

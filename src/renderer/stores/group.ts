@@ -24,6 +24,7 @@ export interface Group {
   description?: string;
   color: string;
   accountIds: string[];
+  accountCount: number;
   publishRule: PublishRule;
   sortOrder: number;
   createdAt: string;
@@ -140,6 +141,7 @@ export const useGroupStore = defineStore('group', () => {
         description: g.description,
         color: g.color,
         accountIds: [],
+        accountCount: g.accountCount || 0,
         publishRule: defaultPublishRule,
         sortOrder: g.sortOrder,
         createdAt: g.createdAt instanceof Date ? g.createdAt.toISOString() : String(g.createdAt),

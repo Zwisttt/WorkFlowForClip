@@ -16,6 +16,7 @@ export interface Material {
   title: string;
   description?: string;
   filePath: string;
+  fileSize: number;
   thumbnailPath?: string;
   platform?: string;
   groupId?: string;
@@ -23,6 +24,22 @@ export interface Material {
   status: MaterialStatus;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface MaterialRow {
+  id: string;
+  type: string;
+  title: string;
+  description: string | null;
+  file_path: string;
+  file_size: number;
+  thumbnail_path: string | null;
+  platform: string | null;
+  group_id: string | null;
+  metadata: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // ─── 数据库行映射 ────────────────────────────────────────────
@@ -125,6 +142,11 @@ export interface IMaterialService {
 
   // 下载
   downloadMaterials(ids: string[], targetDir: string): Promise<void>;
+
+  // 素材库路径
+  getDefaultMaterialLibraryPath(): string;
+  getMaterialLibraryPath(): string;
+  setMaterialLibraryPath(path: string): Promise<void>;
 
   // 生命周期
   initialize(): Promise<void>;

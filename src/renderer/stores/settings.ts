@@ -21,6 +21,7 @@ export interface AppSettings {
   notificationMonitorAlerts: boolean;
   notificationAnomalyAlerts: boolean;
   notificationCriticalOnly: boolean;
+  materialLibraryPath: string;
 }
 
 const defaultSettings: AppSettings = {
@@ -43,6 +44,7 @@ const defaultSettings: AppSettings = {
   notificationMonitorAlerts: true,
   notificationAnomalyAlerts: true,
   notificationCriticalOnly: false,
+  materialLibraryPath: '',
 };
 
 export const useSettingsStore = defineStore('settings', () => {

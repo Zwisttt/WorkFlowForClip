@@ -340,6 +340,14 @@ const api = {
       ipcRenderer.invoke('material:download', ids, targetDir),
     moveToGroup: (ids: string[], groupId: string | null): Invoke<{ success: string[]; failed: string[] }> =>
       ipcRenderer.invoke('material:moveToGroup', ids, groupId),
+    getLibraryPath: (): Invoke<string> =>
+      ipcRenderer.invoke('material:getLibraryPath'),
+    setLibraryPath: (path: string): Invoke<void> =>
+      ipcRenderer.invoke('material:setLibraryPath', path),
+    regenerateThumbnails: (): Invoke<{ success: number; failed: number }> =>
+      ipcRenderer.invoke('material:regenerateThumbnails'),
+    openInFolder: (filePath: string): Invoke<void> =>
+      ipcRenderer.invoke('material:openInFolder', filePath),
   },
 
   materialGroup: {

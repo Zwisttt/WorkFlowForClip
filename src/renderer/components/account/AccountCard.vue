@@ -117,26 +117,22 @@
           </div>
         </div>
       </el-popover>
-      <template v-if="accountGroupInfos.length">
-        <span
-          v-for="gc in accountGroupInfos"
-          :key="gc.id"
-          ref="groupTriggerRef"
-          class="account-card__tag account-card__tag--group"
-          :style="{ background: gc.color + '22', color: gc.color, borderColor: gc.color + '44' }"
-          @click.stop="showGroupPicker = true"
-        >
-          {{ gc.name }}
-        </span>
-      </template>
-      <span
-        v-else
-        ref="groupTriggerRef"
-        class="account-card__tag account-card__tag--empty"
-        @click.stop="showGroupPicker = true"
+      <span ref="groupTriggerRef" class="account-card__tag"
+        :class="accountGroupInfos.length ? 'account-card__tag--group' : 'account-card__tag--empty'"
+        @click.stop="showGroupPicker = !showGroupPicker"
       >
-        <el-icon :size="11"><FolderOpened /></el-icon>
-        分组+
+        <template v-if="accountGroupInfos.length">
+          <span
+            v-for="gc in accountGroupInfos"
+            :key="gc.id"
+            class="account-card__group-chip"
+            :style="{ background: gc.color + '22', color: gc.color }"
+          >{{ gc.name }}</span>
+        </template>
+        <template v-else>
+          <el-icon :size="11"><FolderOpened /></el-icon>
+          分组+
+        </template>
       </span>
     </div>
 
@@ -194,6 +190,7 @@ import { computed, ref, onMounted } from 'vue';
 import { Delete, Stamp, Connection, FolderOpened, CircleCheck, ChatLineRound, EditPen, Share } from '@element-plus/icons-vue';
 import type { Account } from '@/renderer/stores/account';
 import { useAccountStore } from '@/renderer/stores/account';
+import { useGroupStore } from '@/renderer/stores/group';
 
 const props = defineProps<{
   account: Account;
@@ -208,6 +205,7 @@ defineEmits<{
 }>();
 
 const store = useAccountStore();
+const groupStore = useGroupStore();
 const hovered = ref(false);
 const editingRemark = ref(false);
 const remarkInput = ref('');
@@ -328,7 +326,7 @@ async function toggleGroup(groupId: string) {
   if (!window.matrixflow?.accounts?.setGroup) return;
   const action = activeGroupIds.value.has(groupId) ? 'remove' : 'add';
   await window.matrixflow.accounts.setGroup(props.account.id, groupId, action);
-  await store.fetchAccounts();
+  await Promise.all([store.fetchAccounts(), groupStore.fetchGroups()]);
 }
 
 async function clearAllGroups() {
@@ -337,14 +335,21 @@ async function clearAllGroups() {
   for (const gid of activeGroupIds.value) {
     await window.matrixflow.accounts.setGroup(props.account.id, gid, 'remove');
   }
-  await store.fetchAccounts();
+  await Promise.all([store.fetchAccounts(), groupStore.fetchGroups()]);
 }
 
-function openHomepage() {
-  const url = props.account.homepageUrl;
-  if (url) {
-    window.open(url, '_blank');
-  }
+const PLATFORM_HOMEPAGE: Record<string, string> = {
+  douyin: 'https://creator.douyin.com',
+  xiaohongshu: 'https://creator.xiaohongshu.com',
+  kuaishou: 'https://cp.kuaishou.com/profile',
+  bilibili: 'https://member.bilibili.com',
+  weixin_video: 'https://channels.weixin.qq.com',
+};
+
+async function openHomepage() {
+  const url = props.account.homepageUrl || PLATFORM_HOMEPAGE[props.account.platform];
+  if (!url) return;
+  await window.matrixflow.browser.openAccountBrowser(props.account.id, url);
 }
 </script>
 
@@ -524,12 +529,23 @@ function openHomepage() {
 }
 
 .account-card__tag--group {
-  border: 1px solid;
+  border: 1px solid var(--color-border-light);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
 }
 
 .account-card__tag--group:hover {
   filter: brightness(0.95);
+}
+
+.account-card__group-chip {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  line-height: 1.4;
 }
 
 .account-card__picker {

@@ -54,7 +54,7 @@ export class AccountService implements IAccountService {
 
   dispose(): void {
     if (this.cookieCheckTimer) {
-      clearInterval(this.cookieCheckTimer);
+      clearTimeout(this.cookieCheckTimer as unknown as ReturnType<typeof setTimeout>);
       this.cookieCheckTimer = null;
     }
     if (this.sessionCleanupTimer) {
@@ -481,8 +481,14 @@ export class AccountService implements IAccountService {
   }
 
   private startCookiePeriodicCheck(): void {
-    this.cookieCheckTimer = setInterval(async () => {
+    const check = async () => {
       try {
+        const autoCheck = await this.readSetting<boolean>('autoCheckCookie', true);
+        if (!autoCheck) {
+          logger.info('Cookie 自动检测已关闭，跳过');
+          return;
+        }
+
         const accounts = await this.getAllAccounts();
         const activeAccounts = accounts.filter((a) => a.status === 'active');
 
@@ -494,7 +500,33 @@ export class AccountService implements IAccountService {
       } catch (err) {
         logger.error('定期 Cookie 检查失败', err);
       }
-    }, COOKIE_CHECK_INTERVAL_MS);
+    };
+
+    const scheduleNext = async () => {
+      const intervalMin = await this.readSetting<number>('cookieCheckInterval', 30);
+      const intervalMs = Math.max(intervalMin, 10) * 60 * 1000;
+      this.cookieCheckTimer = setTimeout(async () => {
+        await check();
+        scheduleNext();
+      }, intervalMs) as unknown as ReturnType<typeof setInterval>;
+    };
+
+    scheduleNext();
+  }
+
+  private async readSetting<T>(key: string, fallback: T): Promise<T> {
+    try {
+      const db = this.requireDatabase();
+      const row = db.prepare('SELECT value FROM platform_configs WHERE key = ?').get(key) as any;
+      if (row?.value) {
+        try {
+          return JSON.parse(row.value) as T;
+        } catch {
+          return row.value as T;
+        }
+      }
+    } catch {}
+    return fallback;
   }
 
   private startSessionCleanup(): void {

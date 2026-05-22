@@ -1,8 +1,9 @@
 import { initSentryMain } from './core/SentryInit';
 initSentryMain();
 
-import { app, BrowserWindow, ipcMain, protocol, net } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { AppLifecycle } from './core/AppLifecycle';
 import { ConfigManager } from './core/ConfigManager';
 import { EventBus } from './core/EventBus';
@@ -13,11 +14,25 @@ import { taskScheduler } from './core/TaskScheduler';
 import { selectorUpdateService } from './core/SelectorUpdateService';
 import { platformConfigLoader } from './core/PlatformConfigLoader';
 import { registerIpcHandlers } from './ipc/handlers';
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'local-file',
+    privileges: {
+      secure: true,
+      standard: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      bypassCSP: true,
+    },
+  },
+]);
 import { registerAccountLoginHandlers } from './services/ipc-handlers';
 import { autoUpdaterService } from './core/AutoUpdater';
 import { initDatabase, closeDatabase } from './data/Database';
 import { registerAllAdapters, PlatformRegistry } from './platform/adapter';
 import { multiPanelService } from './services/MultiPanelService';
+import { materialService } from './services/MaterialService';
 
 const logger = new Logger('Main');
 
@@ -66,9 +81,101 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  protocol.handle('local-file', (request) => {
-    const filePath = decodeURIComponent(request.url.replace('local-file://', ''));
-    return net.fetch(`file://${filePath}`);
+  protocol.handle('local-file', async (request) => {
+    try {
+      const url = new URL(request.url);
+      // Chromium 会把 // 后的第一段当 host 并转小写
+      // local-file:///Volumes/... → host="" pathname="/Volumes/..."
+      // local-file://Volumes/... → host="volumes" pathname="/..."
+      // 两种情况都需要处理
+      let filePath: string;
+      if (url.host) {
+        filePath = '/' + url.host + decodeURIComponent(url.pathname);
+      } else {
+        filePath = decodeURIComponent(url.pathname);
+      }
+
+      if (!path.isAbsolute(filePath)) {
+        return new Response('Forbidden', { status: 403 });
+      }
+
+      if (!fs.existsSync(filePath)) {
+        return new Response(`Not found: ${path.basename(filePath)}`, { status: 404 });
+      }
+
+      const stat = fs.statSync(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      let contentType = 'application/octet-stream';
+
+      switch (ext) {
+        case '.jpg':
+        case '.jpeg':
+          contentType = 'image/jpeg';
+          break;
+        case '.png':
+          contentType = 'image/png';
+          break;
+        case '.gif':
+          contentType = 'image/gif';
+          break;
+        case '.webp':
+          contentType = 'image/webp';
+          break;
+        case '.mp4':
+          contentType = 'video/mp4';
+          break;
+        case '.webm':
+          contentType = 'video/webm';
+          break;
+        case '.mov':
+          contentType = 'video/quicktime';
+          break;
+      }
+
+      // 处理 Range 请求（<video> 元素需要）
+      const rangeHeader = request.headers.get('range');
+      if (rangeHeader) {
+        const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+        if (match) {
+          const start = match[1] ? parseInt(match[1], 10) : 0;
+          const end = match[2] ? parseInt(match[2], 10) : stat.size - 1;
+          const chunkSize = end - start + 1;
+
+          if (start >= stat.size || end >= stat.size) {
+            return new Response('Range Not Satisfiable', { status: 416 });
+          }
+
+          const buffer = Buffer.alloc(chunkSize);
+          const fd = fs.openSync(filePath, 'r');
+          fs.readSync(fd, buffer, 0, chunkSize, start);
+          fs.closeSync(fd);
+
+          return new Response(buffer, {
+            status: 206,
+            headers: {
+              'Content-Type': contentType,
+              'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+              'Content-Length': String(chunkSize),
+              'Accept-Ranges': 'bytes',
+              'Cache-Control': 'public, max-age=31536000',
+            },
+          });
+        }
+      }
+
+      const data = fs.readFileSync(filePath);
+      return new Response(data, {
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': String(stat.size),
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=31536000',
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(`Error: ${message}`, { status: 500 });
+    }
   });
 
   logger.info('MatrixFlow 启动中...');
@@ -93,6 +200,9 @@ app.whenReady().then(async () => {
 
   await platformConfigLoader.initialize();
   logger.info('平台配置加载器已启动');
+
+  await materialService.initialize();
+  logger.info('素材管理服务已启动');
 
   const eventBus = EventBus.getInstance();
   const lifecycle = new AppLifecycle(config, eventBus);
@@ -126,6 +236,9 @@ app.on('before-quit', async () => {
 
   taskScheduler.stop();
   logger.info('任务调度器已停止');
+
+  materialService.dispose();
+  logger.info('素材管理服务已停止');
 
   await browserPool.shutdown();
   logger.info('浏览器池已关闭');

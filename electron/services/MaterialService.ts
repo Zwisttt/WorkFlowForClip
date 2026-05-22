@@ -1,6 +1,8 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { app } from 'electron';
+import ffmpeg from 'fluent-ffmpeg';
 import { Logger } from '../core/Logger';
 import { EventBus } from '../core/EventBus';
 import { getDatabase, isDatabaseAvailable } from '../data/Database';
@@ -25,13 +27,13 @@ import { MaterialEvent, FILE_VALIDATION } from './types/material';
 
 const logger = new Logger('MaterialService');
 
-const MATERIALS_DIR = path.join(process.cwd(), 'data', 'materials');
-const THUMBNAILS_DIR = path.join(process.cwd(), 'data', 'thumbnails');
 const DEFAULT_PAGE_SIZE = 20;
 
 export class MaterialService implements IMaterialService {
   private static instance: MaterialService;
   private initialized = false;
+  private materialsDir: string = '';
+  private thumbnailsDir: string = '';
 
   private constructor() {}
 
@@ -45,11 +47,35 @@ export class MaterialService implements IMaterialService {
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
+    const userDataPath = app.getPath('userData');
+    const defaultPath = path.join(userDataPath, 'data', 'materials');
+    
+    const savedPath = await this.loadSavedLibraryPath();
+    this.materialsDir = savedPath || defaultPath;
+    this.thumbnailsDir = path.join(this.materialsDir, '.thumbnails');
+
     this.ensureSchema();
     this.ensureDirectories();
 
     this.initialized = true;
-    logger.info('素材管理服务初始化完成');
+    logger.info(`素材管理服务初始化完成: ${this.materialsDir}`);
+  }
+
+  private async loadSavedLibraryPath(): Promise<string | null> {
+    try {
+      const db = this.requireDatabase();
+      const stmt = db.prepare("SELECT config_value FROM platform_configs WHERE platform = 'app' AND config_key = ?");
+      const row = stmt.get('materialLibraryPath') as { config_value: string } | undefined;
+      if (row?.config_value) {
+        const parsed = JSON.parse(row.config_value);
+        if (typeof parsed === 'string' && parsed.trim()) {
+          return parsed.trim();
+        }
+      }
+    } catch (err) {
+      logger.warn('加载素材库路径配置失败:', err);
+    }
+    return null;
   }
 
   dispose(): void {
@@ -57,13 +83,64 @@ export class MaterialService implements IMaterialService {
     logger.info('素材管理服务已释放');
   }
 
+  getDefaultMaterialLibraryPath(): string {
+    const userDataPath = app.getPath('userData');
+    return path.join(userDataPath, 'data', 'materials');
+  }
+
+  getMaterialLibraryPath(): string {
+    return this.materialsDir || this.getDefaultMaterialLibraryPath();
+  }
+
+  async setMaterialLibraryPath(customPath: string): Promise<void> {
+    if (!fs.existsSync(customPath)) {
+      fs.mkdirSync(customPath, { recursive: true });
+    }
+    this.materialsDir = customPath;
+    this.thumbnailsDir = path.join(customPath, '.thumbnails');
+    this.ensureDirectories();
+    
+    const db = this.requireDatabase();
+    const stmt = db.prepare(`
+      INSERT INTO platform_configs (id, platform, config_key, config_value, updated_at)
+      VALUES (?, 'app', ?, ?, datetime('now'))
+      ON CONFLICT(platform, config_key) DO UPDATE SET config_value = excluded.config_value, updated_at = datetime('now')
+    `);
+    stmt.run('materialLibraryPath', 'materialLibraryPath', JSON.stringify(customPath));
+    
+    logger.info(`素材库路径已更新并保存: ${this.materialsDir}`);
+  }
+
   private ensureDirectories(): void {
-    if (!fs.existsSync(MATERIALS_DIR)) {
-      fs.mkdirSync(MATERIALS_DIR, { recursive: true });
+    if (!fs.existsSync(this.materialsDir)) {
+      fs.mkdirSync(this.materialsDir, { recursive: true });
     }
-    if (!fs.existsSync(THUMBNAILS_DIR)) {
-      fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
+    if (!fs.existsSync(this.thumbnailsDir)) {
+      fs.mkdirSync(this.thumbnailsDir, { recursive: true });
     }
+  }
+
+  async regenerateThumbnails(): Promise<{ success: number; failed: number }> {
+    const db = this.requireDatabase();
+    const rows = db.prepare("SELECT id, file_path, type FROM materials WHERE status = 'active' AND (thumbnail_path IS NULL OR thumbnail_path = '')").all() as MaterialRow[];
+    
+    let success = 0;
+    let failed = 0;
+
+    for (const row of rows) {
+      if (row.type === 'video' || row.type === 'image') {
+        const thumbnailPath = await this.generateThumbnail(row.file_path, row.type as MaterialType);
+        if (thumbnailPath) {
+          db.prepare('UPDATE materials SET thumbnail_path = ?, updated_at = ? WHERE id = ?').run(thumbnailPath, new Date().toISOString(), row.id);
+          success++;
+        } else {
+          failed++;
+        }
+      }
+    }
+
+    logger.info(`缩略图重新生成完成: 成功=${success}, 失败=${failed}`);
+    return { success, failed };
   }
 
   private ensureSchema(): void {
@@ -82,6 +159,7 @@ export class MaterialService implements IMaterialService {
         title TEXT NOT NULL,
         description TEXT,
         file_path TEXT NOT NULL,
+        file_size INTEGER DEFAULT 0,
         thumbnail_path TEXT,
         platform TEXT,
         group_id TEXT,
@@ -98,6 +176,11 @@ export class MaterialService implements IMaterialService {
       CREATE INDEX IF NOT EXISTS idx_materials_created ON materials(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_materials_group_type ON materials(group_id, type);
     `);
+
+    const columns = db.prepare("PRAGMA table_info('materials')").all() as { name: string }[];
+    if (!columns.some(c => c.name === 'file_size')) {
+      db.exec('ALTER TABLE materials ADD COLUMN file_size INTEGER DEFAULT 0');
+    }
   }
 
   private requireDatabase(): ReturnType<typeof getDatabase> {
@@ -164,22 +247,30 @@ export class MaterialService implements IMaterialService {
 
     const ext = path.extname(filePath).toLowerCase();
     const materialType = validation.type!;
+    const now = new Date();
     const filename = `${Date.now()}_${crypto.randomUUID()}${ext}`;
-    const destPath = path.join(MATERIALS_DIR, filename);
+
+    const dateDir = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const typeDir = materialType === 'video' ? 'videos' : 'images';
+    const subDir = path.join(this.materialsDir, dateDir, typeDir);
+    fs.mkdirSync(subDir, { recursive: true });
+
+    const destPath = path.join(subDir, filename);
 
     fs.copyFileSync(filePath, destPath);
 
+    const fileSize = fs.statSync(destPath).size;
     const thumbnailPath = await this.generateThumbnail(destPath, materialType);
 
     const id = crypto.randomUUID();
-    const now = new Date().toISOString();
+    const isoNow = now.toISOString();
     const materialTitle = title || path.basename(filePath, ext);
 
     const db = this.requireDatabase();
     db.prepare(
-      `INSERT INTO materials (id, type, title, description, file_path, thumbnail_path, group_id, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
-    ).run(id, materialType, materialTitle, description || null, destPath, thumbnailPath, groupId || null, now, now);
+      `INSERT INTO materials (id, type, title, description, file_path, file_size, thumbnail_path, group_id, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+    ).run(id, materialType, materialTitle, description || null, destPath, fileSize, thumbnailPath, groupId || null, isoNow, isoNow);
 
     const material = await this.getMaterial(id);
 
@@ -397,7 +488,7 @@ export class MaterialService implements IMaterialService {
 
     try {
       const filename = `${path.basename(filePath, path.extname(filePath))}_thumb.jpg`;
-      const thumbnailPath = path.join(THUMBNAILS_DIR, filename);
+      const thumbnailPath = path.join(this.thumbnailsDir, filename);
 
       if (type === 'image') {
         const sharp = await import('sharp');
@@ -409,7 +500,7 @@ export class MaterialService implements IMaterialService {
       }
 
       if (type === 'video') {
-        return null;
+        return await this.generateVideoThumbnail(filePath, thumbnailPath);
       }
 
       return null;
@@ -417,6 +508,26 @@ export class MaterialService implements IMaterialService {
       logger.error(`缩略图生成失败: ${filePath}`, err);
       return null;
     }
+  }
+
+  private async generateVideoThumbnail(videoPath: string, thumbnailPath: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      ffmpeg(videoPath)
+        .screenshots({
+          count: 1,
+          folder: this.thumbnailsDir,
+          filename: path.basename(thumbnailPath),
+          size: '300x200',
+        })
+        .on('end', () => {
+          logger.info(`视频缩略图生成成功: ${thumbnailPath}`);
+          resolve(thumbnailPath);
+        })
+        .on('error', (err: Error) => {
+          logger.warn(`视频缩略图生成失败 (ffmpeg 可能未安装): ${videoPath}`, err.message);
+          resolve(null);
+        });
+    });
   }
 
   private sanitizeFilename(filename: string): string {
@@ -436,6 +547,7 @@ export class MaterialService implements IMaterialService {
       title: row.title,
       description: row.description || undefined,
       filePath: row.file_path,
+      fileSize: row.file_size || 0,
       thumbnailPath: row.thumbnail_path || undefined,
       platform: row.platform || undefined,
       groupId: row.group_id || undefined,

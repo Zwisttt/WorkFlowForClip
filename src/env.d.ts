@@ -236,6 +236,10 @@ interface MatrixFlowAPI {
     batchDelete: (ids: string[]) => Promise<IpcResult<{ success: string[]; failed: string[] }>>;
     download: (ids: string[], targetDir: string) => Promise<IpcResult<void>>;
     moveToGroup: (ids: string[], groupId: string | null) => Promise<IpcResult<{ success: string[]; failed: string[] }>>;
+    getLibraryPath: () => Promise<IpcResult<string>>;
+    setLibraryPath: (path: string) => Promise<IpcResult<void>>;
+    regenerateThumbnails: () => Promise<IpcResult<{ success: number; failed: number }>>;
+    openInFolder: (filePath: string) => Promise<IpcResult<void>>;
   };
 
   materialGroup: {

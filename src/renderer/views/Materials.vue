@@ -76,19 +76,14 @@
       @upload="handleUpload"
     />
 
-    <el-dialog v-model="previewVisible" title="素材预览" width="800px">
-      <img
-        v-if="previewMaterial?.type === 'image'"
-        :src="`local-file://${encodeURIComponent(previewMaterial?.filePath || '')}`"
-        style="width: 100%"
-      />
-      <video
-        v-else
-        :src="`local-file://${encodeURIComponent(previewMaterial?.filePath || '')}`"
-        controls
-        style="width: 100%"
-      />
-    </el-dialog>
+    <MaterialPreviewDialog
+      v-model:visible="previewVisible"
+      :material="previewMaterial"
+      :materials="filteredMaterials"
+      :current-index="previewIndex"
+      @error="handlePreviewError"
+      @navigate="handleNavigate"
+    />
   </div>
 </template>
 
@@ -99,6 +94,7 @@ import { Upload } from '@element-plus/icons-vue';
 import { useMaterialsStore } from '../stores/materials';
 import GroupSidebar from '../components/materials/GroupSidebar.vue';
 import MaterialCard from '../components/materials/MaterialCard.vue';
+import MaterialPreviewDialog from '../components/materials/MaterialPreviewDialog.vue';
 import BatchActionBar from '../components/materials/BatchActionBar.vue';
 import UploadDialog from '../components/materials/UploadDialog.vue';
 import Loading from '../components/common/Loading.vue';
@@ -112,6 +108,7 @@ const typeFilter = ref('');
 const uploadDialogVisible = ref(false);
 const previewVisible = ref(false);
 const previewMaterial = ref<Material | null>(null);
+const previewIndex = ref(0);
 
 const filteredMaterials = computed(() => {
   let result = store.filteredMaterials;
@@ -149,7 +146,20 @@ function handleSelect(id: string, selected: boolean) {
 
 function handlePreview(material: Material) {
   previewMaterial.value = material;
+  previewIndex.value = filteredMaterials.value.findIndex(m => m.id === material.id);
   previewVisible.value = true;
+}
+
+function handleNavigate(index: number) {
+  const target = filteredMaterials.value[index];
+  if (target) {
+    previewMaterial.value = target;
+    previewIndex.value = index;
+  }
+}
+
+function handlePreviewError() {
+  ElMessage.error('无法加载素材文件，请检查文件是否存在');
 }
 
 async function handleDelete(id: string) {
