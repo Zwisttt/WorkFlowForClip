@@ -1071,9 +1071,10 @@ async function openInChrome(url: string) {
 
 /* ===== 平台网格 ===== */
 .platform-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
 }
 
 .platform-card {
@@ -1081,7 +1082,9 @@ async function openInChrome(url: string) {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  padding: 16px 8px;
+  padding: 14px 6px;
+  flex: 0 0 calc((100% - 20px) / 3);
+  min-width: 90px;
   min-height: 100px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-lg);
