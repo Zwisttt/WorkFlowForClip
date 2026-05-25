@@ -64,25 +64,20 @@
               <span class="panel__title">选择平台</span>
               <span class="panel__subtitle">请选择需要登录的平台</span>
             </div>
-            <div class="panel__badge">+ 平台</div>
           </div>
-          <div class="platform-grid">
-            <div
-              v-for="platform in platforms"
-              :key="platform.value"
-              class="platform-card"
-              :class="{ 'platform-card--active': selectedPlatform === platform.value }"
-              :style="{ '--platform-color': platform.color }"
-              @click="selectedPlatform = platform.value"
-            >
-              <div class="platform-card__bg"></div>
-              <div class="platform-card__icon">
-                <span class="platform-card__initial">{{ platform.label.charAt(0) }}</span>
+              <div class="platform-grid">
+                <div
+                  v-for="platform in platforms"
+                  :key="platform.value"
+                  class="platform-card"
+                  :class="{ 'platform-card--active': selectedPlatform === platform.value }"
+                  :style="{ '--platform-color': platform.color }"
+                  @click="selectedPlatform = platform.value"
+                >
+                  <div class="platform-card__icon" v-html="getPlatformIcon(platform.value)"></div>
+                  <span class="platform-card__name">{{ platform.label }}</span>
+                </div>
               </div>
-              <span class="platform-card__name">{{ platform.label }}</span>
-              <span class="platform-card__desc">官方安全登录</span>
-            </div>
-          </div>
         </div>
 
         <!-- 右面板 — 配置模式 -->
@@ -92,7 +87,6 @@
               <span class="panel__title">配置模式</span>
               <span class="panel__subtitle">根据业务需求选择登录环境</span>
             </div>
-            <span class="panel__badge panel__badge--secure">Enterprise Secure</span>
           </div>
 
           <!-- 配置模式卡片 -->
@@ -383,6 +377,7 @@ import {
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { useAccountStore, type BrowserConfig } from '@/renderer/stores/account';
+import { PLATFORM_ICONS } from '@/renderer/constants/platformIcons';
 
 const props = defineProps<{ modelValue: boolean }>();
 const emit = defineEmits<{ 'update:modelValue': [val: boolean]; success: [] }>();
@@ -418,6 +413,10 @@ const platforms = [
   { label: '快手', value: 'kuaishou', color: '#FF4906' },
   { label: 'B站', value: 'bilibili', color: '#00A1D6' },
 ];
+
+function getPlatformIcon(platform: string): string {
+  return PLATFORM_ICONS[platform] || '';
+}
 
 const fingerprintOptions = ref<Array<{ id: string; name: string }>>([]);
 const proxyOptions = ref<Array<{ id: string; name: string; host: string; port: number }>>([]);
@@ -1073,18 +1072,16 @@ async function openInChrome(url: string) {
 /* ===== 平台网格 ===== */
 .platform-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: var(--space-2);
-  position: relative;
-  z-index: 1;
 }
 
 .platform-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-3);
   border: 2px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -1093,22 +1090,10 @@ async function openInChrome(url: string) {
   overflow: hidden;
 }
 
-.platform-card__bg {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.04) 0%, transparent 100%);
-  opacity: 0;
-  transition: opacity 0.25s;
-}
-
 .platform-card:hover {
   border-color: var(--color-primary-light);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
-}
-
-.platform-card:hover .platform-card__bg {
-  opacity: 1;
 }
 
 .platform-card--active {
@@ -1122,6 +1107,10 @@ async function openInChrome(url: string) {
   color: #fff;
 }
 
+.platform-card--active .platform-card__icon :deep(svg) {
+  filter: brightness(0) invert(1);
+}
+
 .platform-card__icon {
   width: 36px;
   height: 36px;
@@ -1132,28 +1121,18 @@ async function openInChrome(url: string) {
   border-radius: var(--radius-md);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
-  position: relative;
-  z-index: 1;
+  overflow: hidden;
 }
 
-.platform-card__initial {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-bold);
+.platform-card__icon :deep(svg) {
+  width: 26px;
+  height: 26px;
 }
 
 .platform-card__name {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-primary);
-  position: relative;
-  z-index: 1;
-}
-
-.platform-card__desc {
-  font-size: var(--font-size-2xs);
-  color: var(--color-text-placeholder);
-  position: relative;
-  z-index: 1;
 }
 
 /* ===== 配置卡片 ===== */
