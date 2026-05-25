@@ -252,16 +252,23 @@ class MultiPanelService {
     if (!session) return;
 
     const [contentWidth, contentHeight] = this.mainWindow.getContentSize();
-    const sidebarWidth = 220;
+
+    const mainSidebarWidth = 150;
+    const contentPadding = 24;
+    const panelSidebarWidth = 220;
+    const titlebarHeight = 38;
+    const headerHeight = 56;
     const tabBarHeight = 36;
     const toolbarHeight = 44;
 
     const bounds = {
-      x: sidebarWidth,
-      y: tabBarHeight + toolbarHeight,
-      width: contentWidth - sidebarWidth,
-      height: contentHeight - tabBarHeight - toolbarHeight,
+      x: mainSidebarWidth + contentPadding + panelSidebarWidth,
+      y: titlebarHeight + headerHeight + contentPadding + tabBarHeight + toolbarHeight,
+      width: contentWidth - mainSidebarWidth - contentPadding - panelSidebarWidth - contentPadding,
+      height: contentHeight - titlebarHeight - headerHeight - contentPadding - tabBarHeight - toolbarHeight,
     };
+
+    logger.info(`layoutActivePanel: bounds={x:${bounds.x}, y:${bounds.y}, w:${bounds.width}, h:${bounds.height}}, contentSize={w:${contentWidth}, h:${contentHeight}}`);
 
     browserManager.layoutEmbedded(session.accountId, bounds);
   }
