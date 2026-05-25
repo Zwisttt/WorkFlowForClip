@@ -1,19 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Monitor } from '@element-plus/icons-vue';
 import { usePanelStore } from '@/stores/panel';
 import PanelSidebar from '@/renderer/components/panel/PanelSidebar.vue';
 import BrowserTabs from '@/renderer/components/panel/BrowserTabs.vue';
 import BrowserContent from '@/renderer/components/panel/BrowserContent.vue';
-import Loading from '@/renderer/components/common/Loading.vue';
-import Empty from '@/renderer/components/common/Empty.vue';
 
 const panelStore = usePanelStore();
 
 const activePanels = computed(() => panelStore.panels);
 const activePanelId = computed(() => panelStore.focusedPanelId);
-const activePanel = computed(() => 
+const activePanel = computed(() =>
   activePanels.value.find(p => p.id === activePanelId.value) || null
 );
 
@@ -25,9 +22,9 @@ onMounted(async () => {
 async function handleSelectAccount(accountId: string) {
   const result = await panelStore.openPanel(accountId);
   if (result) {
-    ElMessage.success(`已打开 ${result.nickname} 的面板`);
+    ElMessage.success(`已打开 ${result.nickname} 的工作区`);
   } else if (panelStore.panels.length >= panelStore.maxPanels) {
-    ElMessage.warning(`最多同时打开 ${panelStore.maxPanels} 个面板`);
+    ElMessage.warning(`最多同时打开 ${panelStore.maxPanels} 个工作区`);
   }
 }
 
@@ -43,6 +40,15 @@ function handleSelectTab(panelId: string) {
   panelStore.focusPanel(panelId);
 }
 
+function handleReorder(fromId: string, toId: string) {
+  const panels = panelStore.panels;
+  const fromIdx = panels.findIndex(p => p.id === fromId);
+  const toIdx = panels.findIndex(p => p.id === toId);
+  if (fromIdx === -1 || toIdx === -1) return;
+  const [moved] = panels.splice(fromIdx, 1);
+  panels.splice(toIdx, 0, moved);
+}
+
 function handleRefresh() {
   panelStore.loadAvailableAccounts();
 }
@@ -50,17 +56,10 @@ function handleRefresh() {
 function handleAddAccount() {
   ElMessage.info('请在账号管理页面添加账号');
 }
-
-function handleOpenDevTools() {
-  if (activePanelId.value) {
-    ElMessage.info('开发者工具功能开发中');
-  }
-}
 </script>
 
 <template>
   <div class="multi-panel-view">
-    <!-- 左侧账号面板 -->
     <PanelSidebar
       :accounts="panelStore.availableAccounts"
       :active-panel-ids="panelStore.panels.map(p => p.accountId)"
@@ -70,47 +69,44 @@ function handleOpenDevTools() {
       @select-account="handleSelectAccount"
     />
 
-    <!-- 右侧浏览器区域 -->
-    <div class="multi-panel-view__main">
-      <!-- 有打开的面板 -->
+    <div class="workspace">
       <template v-if="activePanels.length > 0">
-        <!-- 标签栏 -->
         <BrowserTabs
           :panels="activePanels"
           :active-panel-id="activePanelId"
           @select="handleSelectTab"
           @close="handleCloseTab"
           @close-all="handleCloseAllTabs"
+          @reorder="handleReorder"
         />
 
-        <!-- 内容区 -->
         <BrowserContent
           :panel="activePanel"
-          @open-dev-tools="handleOpenDevTools"
           @close="handleCloseTab"
         />
       </template>
 
-      <!-- 空状态 -->
       <template v-else>
-        <div class="multi-panel-view__empty">
-          <div class="empty-illustration">
-            <el-icon :size="80"><Monitor /></el-icon>
-          </div>
-          <h3 class="empty-title">选择账号开始矩阵管理</h3>
-          <p class="empty-hint">从左侧面板选择账号，打开创作者中心</p>
-          <div class="empty-features">
-            <div class="feature-item">
-              <span class="feature-dot" />
+        <div class="workspace__empty">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#334155" stroke-width="1">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+          </svg>
+          <h3 class="workspace__empty-title">选择账号开始矩阵管理</h3>
+          <p class="workspace__empty-hint">从左侧面板选择账号，打开创作者中心</p>
+          <div class="workspace__empty-features">
+            <div class="workspace__feature">
+              <span class="workspace__feature-dot" />
               <span>支持抖音、小红书、视频号、快手、B站等平台</span>
             </div>
-            <div class="feature-item">
-              <span class="feature-dot" />
+            <div class="workspace__feature">
+              <span class="workspace__feature-dot" />
               <span>内嵌浏览器与外部浏览器自由切换</span>
             </div>
-            <div class="feature-item">
-              <span class="feature-dot" />
-              <span>最多同时管理 10 个账号面板</span>
+            <div class="workspace__feature">
+              <span class="workspace__feature-dot" />
+              <span>最多同时管理 10 个账号工作区</span>
             </div>
           </div>
         </div>
@@ -123,66 +119,65 @@ function handleOpenDevTools() {
 .multi-panel-view {
   display: flex;
   height: 100%;
-  background: var(--color-bg-page);
+  background: #0f172a;
 }
 
-.multi-panel-view__main {
+.workspace {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  background: #0f172a;
 }
 
-/* ── 空状态 ── */
-.multi-panel-view__empty {
+.workspace__empty {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--space-8);
+  padding: 48px;
   text-align: center;
+  background: #0f172a;
 }
 
-.empty-illustration {
-  color: var(--color-text-placeholder);
-  margin-bottom: var(--space-6);
+.workspace__empty-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin: 16px 0 8px;
+  font-family: 'Inter', -apple-system, 'PingFang SC', sans-serif;
 }
 
-.empty-title {
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0 0 var(--space-2);
+.workspace__empty-hint {
+  font-size: 14px;
+  color: #64748b;
+  margin: 0 0 24px;
+  font-family: 'Inter', -apple-system, 'PingFang SC', sans-serif;
 }
 
-.empty-hint {
-  font-size: var(--font-size-base);
-  color: var(--color-text-secondary);
-  margin: 0 0 var(--space-6);
-}
-
-.empty-features {
+.workspace__empty-features {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 12px;
   max-width: 320px;
 }
 
-.feature-item {
+.workspace__feature {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
+  gap: 12px;
+  font-size: 13px;
+  color: #64748b;
+  font-family: 'Inter', -apple-system, 'PingFang SC', sans-serif;
 }
 
-.feature-dot {
+.workspace__feature-dot {
   width: 6px;
   height: 6px;
-  border-radius: var(--radius-full);
-  background: var(--color-primary);
+  border-radius: 50%;
+  background: #2563eb;
   flex-shrink: 0;
 }
 </style>

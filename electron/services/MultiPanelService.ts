@@ -252,15 +252,15 @@ class MultiPanelService {
     if (!session) return;
 
     const [contentWidth, contentHeight] = this.mainWindow.getContentSize();
-    const sidebarWidth = 280;
-    const headerHeight = 60;
-    const addressBarHeight = 40;
+    const sidebarWidth = 220;
+    const tabBarHeight = 36;
+    const toolbarHeight = 44;
 
     const bounds = {
       x: sidebarWidth,
-      y: headerHeight + addressBarHeight,
+      y: tabBarHeight + toolbarHeight,
       width: contentWidth - sidebarWidth,
-      height: contentHeight - headerHeight - addressBarHeight,
+      height: contentHeight - tabBarHeight - toolbarHeight,
     };
 
     browserManager.layoutEmbedded(session.accountId, bounds);
