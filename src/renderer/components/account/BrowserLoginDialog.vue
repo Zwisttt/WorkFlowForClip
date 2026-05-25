@@ -974,8 +974,8 @@ async function openInChrome(url: string) {
 
 /* ===== 两面板布局 ===== */
 .two-panel {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 360px 1fr;
   gap: var(--space-4);
 }
 
@@ -1074,17 +1074,17 @@ async function openInChrome(url: string) {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .platform-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 20px 10px 16px;
-  flex: 0 0 calc((100% - 24px) / 3);
-  min-width: 100px;
+  gap: 8px;
+  padding: 16px 6px 12px;
+  flex: 0 0 calc((100% - 16px) / 3);
+  min-width: 80px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-card);
