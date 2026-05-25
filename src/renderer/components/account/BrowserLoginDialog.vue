@@ -1073,33 +1073,33 @@ async function openInChrome(url: string) {
 .platform-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: var(--space-2);
+  gap: 8px;
 }
 
 .platform-card {
-  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: 2px solid var(--color-border);
+  gap: 10px;
+  padding: 16px 8px;
+  min-height: 100px;
+  border: 1.5px solid var(--color-border);
   border-radius: var(--radius-lg);
+  background: var(--color-bg-card);
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
+  transition: all var(--transition-base);
 }
 
 .platform-card:hover {
+  transform: scale(1.02);
   border-color: var(--color-primary-light);
   box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
 }
 
 .platform-card--active {
-  border-color: var(--color-primary);
   background: var(--color-primary-lighter);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .platform-card--active .platform-card__icon {
@@ -1108,31 +1108,32 @@ async function openInChrome(url: string) {
 }
 
 .platform-card--active .platform-card__icon :deep(svg) {
-  filter: brightness(0) invert(1);
+  filter: brightness(0) saturate(100%) invert(1);
 }
 
 .platform-card__icon {
-  width: 36px;
-  height: 36px;
+  width: 48px;
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg-page);
-  border-radius: var(--radius-md);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  background: #f1f5f9;
+  border-radius: 50%;
+  transition: all var(--transition-base);
   flex-shrink: 0;
   overflow: hidden;
 }
 
 .platform-card__icon :deep(svg) {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
 }
 
 .platform-card__name {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
+  font-size: 13px;
+  font-weight: 600;
   color: var(--color-text-primary);
+  text-align: center;
 }
 
 /* ===== 配置卡片 ===== */
