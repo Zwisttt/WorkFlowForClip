@@ -47,6 +47,13 @@ function handleToolbarDevTools() {
   if (props.panel && panelApi) panelApi.openDevTools(props.panel.id);
 }
 
+function handleToolbarTogglePin() {
+  if (props.panel) {
+    const panel = props.panel as any;
+    panel.pinned = !panel.pinned;
+  }
+}
+
 function handleToolbarNavigate(url: string) {
   if (!url || !props.panel || !panelApi) return;
   const finalUrl = url.startsWith('http') ? url : `https://${url}`;
@@ -97,6 +104,7 @@ onMounted(() => {
         @forward="handleToolbarForward"
         @refresh="handleToolbarRefresh"
         @open-devtools="handleToolbarDevTools"
+        @toggle-pin="handleToolbarTogglePin"
         @navigate="handleToolbarNavigate"
       />
 

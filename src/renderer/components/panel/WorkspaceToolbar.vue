@@ -85,7 +85,6 @@ function handleKeydown(e: KeyboardEvent) {
       <button
         class="workspace-toolbar__nav-btn"
         :class="{ 'workspace-toolbar__nav-btn--disabled': !canGoBack }"
-        :disabled="!canGoBack"
         title="返回"
         @click="emit('back')"
       >
@@ -97,7 +96,6 @@ function handleKeydown(e: KeyboardEvent) {
       <button
         class="workspace-toolbar__nav-btn"
         :class="{ 'workspace-toolbar__nav-btn--disabled': !canGoForward }"
-        :disabled="!canGoForward"
         title="前进"
         @click="emit('forward')"
       >
