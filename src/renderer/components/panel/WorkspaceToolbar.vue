@@ -226,7 +226,6 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 .workspace-toolbar__nav-btn--disabled {
-  opacity: 0.3;
   cursor: default;
 }
 

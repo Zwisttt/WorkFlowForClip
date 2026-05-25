@@ -8,6 +8,7 @@ interface PanelInfo {
   accountId: string;
   platform: string;
   nickname: string;
+  avatar?: string;
   browser_mode?: BrowserMode;
 }
 
@@ -92,6 +93,7 @@ export const usePanelStore = defineStore('panel', () => {
           accountId: result.data.accountId,
           platform: result.data.platform,
           nickname: result.data.nickname,
+          avatar: account?.avatar,
           browser_mode: browserMode,
         };
         panels.value.push(panel);
