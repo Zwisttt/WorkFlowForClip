@@ -13,7 +13,7 @@
         <el-radio-button value="video">视频</el-radio-button>
         <el-radio-button value="image">图文</el-radio-button>
       </el-radio-group>
-      <el-button type="primary" @click="handleUpload">
+      <el-button type="primary" :loading="uploading" @click="handleUpload">
         <el-icon><Upload /></el-icon>
         上传新内容
       </el-button>
@@ -60,9 +60,9 @@
             >
               {{ statusLabel(content.status) }}
             </el-tag>
-            <span v-if="content.tags.length" class="wsc-card__tags">
-              {{ content.tags.slice(0, 2).join('、') }}
-              <template v-if="content.tags.length > 2">+{{ content.tags.length - 2 }}</template>
+            <span v-if="content.tags?.length" class="wsc-card__tags">
+              {{ content.tags!.slice(0, 2).join('、') }}
+              <template v-if="content.tags!.length > 2">+{{ content.tags!.length - 2 }}</template>
             </span>
           </div>
         </div>
@@ -82,6 +82,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { ElMessage } from 'element-plus';
 import { Upload, VideoCamera, Picture, Loading } from '@element-plus/icons-vue';
 import { useContentStore, type ContentItem } from '@/renderer/stores/content';
 
@@ -117,7 +118,7 @@ const filteredContents = computed(() => {
     list = list.filter(
       (c) =>
         c.title.toLowerCase().includes(q) ||
-        c.tags.some((t) => t.toLowerCase().includes(q)),
+        (c.tags && c.tags.some((t) => t.toLowerCase().includes(q))),
     );
   }
 
@@ -163,13 +164,50 @@ function statusTagType(status: string): string {
   return STATUS_MAP[status]?.type || 'info';
 }
 
-function handleUpload() {
-  // UI trigger only — actual upload is handled by parent
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.multiple = true;
-  input.accept = 'video/*,image/*';
-  input.click();
+const uploading = ref(false);
+
+async function handleUpload() {
+  if (!window.matrixflow?.dialog?.openFile) {
+    ElMessage.error('文件选择功能不可用');
+    return;
+  }
+
+  try {
+    const result = await window.matrixflow.dialog.openFile({
+      title: '选择要上传的内容',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '图片和视频', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mov', 'avi'] },
+        { name: '图片', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] },
+        { name: '视频', extensions: ['mp4', 'mov', 'avi'] },
+      ],
+    });
+
+    if (!result) return;
+
+    const paths: string[] = Array.isArray(result) ? result : [result];
+    if (paths.length === 0) return;
+
+    uploading.value = true;
+
+    for (const filePath of paths) {
+      if (!filePath) continue;
+      try {
+        await contentStore.createContent({ filePath });
+      } catch {
+        ElMessage.error(`上传失败: ${filePath.split(/[\\/]/).pop() || filePath}`);
+      }
+    }
+
+    await contentStore.fetchContents();
+    ElMessage.success(`成功上传 ${paths.length} 个文件`);
+  } catch (e) {
+    if ((e as Error)?.message !== 'Error: dialog was cancelled') {
+      ElMessage.error('文件选择失败');
+    }
+  } finally {
+    uploading.value = false;
+  }
 }
 </script>
 
