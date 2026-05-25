@@ -14,8 +14,8 @@ const emit = defineEmits<{
   back: [];
   forward: [];
   refresh: [];
-  openDevTools: [];
-  togglePin: [];
+  'open-devtools': [];
+  'toggle-pin': [];
   navigate: [url: string];
 }>();
 
@@ -176,17 +176,9 @@ function handleKeydown(e: KeyboardEvent) {
       <button
         class="workspace-toolbar__action-btn workspace-toolbar__action-btn--text"
         title="打开控制台"
-        @click="emit('openDevTools')"
+        @click="emit('open-devtools')"
       >
         控制台
-      </button>
-
-      <button
-        class="workspace-toolbar__action-btn workspace-toolbar__action-btn--text"
-        title="固定窗口"
-        @click="emit('togglePin')"
-      >
-        固定
       </button>
     </div>
   </div>
