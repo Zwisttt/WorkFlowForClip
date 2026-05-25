@@ -413,6 +413,7 @@ export function registerIpcHandlers(): void {
         fingerprintId: row.fingerprint_id || undefined,
         proxyId: row.proxy_id || undefined,
         browserMode: row.browser_mode || 'embedded',
+        browser_mode: row.browser_mode || 'embedded',
         status: row.cookie_valid === 1 ? 'online' : 'offline',
         remark: row.remark || undefined,
         createdAt: row.created_at,
@@ -1055,10 +1056,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('accounts:setGroup', async (_, { accountId, groupId, action }: { accountId: string; groupId: string; action: 'add' | 'remove' }) => {
     try {
       const db = getDatabase();
+      const now = new Date().toISOString();
       if (action === 'remove') {
         db.prepare('DELETE FROM account_groups WHERE account_id = ? AND group_id = ?').run(accountId, groupId);
+        const row = db.prepare('SELECT group_id FROM accounts WHERE id = ?').get(accountId) as { group_id: string | null } | undefined;
+        if (row?.group_id === groupId) {
+          db.prepare('UPDATE accounts SET group_id = NULL, updated_at = ? WHERE id = ?').run(now, accountId);
+        }
       } else {
         db.prepare('INSERT OR IGNORE INTO account_groups (account_id, group_id) VALUES (?, ?)').run(accountId, groupId);
+        db.prepare('UPDATE accounts SET group_id = ?, updated_at = ? WHERE id = ?').run(groupId, now, accountId);
       }
       return { success: true };
     } catch (error) {
@@ -1281,47 +1288,19 @@ export function registerIpcHandlers(): void {
       const browserMode = row?.browser_mode || 'embedded';
 
       if (browserMode === 'embedded') {
-        const existing = embeddedContexts.get(accountId);
-        if (existing) {
-          const page = existing.context.pages()[0] || await existing.context.newPage();
-          await page.goto(url, { waitUntil: 'domcontentloaded' });
-          return { success: true };
+        const platform = (db.prepare('SELECT platform FROM accounts WHERE id = ?').get(accountId) as any)?.platform || 'kuaishou';
+        const { browserManager } = await import('../services/embedded-browser/browser-manager');
+
+        if (browserManager.hasTab(accountId)) {
+          const view = browserManager.getView(accountId);
+          if (view) {
+            view.webContents.loadURL(url);
+            browserManager.switchTab(accountId);
+            return { success: true };
+          }
         }
 
-        const launcher = createBrowserLauncher({ type: 'embedded' as BrowserType });
-        const context = await launcher.launch({ type: 'embedded' as BrowserType, headless: false }, accountId);
-
-        const sessionManager = new SessionManager();
-        const state = await sessionManager.load(accountId);
-        if (state && Array.isArray(state.cookies)) {
-          const patchrightCookies: Array<{
-            name: string; value: string; domain?: string; path?: string;
-            expires?: number; httpOnly?: boolean; secure?: boolean; sameSite?: 'Strict' | 'Lax' | 'None'
-          }> = (state.cookies as Array<{
-            name: string; value: string; domain: string; path?: string;
-            secure?: boolean; httpOnly?: boolean; sameSite?: string; expires?: number
-          }>).map(c => ({
-            name: c.name,
-            value: c.value,
-            domain: c.domain,
-            path: c.path || '/',
-            secure: c.secure ?? false,
-            httpOnly: c.httpOnly ?? false,
-            sameSite: ((c.sameSite as string || 'Lax').charAt(0).toUpperCase() + (c.sameSite as string || 'Lax').slice(1).toLowerCase()) as 'Strict' | 'Lax' | 'None',
-            expires: c.expires ?? -1,
-          }));
-          await context.addCookies(patchrightCookies);
-        }
-
-        embeddedContexts.set(accountId, { launcher, context });
-
-        context.on('close', () => {
-          embeddedContexts.delete(accountId);
-        });
-
-        const page = context.pages()[0] || await context.newPage();
-        await page.goto(url, { waitUntil: 'domcontentloaded' });
-
+        await browserManager.createTab(accountId, platform, url);
         return { success: true };
       } else {
         // chrome / fingerprint 模式走 browser:openUrl

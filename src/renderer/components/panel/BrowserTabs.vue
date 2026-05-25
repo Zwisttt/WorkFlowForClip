@@ -24,11 +24,12 @@ const emit = defineEmits<{
 }>();
 
 // 平台配置
-const platformConfig = {
+const platformConfig: Record<string, { label: string; color: string }> = {
   douyin: { label: '抖音', color: 'var(--color-plat-douyin)' },
   xiaohongshu: { label: '小红书', color: 'var(--color-plat-xiaohongshu)' },
-  wechat: { label: '视频号', color: 'var(--color-plat-wechat)' },
+  weixin_video: { label: '视频号', color: 'var(--color-plat-wechat)' },
   kuaishou: { label: '快手', color: 'var(--color-plat-kuaishou)' },
+  bilibili: { label: 'B站', color: 'var(--color-plat-bilibili, #00a1d6)' },
 };
 
 function getPlatformConfig(platform: string) {

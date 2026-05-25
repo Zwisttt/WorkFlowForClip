@@ -39,7 +39,7 @@
         >
           <span class="filter-panel__dot" :style="{ background: group.color }" />
           <span class="filter-panel__label">{{ group.name }}</span>
-          <span class="filter-panel__count">{{ group.accountCount ?? group.accountIds?.length ?? 0 }}</span>
+          <span class="filter-panel__count">{{ getGroupAccountCount(group.id) }}</span>
         </li>
       </ul>
     </div>
@@ -49,9 +49,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import type { Group } from '@/renderer/stores/group';
+import type { Account } from '@/renderer/stores/account';
 
 const props = defineProps<{
   groups: Group[];
+  accounts: Account[];
   platformCounts?: Record<string, number>;
 }>();
 
@@ -86,6 +88,10 @@ function handlePlatformSelect(value: string) {
 function handleGroupSelect(value: string) {
   selectedGroup.value = value;
   emit('filter-group', value);
+}
+
+function getGroupAccountCount(groupId: string): number {
+  return props.accounts.filter(a => a.groupId === groupId).length;
 }
 </script>
 

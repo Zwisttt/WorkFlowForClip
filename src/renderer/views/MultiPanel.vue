@@ -87,6 +87,7 @@ function handleOpenDevTools() {
         <BrowserContent
           :panel="activePanel"
           @open-dev-tools="handleOpenDevTools"
+          @close="handleCloseTab"
         />
       </template>
 
@@ -101,7 +102,7 @@ function handleOpenDevTools() {
           <div class="empty-features">
             <div class="feature-item">
               <span class="feature-dot" />
-              <span>支持抖音、小红书、视频号、快手四大平台</span>
+              <span>支持抖音、小红书、视频号、快手、B站等平台</span>
             </div>
             <div class="feature-item">
               <span class="feature-dot" />

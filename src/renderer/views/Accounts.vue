@@ -27,6 +27,7 @@
         <!-- 左侧筛选面板 -->
         <AccountFilterPanel
           :groups="groupStore.groups"
+          :accounts="accountStore.accounts"
           @filter-platform="handlePlatformFilter"
           @filter-group="handleGroupFilter"
         />

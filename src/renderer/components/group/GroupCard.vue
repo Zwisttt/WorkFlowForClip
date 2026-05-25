@@ -3,7 +3,7 @@
     <div class="group-card__header">
       <span class="group-card__dot" />
       <span class="group-card__name">{{ group.name }}</span>
-      <span class="group-card__count">{{ group.accountIds.length }} 个账号</span>
+      <span class="group-card__count">{{ group.accountCount ?? group.accountIds?.length ?? 0 }} 个账号</span>
     </div>
 
     <div class="group-card__body">

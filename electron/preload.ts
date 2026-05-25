@@ -196,6 +196,24 @@ const api = {
       ipcRenderer.invoke('panel:focus', { panelId }),
     list: () =>
       ipcRenderer.invoke('panel:list'),
+    navigate: (panelId: string, action: string, url?: string) => {
+      if (action === 'url' && url) {
+        ipcRenderer.send('panel-address:navigate', { panelId, url });
+      } else {
+        ipcRenderer.send(`panel-address:${action}`, { panelId });
+      }
+    },
+    openDevTools: (panelId: string) =>
+      ipcRenderer.send('panel-address:open-devtools', { panelId }),
+    onUrlChange: (callback: (panelId: string, url: string) => void) => {
+      ipcRenderer.on('panel-browser:url-change', (_, panelId, url) => callback(panelId, url));
+    },
+    onNavigationState: (callback: (panelId: string, canBack: boolean, canForward: boolean) => void) => {
+      ipcRenderer.on('panel-browser:navigation-state', (_, panelId, canBack, canForward) => callback(panelId, canBack, canForward));
+    },
+    onLoadingState: (callback: (panelId: string, isLoading: boolean) => void) => {
+      ipcRenderer.on('panel-browser:loading-state', (_, panelId, isLoading) => callback(panelId, isLoading));
+    },
   },
 
   draft: {

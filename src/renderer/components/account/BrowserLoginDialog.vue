@@ -2,7 +2,7 @@
   <el-dialog
     v-model="visible"
     title=""
-    width="640px"
+    width="860px"
     destroy-on-close
     :close-on-click-modal="false"
     class="add-account-dialog"
@@ -10,377 +10,367 @@
   >
     <template #header>
       <div class="dialog-header">
-        <h2 class="dialog-header__title">添加账号</h2>
-        <p class="dialog-header__subtitle">选择平台并配置登录方式</p>
+        <div class="dialog-header__left">
+          <h2 class="dialog-header__title">添加账号</h2>
+          <p class="dialog-header__subtitle">选择平台并配置登录方式</p>
+        </div>
+        <button class="dialog-header__close" @click="handleClose">
+          <el-icon :size="18"><Close /></el-icon>
+        </button>
       </div>
     </template>
 
-    <div class="browser-login-dialog">
-      <div class="browser-login-dialog__steps">
-        <div class="steps-track">
-          <div class="steps-track__line"></div>
-          <div 
-            class="steps-track__progress" 
-            :style="{ width: `${currentStep * 50}%` }"
-          ></div>
-        </div>
+    <!-- 步骤指示器 -->
+    <div class="steps-section">
+      <div class="steps-track">
+        <div class="steps-track__line"></div>
+        <div
+          class="steps-track__progress"
+          :style="{ width: `${(currentStep / (steps.length - 1)) * 100}%` }"
+        ></div>
+      </div>
+      <div class="steps-container">
         <div
           v-for="(stepItem, index) in steps"
           :key="stepItem.key"
-          class="step-indicator"
+          class="step-item"
           :class="{
-            'step-indicator--active': currentStep === index,
-            'step-indicator--done': currentStep > index,
+            'step-item--active': currentStep === index,
+            'step-item--done': currentStep > index,
           }"
         >
-          <div class="step-indicator__dot">
-            <div class="step-indicator__number">
-              <el-icon v-if="currentStep > index" :size="14"><Check /></el-icon>
-              <span v-else>{{ index + 1 }}</span>
-            </div>
-          </div>
-          <span class="step-indicator__label">{{ stepItem.label }}</span>
-        </div>
-      </div>
-
-      <!-- Step 1: 选择平台 -->
-      <div v-if="currentStep === 0" class="browser-login-dialog__content">
-        <div class="section-label">
-          <span class="section-label__text">选择平台</span>
-        </div>
-        
-        <div class="platform-grid">
-          <div
-            v-for="platform in platforms"
-            :key="platform.value"
-            class="platform-card"
-            :class="{ 'platform-card--active': selectedPlatform === platform.value }"
-            :style="{ '--platform-color': platform.color }"
-            @click="selectedPlatform = platform.value"
-          >
-            <div class="platform-card__icon">
-              <span class="platform-card__initial">{{ platform.label.charAt(0) }}</span>
-            </div>
-            <span class="platform-card__name">{{ platform.label }}</span>
-            <div class="platform-card__badge" v-if="selectedPlatform === platform.value">
-              <el-icon :size="12"><Check /></el-icon>
-            </div>
-          </div>
-        </div>
-
-        <div class="section-divider"></div>
-
-        <div class="section-label">
-          <span class="section-label__text">配置模式</span>
-        </div>
-
-        <div class="config-mode-cards">
-          <div
-            class="config-mode-card"
-            :class="{ 'config-mode-card--active': configMode === 'quick' }"
-            @click="configMode = 'quick'"
-          >
-            <div class="config-mode-card__icon config-mode-card__icon--quick">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-              </svg>
-            </div>
-            <div class="config-mode-card__content">
-              <span class="config-mode-card__title">快速配置</span>
-              <span class="config-mode-card__desc">内嵌浏览器 + 本地指纹 + 本地IP</span>
-            </div>
-            <div class="config-mode-card__check" v-if="configMode === 'quick'">
+          <div class="step-item__circle">
+            <div v-if="currentStep > index" class="step-item__check">
               <el-icon :size="14"><Check /></el-icon>
             </div>
+            <span v-else class="step-item__number">{{ String(index + 1).padStart(2, '0') }}</span>
           </div>
-
+          <span class="step-item__label">{{ stepItem.label }}</span>
           <div
-            class="config-mode-card"
-            :class="{ 'config-mode-card--active': configMode === 'smart' }"
-            @click="configMode = 'smart'"
-          >
-            <div class="config-mode-card__icon config-mode-card__icon--smart">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 16v-4M12 8h.01"/>
-              </svg>
-            </div>
-            <div class="config-mode-card__content">
-              <span class="config-mode-card__title">智能配置</span>
-              <span class="config-mode-card__desc">AI 风险检测 → 推荐配置</span>
-            </div>
-            <div class="config-mode-card__check" v-if="configMode === 'smart'">
-              <el-icon :size="14"><Check /></el-icon>
-            </div>
-          </div>
-
-          <div
-            class="config-mode-card"
-            :class="{ 'config-mode-card--active': configMode === 'custom' }"
-            @click="configMode = 'custom'"
-          >
-            <div class="config-mode-card__icon config-mode-card__icon--custom">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-              </svg>
-            </div>
-            <div class="config-mode-card__content">
-              <span class="config-mode-card__title">自定义配置</span>
-              <span class="config-mode-card__desc">自由选择浏览器、指纹、代理</span>
-            </div>
-            <div class="config-mode-card__check" v-if="configMode === 'custom'">
-              <el-icon :size="14"><Check /></el-icon>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="configMode === 'custom'" class="custom-config-section">
-          <div class="config-row">
-            <div class="config-item">
-              <label class="config-item__label">浏览器类型</label>
-              <el-select v-model="browserType" placeholder="选择浏览器" style="width: 100%">
-                <el-option label="内嵌浏览器" value="embedded" />
-                <el-option label="外置 Chrome" value="chrome" />
-                <el-option label="指纹浏览器" value="fingerprint" />
-              </el-select>
-            </div>
-            
-            <div class="config-item">
-              <label class="config-item__label">指纹配置</label>
-              <el-select v-model="fingerprintId" :placeholder="fingerprintPlaceholder" clearable style="width: 100%">
-                <el-option
-                  v-for="fp in fingerprintOptions"
-                  :key="fp.id"
-                  :label="fp.name"
-                  :value="fp.id"
-                />
-              </el-select>
-            </div>
-            
-            <div class="config-item">
-              <label class="config-item__label">代理配置</label>
-              <el-select v-model="proxyId" :placeholder="proxyPlaceholder" clearable style="width: 100%">
-                <el-option
-                  v-for="p in proxyOptions"
-                  :key="p.id"
-                  :label="`${p.name} (${p.host}:${p.port})`"
-                  :value="p.id"
-                />
-              </el-select>
-            </div>
-          </div>
-
-          <div v-if="browserType === 'embedded'" class="config-hint config-hint--embedded">
-            <div class="config-hint__icon">
-              <el-icon :size="16"><InfoFilled /></el-icon>
-            </div>
-            <div class="config-hint__content">
-              <p class="config-hint__text">{{ browserTypeHint }}</p>
-            </div>
-          </div>
-
-          <div v-if="browserType === 'chrome'" class="config-hint config-hint--chrome-plugin">
-            <div class="config-hint__icon">
-              <el-icon :size="16"><WarningFilled /></el-icon>
-            </div>
-            <div class="config-hint__content">
-              <p class="config-hint__text">外置 Chrome 需要安装指纹修改插件才能使用独立指纹。请在上方选择指纹配置后，安装以下插件：</p>
-              <p class="config-hint__links">
-                <span class="config-hint__link" @click="openInChrome('https://chromewebstore.google.com/detail/webrtc-network-limiter/npeicpdbkakmehahjeeohfdhnlpdklia')">WebRTC Leak Prevent ↗</span>
-              </p>
-            </div>
-          </div>
-
-          <div class="config-preview-card">
-            <div class="config-preview-card__header">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="config-preview-card__icon">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-                <polyline points="10 9 9 9 8 9"/>
-              </svg>
-              <span>配置预览</span>
-            </div>
-            <div class="config-preview-card__items">
-              <div class="config-preview-item">
-                <span class="config-preview-item__label">浏览器</span>
-                <span class="config-preview-item__value">{{ configPreview.browser }}</span>
-              </div>
-              <div class="config-preview-item">
-                <span class="config-preview-item__label">指纹</span>
-                <span class="config-preview-item__value">{{ configPreview.fingerprint }}</span>
-              </div>
-              <div class="config-preview-item">
-                <span class="config-preview-item__label">代理</span>
-                <span class="config-preview-item__value">{{ configPreview.proxy }}</span>
-              </div>
-              <div class="config-preview-item">
-                <span class="config-preview-item__label">风险等级</span>
-                <span class="config-preview-item__value" :class="`risk--${configPreview.riskLevel}`">
-                  {{ configPreview.riskLevel === 'low' ? '低风险' : configPreview.riskLevel === 'medium' ? '中风险' : '高风险' }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="configMode === 'smart'" class="smart-config-section">
-          <div class="ai-analysis-panel">
-            <div class="ai-analysis-panel__header">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="ai-analysis-panel__icon">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M12 16v-4M12 8h.01"/>
-              </svg>
-              <span>AI 风险分析</span>
-            </div>
-
-            <div v-if="!selectedPlatform" class="ai-analysis-panel__empty">
-              请先选择平台
-            </div>
-
-            <template v-else>
-              <div class="ai-analysis-panel__risk-level">
-                <span class="ai-analysis-panel__label">当前风险等级</span>
-                <span class="ai-analysis-panel__risk-badge" :class="`ai-analysis-panel__risk-badge--${aiRiskLevel}`">
-                  {{ aiRiskLevel === 'low' ? '低风险' : aiRiskLevel === 'medium' ? '⚠️ 中风险' : '🔴 高风险' }}
-                </span>
-              </div>
-
-              <div class="ai-analysis-panel__factors">
-                <span class="ai-analysis-panel__label">检测结果</span>
-                <div class="ai-factor-list">
-                  <div class="ai-factor-item">
-                    <span class="ai-factor-item__key">本地IP</span>
-                    <span class="ai-factor-item__val">{{ riskInfo?.localIP || '本地IP' }}</span>
-                  </div>
-                  <div class="ai-factor-item">
-                    <span class="ai-factor-item__key">同IP同平台账号</span>
-                    <span class="ai-factor-item__val">{{ riskInfo?.sameIPCount ?? 0 }} 个</span>
-                  </div>
-                  <div class="ai-factor-item">
-                    <span class="ai-factor-item__key">系统限制</span>
-                    <span class="ai-factor-item__val">{{ riskInfo?.limit ?? 5 }} 个</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="ai-analysis-panel__recommend">
-                <span class="ai-analysis-panel__label">💡 推荐配置</span>
-                <div class="ai-recommend-list">
-                  <div class="ai-recommend-item">
-                    <span class="ai-recommend-item__key">浏览器</span>
-                    <span class="ai-recommend-item__val">{{ smartRecommend.browser }}</span>
-                  </div>
-                  <div class="ai-recommend-item">
-                    <span class="ai-recommend-item__key">指纹</span>
-                    <span class="ai-recommend-item__val">{{ smartRecommend.fingerprint }}</span>
-                  </div>
-                  <div class="ai-recommend-item">
-                    <span class="ai-recommend-item__key">代理</span>
-                    <span class="ai-recommend-item__val">{{ smartRecommend.proxy }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="ai-analysis-panel__actions">
-                <div v-if="!proxyOptions.length && aiRiskLevel !== 'low'" class="ai-analysis-panel__prerequisite">
-                  <el-icon :size="14"><Warning /></el-icon>
-                  <span>需要先配置代理池才能使用智能配置</span>
-                  <el-text size="small" type="info">请在系统设置中添加代理</el-text>
-                </div>
-                <el-button v-else type="primary" @click="applySmartRecommend" :disabled="aiRiskLevel === 'low' && !proxyOptions.length">
-                  应用推荐配置
-                </el-button>
-              </div>
-            </template>
-          </div>
-        </div>
-
-        <div v-if="riskInfo && riskInfo.sameIPCount >= 3" class="risk-warning-banner">
-          <div class="risk-warning-banner__icon">
-            <el-icon :size="20"><Warning /></el-icon>
-          </div>
-          <div class="risk-warning-banner__content">
-            <span class="risk-warning-banner__title">风险提示</span>
-            <span class="risk-warning-banner__text">
-              检测到您已有 <strong>{{ riskInfo.sameIPCount }}</strong> 个 {{ currentPlatformLabel }} 账号使用本地IP，
-              建议使用智能配置或自定义配置
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 2: 登录中 -->
-      <div v-else-if="currentStep === 1" class="browser-login-dialog__content">
-        <div class="login-status">
-          <div v-if="loginStatus === 'logging_in'" class="login-status__loading">
-            <div class="login-status__spinner-wrapper">
-              <el-icon class="login-status__spinner" :size="48"><Loading /></el-icon>
-            </div>
-            <span class="login-status__text">正在启动浏览器...</span>
-            <span class="login-status__hint">请稍候，正在为您准备登录环境</span>
-          </div>
-
-          <div v-else-if="loginStatus === 'detecting'" class="login-status__detecting">
-            <div class="login-status__spinner-wrapper">
-              <el-icon class="login-status__spinner" :size="48"><Loading /></el-icon>
-            </div>
-            <span class="login-status__text">等待登录...</span>
-            <span class="login-status__hint">请在浏览器中完成登录操作</span>
-            <el-progress
-              :percentage="loginProgress"
-              :show-text="false"
-              :stroke-width="6"
-              class="login-status__progress"
-            />
-          </div>
-
-          <div v-else-if="loginStatus === 'failed'" class="login-status__failed">
-            <div class="login-status__icon-wrapper login-status__icon-wrapper--danger">
-              <el-icon :size="40"><CircleCloseFilled /></el-icon>
-            </div>
-            <span class="login-status__text">登录失败</span>
-            <span class="login-status__error">{{ loginError }}</span>
-          </div>
-
-          <div v-else-if="loginStatus === 'timeout'" class="login-status__timeout">
-            <div class="login-status__icon-wrapper login-status__icon-wrapper--warning">
-              <el-icon :size="40"><WarningFilled /></el-icon>
-            </div>
-            <span class="login-status__text">登录超时</span>
-            <span class="login-status__hint">请检查网络连接后重试</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 3: 完成 -->
-      <div v-else-if="currentStep === 2" class="browser-login-dialog__content">
-        <div class="login-success">
-          <div class="login-success__icon-wrapper">
-            <el-icon :size="56"><CircleCheckFilled /></el-icon>
-          </div>
-          <h3 class="login-success__title">账号绑定成功</h3>
-          <p class="login-success__desc">已成功绑定 {{ currentPlatformLabel }} 账号</p>
+            class="step-item__indicator"
+            :class="{ 'step-item__indicator--active': currentStep === index }"
+          ></div>
         </div>
       </div>
     </div>
 
+    <!-- Step 1: 选择平台 + 配置模式 -->
+    <div v-if="currentStep === 0" class="dialog-body">
+      <div class="two-panel">
+        <!-- 左面板 — 选择平台 -->
+        <div class="panel panel--left">
+          <div class="panel__header">
+            <div class="panel__title-area">
+              <span class="panel__title">选择平台</span>
+              <span class="panel__subtitle">请选择需要登录的平台</span>
+            </div>
+            <div class="panel__badge">+ 平台</div>
+          </div>
+          <div class="platform-grid">
+            <div
+              v-for="platform in platforms"
+              :key="platform.value"
+              class="platform-card"
+              :class="{ 'platform-card--active': selectedPlatform === platform.value }"
+              :style="{ '--platform-color': platform.color }"
+              @click="selectedPlatform = platform.value"
+            >
+              <div class="platform-card__bg"></div>
+              <div class="platform-card__icon">
+                <span class="platform-card__initial">{{ platform.label.charAt(0) }}</span>
+              </div>
+              <span class="platform-card__name">{{ platform.label }}</span>
+              <span class="platform-card__desc">官方安全登录</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右面板 — 配置模式 -->
+        <div class="panel panel--right">
+          <div class="panel__header">
+            <div class="panel__title-area">
+              <span class="panel__title">配置模式</span>
+              <span class="panel__subtitle">根据业务需求选择登录环境</span>
+            </div>
+            <span class="panel__badge panel__badge--secure">Enterprise Secure</span>
+          </div>
+
+          <!-- 配置模式卡片 -->
+          <div class="config-cards">
+            <!-- 快速配置 -->
+            <div
+              class="config-card"
+              :class="{ 'config-card--active': configMode === 'quick' }"
+              @click="configMode = 'quick'"
+            >
+              <div class="config-card__bg"></div>
+              <div class="config-card__body">
+                <div class="config-card__info">
+                  <span class="config-card__title">快速配置</span>
+                  <span class="config-card__desc">内嵌浏览器 + 本地指纹 + 本地IP</span>
+                </div>
+                <span class="config-card__badge config-card__badge--recommend">推荐</span>
+              </div>
+              <div class="config-card__radio">
+                <div v-if="configMode === 'quick'" class="config-card__radio-dot"></div>
+              </div>
+            </div>
+
+            <!-- 智能配置 -->
+            <div
+              class="config-card"
+              :class="{ 'config-card--active': configMode === 'smart' }"
+              @click="configMode = 'smart'"
+            >
+              <div class="config-card__bg"></div>
+              <div class="config-card__body">
+                <div class="config-card__info">
+                  <span class="config-card__title">智能配置</span>
+                  <span class="config-card__desc">AI 风险检测 → 自动推荐最佳配置</span>
+                </div>
+                <span class="config-card__badge config-card__badge--ai">AI</span>
+              </div>
+              <div class="config-card__radio">
+                <div v-if="configMode === 'smart'" class="config-card__radio-dot"></div>
+              </div>
+            </div>
+
+            <!-- 自定义配置 -->
+            <div
+              class="config-card"
+              :class="{ 'config-card--active': configMode === 'custom' }"
+              @click="configMode = 'custom'"
+            >
+              <div class="config-card__bg"></div>
+              <div class="config-card__body">
+                <div class="config-card__info">
+                  <span class="config-card__title">自定义配置</span>
+                  <span class="config-card__desc">自由选择浏览器、指纹、代理</span>
+                </div>
+                <span class="config-card__badge config-card__badge--advanced">高级</span>
+              </div>
+              <div class="config-card__radio">
+                <div v-if="configMode === 'custom'" class="config-card__radio-dot"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 自定义配置展开 -->
+          <div v-if="configMode === 'custom'" class="custom-config-section">
+            <div class="config-row">
+              <div class="config-item">
+                <label class="config-item__label">浏览器类型</label>
+                <el-select v-model="browserType" placeholder="选择浏览器" style="width: 100%">
+                  <el-option label="内嵌浏览器" value="embedded" />
+                  <el-option label="外置 Chrome" value="chrome" />
+                  <el-option label="指纹浏览器" value="fingerprint" />
+                </el-select>
+              </div>
+              <div class="config-item">
+                <label class="config-item__label">指纹配置</label>
+                <el-select v-model="fingerprintId" :placeholder="fingerprintPlaceholder" clearable style="width: 100%">
+                  <el-option v-for="fp in fingerprintOptions" :key="fp.id" :label="fp.name" :value="fp.id" />
+                </el-select>
+              </div>
+              <div class="config-item">
+                <label class="config-item__label">代理配置</label>
+                <el-select v-model="proxyId" :placeholder="proxyPlaceholder" clearable style="width: 100%">
+                  <el-option v-for="p in proxyOptions" :key="p.id" :label="`${p.name} (${p.host}:${p.port})`" :value="p.id" />
+                </el-select>
+              </div>
+            </div>
+
+            <div v-if="browserType === 'embedded'" class="config-hint config-hint--embedded">
+              <el-icon :size="16"><InfoFilled /></el-icon>
+              <p class="config-hint__text">{{ browserTypeHint }}</p>
+            </div>
+
+            <div v-if="browserType === 'chrome'" class="config-hint config-hint--chrome">
+              <el-icon :size="16"><WarningFilled /></el-icon>
+              <p class="config-hint__text">
+                外置 Chrome 需要安装指纹修改插件才能使用独立指纹。
+                <span class="config-hint__link" @click="openInChrome('https://chromewebstore.google.com/detail/webrtc-network-limiter/npeicpdbkakmehahjeeohfdhnlpdklia')">WebRTC Leak Prevent ↗</span>
+              </p>
+            </div>
+
+            <div class="config-preview-card">
+              <div class="config-preview-card__header">
+                <el-icon :size="16"><Document /></el-icon>
+                <span>配置预览</span>
+              </div>
+              <div class="config-preview-card__items">
+                <div class="config-preview-item">
+                  <span class="config-preview-item__label">浏览器</span>
+                  <span class="config-preview-item__value">{{ configPreview.browser }}</span>
+                </div>
+                <div class="config-preview-item">
+                  <span class="config-preview-item__label">指纹</span>
+                  <span class="config-preview-item__value">{{ configPreview.fingerprint }}</span>
+                </div>
+                <div class="config-preview-item">
+                  <span class="config-preview-item__label">代理</span>
+                  <span class="config-preview-item__value">{{ configPreview.proxy }}</span>
+                </div>
+                <div class="config-preview-item">
+                  <span class="config-preview-item__label">风险等级</span>
+                  <span class="config-preview-item__value" :class="`risk--${configPreview.riskLevel}`">
+                    {{ configPreview.riskLevel === 'low' ? '低风险' : configPreview.riskLevel === 'medium' ? '中风险' : '高风险' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 智能配置面板 -->
+          <div v-if="configMode === 'smart'" class="smart-config-section">
+            <div class="ai-analysis-panel">
+              <div class="ai-analysis-panel__header">
+                <el-icon :size="18"><Warning /></el-icon>
+                <span>AI 风险分析</span>
+              </div>
+              <div v-if="!selectedPlatform" class="ai-analysis-panel__empty">请先选择平台</div>
+              <template v-else>
+                <div class="ai-analysis-panel__risk-level">
+                  <span class="ai-analysis-panel__label">当前风险等级</span>
+                  <span class="ai-analysis-panel__risk-badge" :class="`ai-analysis-panel__risk-badge--${aiRiskLevel}`">
+                    {{ aiRiskLevel === 'low' ? '低风险' : aiRiskLevel === 'medium' ? '⚠️ 中风险' : '🔴 高风险' }}
+                  </span>
+                </div>
+                <div class="ai-analysis-panel__factors">
+                  <span class="ai-analysis-panel__label">检测结果</span>
+                  <div class="ai-factor-list">
+                    <div class="ai-factor-item">
+                      <span class="ai-factor-item__key">本地IP</span>
+                      <span class="ai-factor-item__val">{{ riskInfo?.localIP || '本地IP' }}</span>
+                    </div>
+                    <div class="ai-factor-item">
+                      <span class="ai-factor-item__key">同IP同平台账号</span>
+                      <span class="ai-factor-item__val">{{ riskInfo?.sameIPCount ?? 0 }} 个</span>
+                    </div>
+                    <div class="ai-factor-item">
+                      <span class="ai-factor-item__key">系统限制</span>
+                      <span class="ai-factor-item__val">{{ riskInfo?.limit ?? 5 }} 个</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="ai-analysis-panel__recommend">
+                  <span class="ai-analysis-panel__label">💡 推荐配置</span>
+                  <div class="ai-recommend-list">
+                    <div class="ai-recommend-item">
+                      <span class="ai-recommend-item__key">浏览器</span>
+                      <span class="ai-recommend-item__val">{{ smartRecommend.browser }}</span>
+                    </div>
+                    <div class="ai-recommend-item">
+                      <span class="ai-recommend-item__key">指纹</span>
+                      <span class="ai-recommend-item__val">{{ smartRecommend.fingerprint }}</span>
+                    </div>
+                    <div class="ai-recommend-item">
+                      <span class="ai-recommend-item__key">代理</span>
+                      <span class="ai-recommend-item__val">{{ smartRecommend.proxy }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="ai-analysis-panel__actions">
+                  <div v-if="!proxyOptions.length && aiRiskLevel !== 'low'" class="ai-analysis-panel__prerequisite">
+                    <el-icon :size="14"><Warning /></el-icon>
+                    <span>需要先配置代理池才能使用智能配置</span>
+                    <el-text size="small" type="info">请在系统设置中添加代理</el-text>
+                  </div>
+                  <el-button v-else type="primary" @click="applySmartRecommend" :disabled="aiRiskLevel === 'low' && !proxyOptions.length">
+                    应用推荐配置
+                  </el-button>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- 风险提示横幅 -->
+          <div v-if="riskInfo && riskInfo.sameIPCount >= 3" class="risk-warning-banner">
+            <el-icon :size="20"><Warning /></el-icon>
+            <div class="risk-warning-banner__content">
+              <span class="risk-warning-banner__title">风险提示</span>
+              <span class="risk-warning-banner__text">
+                检测到您已有 <strong>{{ riskInfo.sameIPCount }}</strong> 个 {{ currentPlatformLabel }} 账号使用本地IP，建议使用智能配置或自定义配置
+              </span>
+            </div>
+          </div>
+
+          <!-- 安全提示 -->
+          <div class="security-footer">
+            <span>当前环境已启用安全检测与行为防护机制</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: 登录中 -->
+    <div v-else-if="currentStep === 1" class="dialog-body dialog-body--centered">
+      <div class="login-status">
+        <div v-if="loginStatus === 'logging_in'" class="login-status__loading">
+          <div class="login-status__spinner-wrapper">
+            <el-icon class="login-status__spinner" :size="56"><Loading /></el-icon>
+          </div>
+          <span class="login-status__text">正在启动浏览器...</span>
+          <span class="login-status__hint">请稍候，正在为您准备登录环境</span>
+        </div>
+        <div v-else-if="loginStatus === 'detecting'" class="login-status__detecting">
+          <div class="login-status__spinner-wrapper">
+            <el-icon class="login-status__spinner" :size="56"><Loading /></el-icon>
+          </div>
+          <span class="login-status__text">等待登录...</span>
+          <span class="login-status__hint">请在浏览器中完成登录操作</span>
+          <el-progress :percentage="loginProgress" :show-text="false" :stroke-width="6" class="login-status__progress" />
+        </div>
+        <div v-else-if="loginStatus === 'failed'" class="login-status__failed">
+          <div class="login-status__icon-wrapper login-status__icon-wrapper--danger">
+            <el-icon :size="48"><CircleCloseFilled /></el-icon>
+          </div>
+          <span class="login-status__text">登录失败</span>
+          <span class="login-status__error">{{ loginError }}</span>
+        </div>
+        <div v-else-if="loginStatus === 'timeout'" class="login-status__timeout">
+          <div class="login-status__icon-wrapper login-status__icon-wrapper--warning">
+            <el-icon :size="48"><WarningFilled /></el-icon>
+          </div>
+          <span class="login-status__text">登录超时</span>
+          <span class="login-status__hint">请检查网络连接后重试</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: 完成 -->
+    <div v-else-if="currentStep === 2" class="dialog-body dialog-body--centered">
+      <div class="login-success">
+        <div class="login-success__icon-wrapper">
+          <el-icon :size="64"><CircleCheckFilled /></el-icon>
+        </div>
+        <h3 class="login-success__title">账号绑定成功</h3>
+        <p class="login-success__desc">已成功绑定 {{ currentPlatformLabel }} 账号</p>
+      </div>
+    </div>
+
     <template #footer>
-      <div class="browser-login-dialog__footer">
-        <el-button v-if="currentStep === 1 && (loginStatus === 'failed' || loginStatus === 'timeout')" @click="handleRetry">
-          重试
-        </el-button>
-        <el-button v-if="currentStep === 1" @click="handleCancel">
-          取消
-        </el-button>
-        <el-button v-if="currentStep === 0" :disabled="!selectedPlatform" type="primary" @click="handleNext">
-          开始登录
-        </el-button>
-        <el-button v-if="currentStep === 2" type="primary" @click="handleFinish">
-          完成
-        </el-button>
+      <div class="dialog-footer">
+        <div class="dialog-footer__left">
+          <span v-if="currentStep === 0" class="dialog-footer__hint">当前环境已启用安全检测与行为防护机制</span>
+        </div>
+        <div class="dialog-footer__right">
+          <el-button v-if="currentStep === 1 && (loginStatus === 'failed' || loginStatus === 'timeout')" @click="handleRetry">
+            重试
+          </el-button>
+          <el-button v-if="currentStep === 1" @click="handleCancel">
+            取消
+          </el-button>
+          <el-button v-if="currentStep === 0" @click="handleClose">
+            取消
+          </el-button>
+          <el-button v-if="currentStep === 0" :disabled="!selectedPlatform" type="primary" @click="handleNext">
+            下一步
+          </el-button>
+          <el-button v-if="currentStep === 2" type="primary" @click="handleFinish">
+            完成
+          </el-button>
+        </div>
       </div>
     </template>
   </el-dialog>
@@ -389,7 +379,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted, onMounted } from 'vue';
 import {
-  Check, Loading, CircleCloseFilled, WarningFilled, CircleCheckFilled, Warning, InfoFilled,
+  Check, Loading, CircleCloseFilled, WarningFilled, CircleCheckFilled, Warning, InfoFilled, Close, Document,
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { useAccountStore, type BrowserConfig } from '@/renderer/stores/account';
@@ -769,23 +759,38 @@ async function openInChrome(url: string) {
 </script>
 
 <style scoped>
+/* ===== 弹窗基础覆盖 ===== */
+.add-account-dialog :deep(.el-dialog) {
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+
 .add-account-dialog :deep(.el-dialog__header) {
   padding: 0;
   margin: 0;
 }
 
 .add-account-dialog :deep(.el-dialog__body) {
-  padding: var(--space-5);
-  padding-top: 0;
+  padding: 0;
 }
 
 .add-account-dialog :deep(.el-dialog__footer) {
-  padding: 0 var(--space-5) var(--space-5);
+  padding: 0;
 }
 
+/* ===== 头部 ===== */
 .dialog-header {
-  padding: var(--space-5) var(--space-5) var(--space-3);
-  border-bottom: 1px solid var(--color-border-light);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dialog-header__left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .dialog-header__title {
@@ -794,40 +799,49 @@ async function openInChrome(url: string) {
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
   line-height: 1.3;
+  letter-spacing: 0.02em;
 }
 
 .dialog-header__subtitle {
-  margin: var(--space-1) 0 0 0;
+  margin: 0;
   font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
+  line-height: 1.4;
 }
 
-.browser-login-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.browser-login-dialog__content {
-  min-height: 280px;
-}
-
-.browser-login-dialog__steps {
+.dialog-header__close {
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.dialog-header__close:hover {
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+  border-color: var(--color-text-placeholder);
+}
+
+/* ===== 步骤指示器 ===== */
+.steps-section {
   position: relative;
-  padding: var(--space-3) var(--space-6);
-  margin-bottom: var(--space-1);
+  padding: var(--space-3) var(--space-10) var(--space-2);
 }
 
 .steps-track {
   position: absolute;
-  left: calc(16.67% + 14px);
-  right: calc(16.67% + 14px);
-  top: calc(50% - 1px);
+  left: calc(16% + 22px);
+  right: calc(16% + 22px);
+  top: calc(var(--space-3) + 22px);
   height: 2px;
-  z-index: 0;
 }
 
 .steps-track__line {
@@ -842,109 +856,236 @@ async function openInChrome(url: string) {
   left: 0;
   top: 0;
   bottom: 0;
-  background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary-light) 100%);
+  background: var(--color-primary);
   border-radius: 1px;
-  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 8px rgba(37, 99, 235, 0.3);
 }
 
-.step-indicator {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+.steps-container {
+  position: relative;
   z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  max-width: 520px;
+  margin: 0 auto;
 }
 
-.step-indicator__dot {
-  width: 28px;
-  height: 28px;
+.step-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.step-item__circle {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg-card);
   border: 2px solid var(--color-border);
-  border-radius: 50%;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  flex-shrink: 0;
+  background: var(--color-bg-card);
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-sm);
 }
 
-.step-indicator__number {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
+.step-item__number {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-placeholder);
+  letter-spacing: 0.1em;
+  transition: color 0.35s;
+}
+
+.step-item__check {
   display: flex;
   align-items: center;
   justify-content: center;
+  color: #fff;
 }
 
-.step-indicator__label {
-  font-size: var(--font-size-xs);
+.step-item__label {
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-secondary);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  white-space: nowrap;
+  transition: color 0.35s;
 }
 
-.step-indicator--active .step-indicator__dot {
-  border-color: var(--color-primary);
+.step-item__indicator {
+  width: 24px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-border);
+  transition: all 0.35s;
+}
+
+.step-item__indicator--active {
+  width: 40px;
   background: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  box-shadow: 0 0 12px rgba(37, 99, 235, 0.45);
 }
 
-.step-indicator--active .step-indicator__number {
+.step-item--active .step-item__circle {
+  border-color: var(--color-primary);
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%);
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), 0 8px 24px rgba(37, 99, 235, 0.2);
+}
+
+.step-item--active .step-item__number {
   color: #fff;
 }
 
-.step-indicator--active .step-indicator__label {
-  color: var(--color-primary);
+.step-item--active .step-item__label {
+  color: var(--color-text-primary);
   font-weight: var(--font-weight-semibold);
 }
 
-.step-indicator--done .step-indicator__dot {
+.step-item--done .step-item__circle {
   border-color: var(--color-success);
   background: var(--color-success);
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-}
-
-.step-indicator--done .step-indicator__number {
   color: #fff;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.10);
 }
 
-.step-indicator--done .step-indicator__label {
+.step-item--done .step-item__label {
   color: var(--color-success);
 }
 
-.section-label {
-  margin-bottom: var(--space-2);
+.step-item--done .step-item__indicator {
+  background: var(--color-success);
 }
 
-.section-label__text {
-  font-size: var(--font-size-2xs);
+/* ===== 内容区域 ===== */
+.dialog-body {
+  padding: 0 var(--space-5) var(--space-4);
+}
+
+.dialog-body--centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+}
+
+/* ===== 两面板布局 ===== */
+.two-panel {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: var(--space-4);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.panel--left {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+
+.panel--right {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+.panel--right::before {
+  content: '';
+  position: absolute;
+  top: -80px;
+  right: -80px;
+  width: 200px;
+  height: 200px;
+  background: var(--color-primary-lighter);
+  opacity: 0.3;
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+}
+
+.panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  position: relative;
+  z-index: 1;
+}
+
+.panel__title-area {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.panel__title {
+  font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.panel__subtitle {
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
-.section-divider {
-  height: 1px;
-  background: var(--color-border-light);
-  margin: var(--space-3) 0;
+.panel__badge {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--color-primary-lighter);
+  color: var(--color-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  border: 1px solid rgba(37, 99, 235, 0.15);
 }
 
+.panel__badge--secure {
+  width: auto;
+  height: auto;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-primary-lighter);
+  color: var(--color-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  border: 1px solid rgba(37, 99, 235, 0.15);
+  white-space: nowrap;
+}
+
+/* ===== 平台网格 ===== */
 .platform-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--space-2);
+  position: relative;
+  z-index: 1;
 }
 
 .platform-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-3) var(--space-2);
-  background: var(--color-bg-card);
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--space-3);
   border: 2px solid var(--color-border);
   border-radius: var(--radius-lg);
   cursor: pointer;
@@ -952,29 +1093,28 @@ async function openInChrome(url: string) {
   overflow: hidden;
 }
 
-.platform-card::before {
-  content: '';
+.platform-card__bg {
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, transparent 0%, rgba(0, 0, 0, 0.02) 100%);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.04) 0%, transparent 100%);
   opacity: 0;
   transition: opacity 0.25s;
 }
 
 .platform-card:hover {
   border-color: var(--color-primary-light);
-  transform: translateY(-1px);
   box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
-.platform-card:hover::before {
+.platform-card:hover .platform-card__bg {
   opacity: 1;
 }
 
 .platform-card--active {
   border-color: var(--color-primary);
-  background: linear-gradient(135deg, var(--color-primary-lighter) 0%, #fff 100%);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  background: var(--color-primary-lighter);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
 }
 
 .platform-card--active .platform-card__icon {
@@ -991,197 +1131,169 @@ async function openInChrome(url: string) {
   background: var(--color-bg-page);
   border-radius: var(--radius-md);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .platform-card__initial {
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
 }
 
 .platform-card__name {
-  font-size: var(--font-size-2xs);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-primary);
-}
-
-.platform-card__badge {
-  position: absolute;
-  top: var(--space-1);
-  right: var(--space-1);
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.3);
-}
-
-.config-mode-cards {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-2);
-}
-
-.config-mode-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-2);
-  background: var(--color-bg-card);
-  border: 2px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.config-mode-card:hover {
-  border-color: var(--color-primary-light);
-}
-
-.config-mode-card--active {
-  border-color: var(--color-primary);
-  background: linear-gradient(135deg, var(--color-primary-lighter) 0%, #fff 100%);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
-}
-
-.config-mode-card__icon {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
-}
-
-.config-mode-card__icon svg {
-  width: 18px;
-  height: 18px;
-}
-
-.config-mode-card__content {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: center;
-}
-
-.config-mode-card__title {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.config-mode-card__desc {
-  font-size: var(--font-size-3xs);
-  color: var(--color-text-secondary);
-  line-height: 1.3;
-}
-
-.config-mode-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: var(--space-3);
-  padding: var(--space-5) var(--space-3);
-  background: var(--color-bg-card);
-  border: 2px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.config-mode-card:hover {
-  border-color: var(--color-primary-light);
-  background: var(--color-bg-page);
-}
-
-.config-mode-card--active {
-  border-color: var(--color-primary);
-  background: linear-gradient(135deg, var(--color-primary-lighter) 0%, #fff 100%);
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
-}
-
-.config-mode-card__icon {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-md);
-  flex-shrink: 0;
-}
-
-.config-mode-card__icon svg {
-  width: 22px;
-  height: 22px;
-}
-
-.config-mode-card__icon--quick {
-  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-  color: var(--color-primary);
-}
-
-.config-mode-card__icon--smart {
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  color: #d97706;
-}
-
-.config-mode-card__icon--custom {
-  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-  color: #059669;
-}
-
-.config-mode-card__content {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  align-items: center;
-}
-
-.config-mode-card__title {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
+  position: relative;
+  z-index: 1;
 }
 
-.config-mode-card__desc {
+.platform-card__desc {
   font-size: var(--font-size-2xs);
+  color: var(--color-text-placeholder);
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== 配置卡片 ===== */
+.config-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  position: relative;
+  z-index: 1;
+}
+
+.config-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-page);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.config-card__bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.06) 0%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.config-card:hover {
+  border-color: var(--color-primary-light);
+  background: var(--color-bg-card);
+  box-shadow: var(--shadow-md);
+}
+
+.config-card:hover .config-card__bg {
+  opacity: 1;
+}
+
+.config-card--active {
+  border-color: var(--color-primary);
+  background: linear-gradient(90deg, var(--color-primary-lighter) 0%, #fff 100%);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.06), 0 4px 16px rgba(37, 99, 235, 0.08);
+}
+
+.config-card__body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  position: relative;
+  z-index: 1;
+}
+
+.config-card__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.config-card__title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.config-card__desc {
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   line-height: 1.4;
+  max-width: 240px;
 }
 
-.config-mode-card__check {
-  position: absolute;
-  top: var(--space-1);
-  right: var(--space-1);
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
+.config-card__badge {
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-semibold);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.config-card__badge--recommend {
   background: var(--color-primary);
+  color: #fff;
+}
+
+.config-card__badge--ai {
+  background: #f3e8ff;
+  color: #7c3aed;
+  border-color: rgba(124, 58, 237, 0.2);
+}
+
+.config-card__badge--advanced {
+  background: var(--color-bg-page);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+.config-card__radio {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  transition: all 0.25s;
+  position: relative;
+  z-index: 1;
   flex-shrink: 0;
 }
 
+.config-card--active .config-card__radio {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+}
+
+.config-card__radio-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* ===== 自定义配置区域 ===== */
 .custom-config-section {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  margin-top: var(--space-3);
-  padding: var(--space-3);
+  padding: var(--space-4);
   background: var(--color-bg-page);
   border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+  position: relative;
+  z-index: 1;
+  animation: slideDown 0.25s ease;
 }
 
 .config-row {
@@ -1197,498 +1309,122 @@ async function openInChrome(url: string) {
 }
 
 .config-item__label {
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-secondary);
 }
 
 .config-hint {
   display: flex;
+  align-items: flex-start;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3);
   border-radius: var(--radius-md);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   line-height: 1.5;
 }
 
 .config-hint--embedded {
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  border: 1px solid #93c5fd;
+  background: var(--color-primary-lighter);
+  color: var(--color-primary-dark);
+  border: 1px solid rgba(37, 99, 235, 0.15);
 }
 
-.config-hint--embedded .config-hint__text {
-  color: #1e40af;
-}
-
-.config-hint--chrome-plugin {
-  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-  border: 1px solid #fcd34d;
-}
-
-.config-hint--chrome-plugin .config-hint__text {
+.config-hint--chrome {
+  background: var(--color-warning-light);
   color: #92400e;
-  margin: 0;
-}
-
-.config-hint__icon {
-  flex-shrink: 0;
-  margin-top: 1px;
-  color: inherit;
-}
-
-.config-hint__content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
 }
 
 .config-hint__text {
   margin: 0;
-}
-
-.config-hint__links {
-  display: flex;
-  gap: var(--space-3);
-  margin: 0;
+  flex: 1;
 }
 
 .config-hint__link {
   color: #d97706;
-  text-decoration: none;
-  font-weight: var(--font-weight-medium);
-  font-size: var(--font-size-2xs);
   cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.config-hint__link:hover {
-  text-decoration: underline;
-  opacity: 0.8;
-}
-
-.login-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-6) 0;
-}
-
-.login-status__loading,
-.login-status__detecting {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.login-status__spinner-wrapper {
-  width: 56px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--color-primary-lighter) 0%, #dbeafe 100%);
-  border-radius: 50%;
-}
-
-.login-status__spinner {
-  animation: spin 1s linear infinite;
-  color: var(--color-primary);
-}
-
-.login-status__icon-wrapper {
-  width: 56px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-}
-
-.login-status__icon-wrapper--danger {
-  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-  color: var(--color-danger);
-}
-
-.login-status__icon-wrapper--warning {
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  color: var(--color-warning);
-}
-
-.login-status__text {
-  font-size: var(--font-size-base);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.login-status__hint {
-  font-size: var(--font-size-2xs);
-  color: var(--color-text-secondary);
-}
-
-.login-status__error {
-  font-size: var(--font-size-2xs);
-  color: var(--color-danger);
-  text-align: center;
-  max-width: 280px;
-  padding: var(--space-1) var(--space-3);
-  background: var(--color-danger-light);
-  border-radius: var(--radius-sm);
-}
-
-.login-status__progress {
-  width: 200px;
-}
-
-.login-status__failed,
-.login-status__timeout {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.login-success {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-6) 0;
-}
-
-.login-success__icon-wrapper {
-  width: 64px;
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-  border-radius: 50%;
-  color: var(--color-success);
-}
-
-.login-success__title {
-  margin: 0;
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.login-success__desc {
-  margin: 0;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-}
-
-.config-hint--chrome-plugin .config-hint__text {
-  color: #92400e;
-  margin: 0;
-}
-
-.config-hint__icon {
-  flex-shrink: 0;
-  margin-top: 1px;
-  color: inherit;
-}
-
-.config-hint__content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.config-hint__text {
-  margin: 0;
-}
-
-.config-hint__links {
-  display: flex;
-  gap: var(--space-4);
-  margin: 0;
-}
-
-.config-hint__link {
-  color: #d97706;
-  text-decoration: none;
   font-weight: var(--font-weight-medium);
-  font-size: var(--font-size-xs);
-}
-
-.config-hint__link:hover {
   text-decoration: underline;
-  color: #b45309;
 }
 
 .config-preview-card {
-  padding: var(--space-3);
-  background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 .config-preview-card__header {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
-  margin-bottom: var(--space-2);
-  font-size: var(--font-size-2xs);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-page);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-}
-
-.config-preview-card__icon {
-  width: 12px;
-  height: 12px;
+  color: var(--color-text-primary);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .config-preview-card__items {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-1) var(--space-4);
+  gap: 1px;
+  background: var(--color-border-light);
 }
 
 .config-preview-item {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-card);
+  font-size: var(--font-size-xs);
 }
 
 .config-preview-item__label {
-  font-size: var(--font-size-2xs);
   color: var(--color-text-secondary);
 }
 
 .config-preview-item__value {
-  font-size: var(--font-size-2xs);
+  color: var(--color-text-primary);
   font-weight: var(--font-weight-medium);
-  color: var(--color-text-primary);
 }
 
-.config-preview-item__value.risk--low {
-  color: var(--color-success);
-}
+.risk--low { color: var(--color-success); }
+.risk--medium { color: var(--color-warning); }
+.risk--high { color: var(--color-danger); }
 
-.config-preview-item__value.risk--medium {
-  color: var(--color-warning);
-}
-
-.config-preview-item__value.risk--high {
-  color: var(--color-danger);
-}
-
-.risk-warning-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-  border: 1px solid #fcd34d;
-  border-radius: var(--radius-md);
-  margin-top: var(--space-3);
-}
-
-.risk-warning-banner__icon {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #fbbf24;
-  border-radius: var(--radius-sm);
-  color: #fff;
-  flex-shrink: 0;
-}
-
-.risk-warning-banner__content {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.risk-warning-banner__title {
-  font-size: var(--font-size-2xs);
-  font-weight: var(--font-weight-semibold);
-  color: #92400e;
-}
-
-.risk-warning-banner__text {
-  font-size: var(--font-size-2xs);
-  color: #a16207;
-  line-height: 1.4;
-}
-
-.login-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-4);
-  padding: var(--space-10) 0;
-}
-
-.login-status__loading,
-.login-status__detecting {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-4);
-}
-
-.login-status__spinner-wrapper {
-  width: 80px;
-  height: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--color-primary-lighter) 0%, #dbeafe 100%);
-  border-radius: 50%;
-}
-
-.login-status__spinner {
-  animation: spin 1s linear infinite;
-  color: var(--color-primary);
-}
-
-.login-status__icon-wrapper {
-  width: 80px;
-  height: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-}
-
-.login-status__icon-wrapper--danger {
-  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-  color: var(--color-danger);
-}
-
-.login-status__icon-wrapper--warning {
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  color: var(--color-warning);
-}
-
-.login-status__text {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.login-status__hint {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-
-.login-status__error {
-  font-size: var(--font-size-sm);
-  color: var(--color-danger);
-  text-align: center;
-  max-width: 300px;
-  padding: var(--space-2) var(--space-4);
-  background: var(--color-danger-light);
-  border-radius: var(--radius-md);
-}
-
-.login-status__progress {
-  width: 240px;
-}
-
-.login-status__failed,
-.login-status__timeout {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.login-success {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-10) 0;
-}
-
-.login-success__icon-wrapper {
-  width: 96px;
-  height: 96px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
-  border-radius: 50%;
-  color: var(--color-success);
-}
-
-.login-success__title {
-  margin: 0;
-  font-size: var(--font-size-xl);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-}
-
-.login-success__desc {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-
-.browser-login-dialog__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-3);
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
+/* ===== 智能配置区域 ===== */
 .smart-config-section {
-  margin-top: var(--space-3);
+  position: relative;
+  z-index: 1;
+  animation: slideDown 0.25s ease;
 }
 
 .ai-analysis-panel {
-  background: var(--color-bg-page);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+  border-left: 3px solid #8b5cf6;
 }
 
 .ai-analysis-panel__header {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  color: #7c3aed;
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);
-  color: var(--color-primary);
-}
-
-.ai-analysis-panel__icon {
-  width: 18px;
-  height: 18px;
 }
 
 .ai-analysis-panel__empty {
   font-size: var(--font-size-sm);
   color: var(--color-text-placeholder);
-  text-align: center;
-  padding: var(--space-3);
-}
-
-.ai-analysis-panel__label {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-1);
-  display: block;
 }
 
 .ai-analysis-panel__risk-level {
@@ -1697,11 +1433,16 @@ async function openInChrome(url: string) {
   justify-content: space-between;
 }
 
+.ai-analysis-panel__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
 .ai-analysis-panel__risk-badge {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
   padding: 2px 10px;
   border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
 }
 
 .ai-analysis-panel__risk-badge--low {
@@ -1719,11 +1460,23 @@ async function openInChrome(url: string) {
   background: var(--color-danger-light);
 }
 
+.ai-analysis-panel__factors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ai-analysis-panel__recommend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
 .ai-factor-list,
 .ai-recommend-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .ai-factor-item,
@@ -1736,7 +1489,7 @@ async function openInChrome(url: string) {
 
 .ai-factor-item__key,
 .ai-recommend-item__key {
-  color: var(--color-text-placeholder);
+  color: var(--color-text-secondary);
 }
 
 .ai-factor-item__val {
@@ -1745,7 +1498,7 @@ async function openInChrome(url: string) {
 }
 
 .ai-recommend-item__val {
-  color: var(--color-primary);
+  color: #7c3aed;
   font-weight: var(--font-weight-medium);
 }
 
@@ -1760,5 +1513,173 @@ async function openInChrome(url: string) {
 .ai-analysis-panel__actions {
   padding-top: var(--space-2);
   border-top: 1px solid var(--color-border-light);
+}
+
+/* ===== 风险提示横幅 ===== */
+.risk-warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-warning-light);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  color: #92400e;
+  font-size: var(--font-size-xs);
+  position: relative;
+  z-index: 1;
+}
+
+.risk-warning-banner__content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.risk-warning-banner__title {
+  font-weight: var(--font-weight-semibold);
+}
+
+.risk-warning-banner__text {
+  color: #78350f;
+}
+
+/* ===== 安全提示 ===== */
+.security-footer {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-placeholder);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-light);
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== 登录状态 ===== */
+.login-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-10) 0;
+}
+
+.login-status__spinner-wrapper {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.login-status__spinner {
+  animation: spin 1s linear infinite;
+  color: var(--color-primary);
+}
+
+.login-status__text {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.login-status__hint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.login-status__error {
+  font-size: var(--font-size-sm);
+  color: var(--color-danger);
+}
+
+.login-status__progress {
+  width: 280px;
+}
+
+.login-status__icon-wrapper {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-status__icon-wrapper--danger {
+  background: var(--color-danger-light);
+  color: var(--color-danger);
+}
+
+.login-status__icon-wrapper--warning {
+  background: var(--color-warning-light);
+  color: var(--color-warning);
+}
+
+/* ===== 成功状态 ===== */
+.login-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-10) 0;
+}
+
+.login-success__icon-wrapper {
+  color: var(--color-success);
+  animation: scaleIn 0.3s ease;
+}
+
+.login-success__title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.login-success__desc {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ===== 底部 ===== */
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.dialog-footer__left {
+  flex: 1;
+}
+
+.dialog-footer__hint {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-placeholder);
+}
+
+.dialog-footer__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ===== 动画 ===== */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>

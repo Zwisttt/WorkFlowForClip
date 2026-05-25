@@ -84,7 +84,7 @@ const editingGroup = ref<Group | null>(null);
 const selectedGroup = ref<Group | null>(null);
 
 const totalAccountsBound = computed(() =>
-  groupStore.groups.reduce((sum, g) => sum + g.accountIds.length, 0),
+  groupStore.groups.reduce((sum, g) => sum + (g.accountCount ?? g.accountIds?.length ?? 0), 0),
 );
 
 const activeRuleCount = computed(() =>

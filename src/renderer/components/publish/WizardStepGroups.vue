@@ -26,7 +26,7 @@
         <div class="wsg-card__body">
           <div class="wsg-card__header">
             <span class="wsg-card__name">{{ group.name }}</span>
-            <span class="wsg-card__count">{{ group.accountIds.length }} 个账号</span>
+            <span class="wsg-card__count">{{ group.accountCount ?? group.accountIds?.length ?? 0 }} 个账号</span>
           </div>
           <div class="wsg-card__rule">
             <div class="wsg-card__rule-row">

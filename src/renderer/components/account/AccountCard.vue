@@ -187,6 +187,7 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
+import { ElMessage } from 'element-plus';
 import { Delete, Stamp, Connection, FolderOpened, CircleCheck, ChatLineRound, EditPen, Share } from '@element-plus/icons-vue';
 import type { Account } from '@/renderer/stores/account';
 import { useAccountStore } from '@/renderer/stores/account';
@@ -341,13 +342,19 @@ async function clearAllGroups() {
 const PLATFORM_HOMEPAGE: Record<string, string> = {
   douyin: 'https://creator.douyin.com',
   xiaohongshu: 'https://creator.xiaohongshu.com',
-  kuaishou: 'https://cp.kuaishou.com/profile',
-  bilibili: 'https://member.bilibili.com',
+  kuaishou: 'https://cp.kuaishou.com/article/publish/video',
+  bilibili: 'https://member.bilibili.com/platform/home',
   weixin_video: 'https://channels.weixin.qq.com',
 };
 
 async function openHomepage() {
-  const url = props.account.homepageUrl || PLATFORM_HOMEPAGE[props.account.platform];
+  if (!isOnline.value) {
+    ElMessage.warning('账号已离线，请重新登录');
+    emit('login', props.account.id);
+    return;
+  }
+
+  const url = PLATFORM_HOMEPAGE[props.account.platform];
   if (!url) return;
   await window.matrixflow.browser.openAccountBrowser(props.account.id, url);
 }

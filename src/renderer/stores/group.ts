@@ -216,7 +216,9 @@ export const useGroupStore = defineStore('group', () => {
   }
 
   function getGroupAccountCount(id: string): number {
-    return groups.value.find((g) => g.id === id)?.accountIds.length ?? 0;
+    const g = groups.value.find((g) => g.id === id);
+    if (!g) return 0;
+    return g.accountCount ?? g.accountIds?.length ?? 0;
   }
 
   return {

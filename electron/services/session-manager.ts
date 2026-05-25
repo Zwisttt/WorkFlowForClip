@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { BrowserContext } from 'patchright';
 import type { ISessionManager, Platform, ConsistencyCheck, ConsistencyResult } from './types';
+import type { Cookie } from 'electron';
 
 export class SessionManager implements ISessionManager {
   private baseDir: string;
@@ -39,6 +40,17 @@ export class SessionManager implements ISessionManager {
       origins: [] as Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>,
     };
     return this.writeStorageState(storageState, accountId, platform);
+  }
+
+  async saveFromElectronCookies(cookies: Cookie[], accountId: string, platform: Platform): Promise<string> {
+    const cookieData = cookies.map(c => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain ?? '',
+      path: c.path ?? '/',
+    }));
+
+    return this.saveFromCookies(cookieData, accountId, platform);
   }
 
   private async writeStorageState(

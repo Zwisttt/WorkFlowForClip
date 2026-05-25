@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import { session as electronSession } from 'electron';
 import { Logger } from '../core/Logger';
 import { EventBus } from '../core/EventBus';
 import { securityLayer } from '../core/SecurityLayer';
@@ -187,14 +188,39 @@ export class AccountService implements IAccountService {
       return false;
     }
 
-    const adapter = this.requireAdapter(account.platform);
     let valid = false;
 
     try {
-      valid = await adapter.checkCookie(accountId);
+      const adapter = PlatformRegistry.getAdapter(account.platform);
+      if (adapter) {
+        valid = await adapter.checkCookie(accountId);
+      }
     } catch (err) {
       logger.error(`Cookie 验证异常: accountId=${accountId}`, err);
       valid = false;
+    }
+
+    if (!valid && (account.platform === 'bilibili' || account.platform === 'kuaishou')) {
+      try {
+        const partition = `persist:${accountId}`;
+        const ses = electronSession.fromPartition(partition);
+        const config = {
+          bilibili: { domains: ['.bilibili.com'], required: ['SESSDATA'] },
+          kuaishou: { domains: ['.kuaishou.com'], required: ['kuaishou.web.cp.api_ph', 'kuaishou.web.cp.api_st'] },
+        }[account.platform];
+        if (config) {
+          for (const domain of config.domains) {
+            const cookies = await ses.cookies.get({ domain });
+            const names = cookies.filter(c => !this.isExpired(c)).map(c => c.name);
+            if (config.required.every(r => names.includes(r))) {
+              valid = true;
+              break;
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(`Electron partition cookie 检查失败: accountId=${accountId}`, err);
+      }
     }
 
     const db = this.requireDatabase();
@@ -219,6 +245,11 @@ export class AccountService implements IAccountService {
 
     logger.info(`Cookie 验证完成: accountId=${accountId}, valid=${valid}`);
     return valid;
+  }
+
+  private isExpired(cookie: Electron.Cookie): boolean {
+    if (!cookie.expirationDate) return false;
+    return cookie.expirationDate * 1000 < Date.now();
   }
 
   async refreshCookie(accountId: string): Promise<boolean> {

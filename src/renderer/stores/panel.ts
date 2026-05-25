@@ -42,8 +42,9 @@ export const usePanelStore = defineStore('panel', () => {
     const groups: Record<string, Account[]> = {
       douyin: [],
       xiaohongshu: [],
-      wechat: [],
       kuaishou: [],
+      bilibili: [],
+      weixin_video: [],
     };
 
     availableAccounts.value.forEach((account) => {

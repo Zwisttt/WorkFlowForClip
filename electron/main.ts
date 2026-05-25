@@ -1,7 +1,7 @@
 import { initSentryMain } from './core/SentryInit';
 initSentryMain();
 
-import { app, BrowserWindow, ipcMain, protocol } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, session } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { AppLifecycle } from './core/AppLifecycle';
@@ -33,8 +33,13 @@ import { initDatabase, closeDatabase } from './data/Database';
 import { registerAllAdapters, PlatformRegistry } from './platform/adapter';
 import { multiPanelService } from './services/MultiPanelService';
 import { materialService } from './services/MaterialService';
+import { browserManager } from './services/embedded-browser/browser-manager';
 
 const logger = new Logger('Main');
+
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+app.commandLine.appendSwitch('disable-features', 'AutomationControlled');
+app.commandLine.appendSwitch('force-webrtc-ip-handling-policy', 'default_public_interface_only');
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -67,6 +72,7 @@ async function createWindow() {
 
   autoUpdaterService.initialize(mainWindow);
   multiPanelService.setMainWindow(mainWindow);
+  browserManager.setMainWindow(mainWindow);
 
   if (process.env.NODE_ENV === 'development') {
     await mainWindow.loadURL('http://localhost:5173');
@@ -81,6 +87,14 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['*://*.hdslb.com/*'] },
+    (details, callback) => {
+      details.requestHeaders['Referer'] = 'https://www.bilibili.com';
+      callback({ requestHeaders: details.requestHeaders });
+    }
+  );
+
   protocol.handle('local-file', async (request) => {
     try {
       const url = new URL(request.url);
@@ -239,6 +253,9 @@ app.on('before-quit', async () => {
 
   materialService.dispose();
   logger.info('素材管理服务已停止');
+
+  browserManager.dispose();
+  logger.info('内嵌浏览器已关闭');
 
   await browserPool.shutdown();
   logger.info('浏览器池已关闭');
