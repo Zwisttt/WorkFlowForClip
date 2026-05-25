@@ -974,8 +974,8 @@ async function openInChrome(url: string) {
 
 /* ===== 两面板布局 ===== */
 .two-panel {
-  display: grid;
-  grid-template-columns: 300px 1fr;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
 }
 
