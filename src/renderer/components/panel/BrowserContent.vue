@@ -132,14 +132,19 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--color-workspace-bg);
+  background: transparent;
 }
 
 .browser-content__viewport {
   flex: 1;
   position: relative;
   overflow: hidden;
-  background: var(--color-workspace-bg);
+  background: transparent;
+  pointer-events: none;
+}
+
+.browser-content__viewport > * {
+  pointer-events: auto;
 }
 
 .browser-content__placeholder {
@@ -153,6 +158,8 @@ onMounted(() => {
   color: var(--color-workspace-text-muted);
   font-size: 13px;
   font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--color-workspace-bg);
+  transition: opacity 0.3s ease;
 }
 
 .browser-content__external {

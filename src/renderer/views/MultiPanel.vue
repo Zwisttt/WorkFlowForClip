@@ -119,7 +119,7 @@ function handleAddAccount() {
 .multi-panel-view {
   display: flex;
   height: 100%;
-  background: var(--color-workspace-bg);
+  background: transparent;
 }
 
 .workspace {
@@ -128,7 +128,7 @@ function handleAddAccount() {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  background: var(--color-workspace-bg);
+  background: transparent;
 }
 
 .workspace__empty {
