@@ -198,7 +198,7 @@ const props = defineProps<{
   groups: Array<{ id: string; name: string; color: string }>;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   detail: [id: string];
   validate: [id: string];
   login: [id: string];

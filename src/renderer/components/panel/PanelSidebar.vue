@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed } from 'vue';
 import {
   Refresh,
   Plus,
@@ -233,9 +233,15 @@ function handleAccountClick(account: Account) {
                 >
                   <!-- 头像 -->
                   <div class="account-item__avatar">
-                    <el-avatar :size="32" :src="account.avatar">
+                    <img
+                      v-if="account.avatar"
+                      :src="account.avatar"
+                      class="account-item__avatar-img"
+                      @error="(e) => { (e.target as HTMLImageElement).style.display = 'none'; }"
+                    />
+                    <span v-if="!account.avatar" class="account-item__avatar-fallback">
                       {{ account.nickname?.charAt(0) || '?' }}
-                    </el-avatar>
+                    </span>
                     <!-- 平台色边框 -->
                     <span
                       class="avatar-border"
@@ -245,7 +251,9 @@ function handleAccountClick(account: Account) {
 
                   <!-- 账号信息 -->
                   <div class="account-item__info">
-                    <div class="account-item__name">{{ account.nickname || '未命名' }}</div>
+                    <div class="account-item__name">
+                      {{ account.nickname || '未命名' }}
+                    </div>
                     <div class="account-item__meta">
                       <!-- 状态点 -->
                       <span
@@ -462,7 +470,32 @@ export default {
 /* ── 头像 ── */
 .account-item__avatar {
   position: relative;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--color-bg-page);
+}
+
+.account-item__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.account-item__avatar-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  border-radius: 50%;
+  background: var(--color-primary-lighter);
 }
 
 .avatar-border {
