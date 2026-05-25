@@ -235,7 +235,7 @@ function handleKeydown(e: KeyboardEvent) {
 
 .workspace-toolbar__nav-btn--disabled {
   opacity: 0.3;
-  cursor: not-allowed;
+  cursor: default;
 }
 
 .workspace-toolbar__url-wrapper {

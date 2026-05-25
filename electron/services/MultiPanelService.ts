@@ -86,10 +86,13 @@ class MultiPanelService {
     });
 
     ipcMain.on('panel-address:open-devtools', (_, data: { panelId: string }) => {
+      logger.info(`openDevTools: panelId=${data.panelId}`);
       const session = this.sessions.get(data.panelId);
-      if (!session) return;
+      if (!session) { logger.warn(`openDevTools: session not found for ${data.panelId}`); return; }
       const view = browserManager.getView(session.accountId);
-      view?.webContents.openDevTools({ mode: 'detach' });
+      if (!view) { logger.warn(`openDevTools: view not found for ${session.accountId}`); return; }
+      view.webContents.openDevTools({ mode: 'detach' });
+      logger.info(`openDevTools: opened for ${session.accountId}`);
     });
 
     this.ipcHandlersRegistered = true;
