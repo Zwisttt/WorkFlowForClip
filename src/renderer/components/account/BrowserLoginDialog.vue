@@ -1074,40 +1074,54 @@ async function openInChrome(url: string) {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .platform-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 14px 6px;
-  flex: 0 0 calc((100% - 20px) / 3);
-  min-width: 90px;
-  min-height: 100px;
+  gap: 12px;
+  padding: 20px 10px 16px;
+  flex: 0 0 calc((100% - 24px) / 3);
+  min-width: 100px;
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-card);
   cursor: pointer;
-  transition: all var(--transition-base);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.platform-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(37,99,235,0.02) 0%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.25s;
 }
 
 .platform-card:hover {
-  transform: scale(1.02);
+  transform: translateY(-2px);
   border-color: var(--color-primary-light);
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 8px 25px rgba(15,23,42,0.08);
+}
+
+.platform-card:hover::before {
+  opacity: 1;
 }
 
 .platform-card--active {
-  background: var(--color-primary-lighter);
+  background: linear-gradient(135deg, var(--color-primary-lighter) 0%, #eff6ff 100%);
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.1), 0 8px 25px rgba(37,99,235,0.08);
 }
 
 .platform-card--active .platform-card__icon {
   background: var(--platform-color);
-  color: #fff;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
 .platform-card--active .platform-card__icon :deep(svg) {
@@ -1115,21 +1129,21 @@ async function openInChrome(url: string) {
 }
 
 .platform-card__icon {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #f1f5f9;
-  border-radius: 50%;
-  transition: all var(--transition-base);
+  border-radius: 14px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
   overflow: hidden;
 }
 
 .platform-card__icon :deep(svg) {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
 }
 
 .platform-card__name {
@@ -1137,6 +1151,7 @@ async function openInChrome(url: string) {
   font-weight: 600;
   color: var(--color-text-primary);
   text-align: center;
+  letter-spacing: 0.3px;
 }
 
 /* ===== 配置卡片 ===== */
