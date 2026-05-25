@@ -58,18 +58,22 @@ function handleClose() {
 }
 
 function onUrlChange(panelId: string, url: string) {
-  if (panelId === props.panel?.id) currentUrl.value = url;
+  if (panelId === props.panel?.accountId || panelId === props.panel?.id) {
+    currentUrl.value = url;
+  }
 }
 
 function onNavigationState(panelId: string, back: boolean, forward: boolean) {
-  if (panelId === props.panel?.id) {
+  if (panelId === props.panel?.accountId || panelId === props.panel?.id) {
     canGoBack.value = back;
     canGoForward.value = forward;
   }
 }
 
 function onLoadingState(panelId: string, loading: boolean) {
-  if (panelId === props.panel?.id) isLoading.value = loading;
+  if (panelId === props.panel?.accountId || panelId === props.panel?.id) {
+    isLoading.value = loading;
+  }
 }
 
 onMounted(() => {

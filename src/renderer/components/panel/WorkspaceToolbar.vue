@@ -176,23 +176,19 @@ function handleKeydown(e: KeyboardEvent) {
     <!-- Action Buttons -->
     <div class="workspace-toolbar__actions">
       <button
-        class="workspace-toolbar__action-btn"
-        title="开发者工具"
+        class="workspace-toolbar__action-btn workspace-toolbar__action-btn--text"
+        title="打开控制台"
         @click="emit('openDevTools')"
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M6.5 2.5L8 4L6 6.5M9.5 13.5L8 11L10 8.5M4 8H11M3 5H5M3 10H5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        控制台
       </button>
 
       <button
-        class="workspace-toolbar__action-btn"
+        class="workspace-toolbar__action-btn workspace-toolbar__action-btn--text"
         title="固定窗口"
         @click="emit('togglePin')"
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M10 2L10 9L13 12L11.5 13.5L8 10V2H10Z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        固定
       </button>
     </div>
   </div>
@@ -331,5 +327,13 @@ function handleKeydown(e: KeyboardEvent) {
 
 .workspace-toolbar__action-btn:active {
   transform: scale(0.95);
+}
+
+.workspace-toolbar__action-btn--text {
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: 'Inter', -apple-system, 'PingFang SC', sans-serif;
 }
 </style>

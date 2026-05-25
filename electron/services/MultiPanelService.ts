@@ -152,7 +152,9 @@ class MultiPanelService {
       this.activePanelId = id;
       this.layoutActivePanel();
 
-      this.mainWindow.webContents.send('panel-browser:url-change', id, creatorUrl);
+      this.mainWindow.webContents.send('panel-browser:url-change', session.accountId, creatorUrl);
+      this.mainWindow.webContents.send('panel-browser:navigation-state', session.accountId, false, false);
+      this.mainWindow.webContents.send('panel-browser:loading-state', session.accountId, true);
 
       logger.info(`打开面板: ${account.nickname} (${account.platform})`);
       return session;
