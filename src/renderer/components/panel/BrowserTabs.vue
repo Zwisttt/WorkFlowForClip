@@ -178,7 +178,7 @@ function handleDragEnd() {
   display: flex;
   align-items: center;
   height: 36px;
-  background: #1e293b;
+  background: var(--color-workspace-surface);
   padding: 0 8px;
   gap: 8px;
 }
@@ -251,16 +251,16 @@ function handleDragEnd() {
 }
 
 .browser-tab:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--color-workspace-hover);
 }
 
 .browser-tab--active {
-  background: #0f172a;
-  border-bottom: 2px solid #2563eb;
+  background: var(--color-workspace-bg);
+  border-bottom: 2px solid var(--color-workspace-active);
 }
 
 .browser-tab--drag-over {
-  border-left: 2px solid #2563eb;
+  border-left: 2px solid var(--color-workspace-active);
   padding-left: 10px;
 }
 
@@ -282,7 +282,7 @@ function handleDragEnd() {
   height: 20px;
   border-radius: 50%;
   border: 1px solid;
-  background: #334155;
+  background: var(--color-workspace-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -315,7 +315,7 @@ function handleDragEnd() {
 }
 
 .browser-tab--active .browser-tab__name {
-  color: #f1f5f9;
+  color: var(--color-workspace-text);
 }
 
 /* ── 关闭按钮 ── */
@@ -330,7 +330,7 @@ function handleDragEnd() {
   background: transparent;
   border-radius: 50%;
   cursor: pointer;
-  color: #94a3b8;
+  color: var(--color-workspace-text-secondary);
   opacity: 0;
   transition: all 150ms ease;
   flex-shrink: 0;
@@ -364,13 +364,13 @@ function handleDragEnd() {
   background: transparent;
   border-radius: 6px;
   cursor: pointer;
-  color: #64748b;
+  color: var(--color-workspace-text-muted);
   transition: all 150ms ease;
 }
 
 .browser-tabs__action-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #2563eb;
+  background: var(--color-workspace-hover);
+  color: var(--color-workspace-active);
 }
 
 .browser-tabs__action-btn--danger:hover {

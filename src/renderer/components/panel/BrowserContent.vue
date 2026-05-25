@@ -132,14 +132,14 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #0f172a;
+  background: var(--color-workspace-bg);
 }
 
 .browser-content__viewport {
   flex: 1;
   position: relative;
   overflow: hidden;
-  background: #0f172a;
+  background: var(--color-workspace-bg);
 }
 
 .browser-content__placeholder {
@@ -150,7 +150,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  color: #475569;
+  color: var(--color-workspace-text-muted);
   font-size: 13px;
   font-family: 'Inter', -apple-system, sans-serif;
 }
@@ -163,7 +163,7 @@ onMounted(() => {
   justify-content: center;
   padding: 48px;
   text-align: center;
-  background: #0f172a;
+  background: var(--color-workspace-bg);
   gap: 16px;
 }
 
@@ -171,23 +171,23 @@ onMounted(() => {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--color-workspace-text);
   font-family: 'Inter', -apple-system, sans-serif;
 }
 
 .external-hint {
   margin: 0;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--color-workspace-text-secondary);
   max-width: 400px;
   font-family: 'Inter', -apple-system, sans-serif;
 }
 
 .external-tag {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-workspace-text-secondary);
   padding: 4px 12px;
-  border: 1px solid #334155;
+  border: 1px solid var(--color-workspace-border);
   border-radius: 6px;
   font-family: 'Inter', -apple-system, sans-serif;
 }

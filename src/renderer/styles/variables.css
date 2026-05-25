@@ -101,6 +101,24 @@
   --color-disabled-light: #f5f7fa;
   --opacity-disabled: 0.6;
 
+  /* ── 工作区 (Browser Workspace) ── */
+  --color-workspace-bg: #f1f5f9;
+  --color-workspace-surface: #ffffff;
+  --color-workspace-border: #e2e8f0;
+  --color-workspace-text: #0f172a;
+  --color-workspace-text-secondary: #64748b;
+  --color-workspace-text-muted: #94a3b8;
+  --color-workspace-hover: rgba(0, 0, 0, 0.04);
+  --color-workspace-active: #2563eb;
+  --color-workspace-tab-active-bg: #ffffff;
+  --color-workspace-tab-inactive-text: #64748b;
+  --color-workspace-url-bg: #ffffff;
+  --color-workspace-url-focus-bg: #ffffff;
+  --color-workspace-url-focus-border: #2563eb;
+  --color-workspace-nav-btn: #64748b;
+  --color-workspace-nav-btn-hover: #0f172a;
+  --color-workspace-nav-btn-disabled: rgba(100, 116, 139, 0.3);
+
   /* ── 图表色板 ── */
   --chart-color-1: #2563eb;
   --chart-color-2: #10b981;
@@ -206,6 +224,23 @@ html.dark {
   --el-fill-color-blank: var(--color-bg-card);
   --el-fill-color: var(--color-bg-page);
   --el-fill-color-light: var(--color-bg-page);
+
+  --color-workspace-bg: #0f172a;
+  --color-workspace-surface: #1e293b;
+  --color-workspace-border: #334155;
+  --color-workspace-text: #f1f5f9;
+  --color-workspace-text-secondary: #94a3b8;
+  --color-workspace-text-muted: #64748b;
+  --color-workspace-hover: rgba(255, 255, 255, 0.05);
+  --color-workspace-active: #2563eb;
+  --color-workspace-tab-active-bg: #0f172a;
+  --color-workspace-tab-inactive-text: #94a3b8;
+  --color-workspace-url-bg: #0f172a;
+  --color-workspace-url-focus-bg: #1e293b;
+  --color-workspace-url-focus-border: #2563eb;
+  --color-workspace-nav-btn: #94a3b8;
+  --color-workspace-nav-btn-hover: #f1f5f9;
+  --color-workspace-nav-btn-disabled: rgba(148, 163, 184, 0.3);
 }
 
 *:focus-visible {

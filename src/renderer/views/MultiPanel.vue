@@ -119,7 +119,7 @@ function handleAddAccount() {
 .multi-panel-view {
   display: flex;
   height: 100%;
-  background: #0f172a;
+  background: var(--color-workspace-bg);
 }
 
 .workspace {
@@ -128,7 +128,7 @@ function handleAddAccount() {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  background: #0f172a;
+  background: var(--color-workspace-bg);
 }
 
 .workspace__empty {
@@ -139,20 +139,20 @@ function handleAddAccount() {
   justify-content: center;
   padding: 48px;
   text-align: center;
-  background: #0f172a;
+  background: var(--color-workspace-bg);
 }
 
 .workspace__empty-title {
   font-size: 20px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: var(--color-workspace-text);
   margin: 16px 0 8px;
   font-family: 'Inter', -apple-system, 'PingFang SC', sans-serif;
 }
 
 .workspace__empty-hint {
   font-size: 14px;
-  color: #64748b;
+  color: var(--color-workspace-text-muted);
   margin: 0 0 24px;
   font-family: 'Inter', -apple-system, 'PingFang SC', sans-serif;
 }
@@ -169,7 +169,7 @@ function handleAddAccount() {
   align-items: center;
   gap: 12px;
   font-size: 13px;
-  color: #64748b;
+  color: var(--color-workspace-text-muted);
   font-family: 'Inter', -apple-system, 'PingFang SC', sans-serif;
 }
 
@@ -177,7 +177,7 @@ function handleAddAccount() {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #2563eb;
+  background: var(--color-workspace-active);
   flex-shrink: 0;
 }
 </style>

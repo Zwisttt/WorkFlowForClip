@@ -204,8 +204,8 @@ function handleKeydown(e: KeyboardEvent) {
   align-items: center;
   gap: 8px;
   height: 44px;
-  background: #1e293b;
-  border-bottom: 1px solid #334155;
+  background: var(--color-workspace-surface);
+  border-bottom: 1px solid var(--color-workspace-border);
   padding: 0 12px;
 }
 
@@ -226,13 +226,13 @@ function handleKeydown(e: KeyboardEvent) {
   background: transparent;
   border-radius: 6px;
   cursor: pointer;
-  color: #94a3b8;
+  color: var(--color-workspace-text-secondary);
   transition: all 150ms ease;
 }
 
 .workspace-toolbar__nav-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f1f5f9;
+  background: var(--color-workspace-hover);
+  color: var(--color-workspace-text);
 }
 
 .workspace-toolbar__nav-btn:active:not(:disabled) {
@@ -252,8 +252,8 @@ function handleKeydown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   height: 32px;
-  background: #0f172a;
-  border: 1px solid #334155;
+  background: var(--color-workspace-bg);
+  border: 1px solid var(--color-workspace-border);
   border-radius: 8px;
   padding: 0 10px;
   gap: 8px;
@@ -261,8 +261,8 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 .workspace-toolbar__url-bar--focused {
-  background: #1e293b;
-  border-color: #2563eb;
+  background: var(--color-workspace-surface);
+  border-color: var(--color-workspace-active);
 }
 
 .workspace-toolbar__url-bar--focused .workspace-toolbar__lock-icon {
@@ -281,12 +281,12 @@ function handleKeydown(e: KeyboardEvent) {
   background: transparent;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 13px;
-  color: #f1f5f9;
+  color: var(--color-workspace-text);
   outline: none;
 }
 
 .workspace-toolbar__url-input::placeholder {
-  color: #64748b;
+  color: var(--color-workspace-text-muted);
 }
 
 .workspace-toolbar__spinner {
@@ -320,13 +320,13 @@ function handleKeydown(e: KeyboardEvent) {
   background: transparent;
   border-radius: 6px;
   cursor: pointer;
-  color: #94a3b8;
+  color: var(--color-workspace-text-secondary);
   transition: all 150ms ease;
 }
 
 .workspace-toolbar__action-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f1f5f9;
+  background: var(--color-workspace-hover);
+  color: var(--color-workspace-text);
 }
 
 .workspace-toolbar__action-btn:active {
