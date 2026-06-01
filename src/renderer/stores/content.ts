@@ -50,14 +50,18 @@ export const useContentStore = defineStore('content', () => {
 
   async function createContent(data: Partial<ContentItem>) {
     if (!window.matrixflow) return;
-    const item = await window.matrixflow.content.create(data);
+    const item = await window.matrixflow.content.create(data) as Partial<ContentItem> | undefined;
     const normalized: ContentItem = {
+      id: item?.id || `content_${Date.now()}`,
+      title: item?.title || data.title || '未命名内容',
+      type: item?.type || data.type || 'video',
       tags: [],
       status: 'draft',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      ...(item as Record<string, unknown>),
-    } as ContentItem;
+      ...data,
+      ...item,
+    };
     contents.value.unshift(normalized);
     return normalized;
   }
