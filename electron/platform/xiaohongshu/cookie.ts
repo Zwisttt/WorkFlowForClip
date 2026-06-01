@@ -10,10 +10,26 @@ export function getCookiePath(accountId: string): string {
   const cookieDir = path.join(userDataPath, 'cookies', 'xiaohongshu');
 
   if (!fs.existsSync(cookieDir)) {
-    fs.mkdirSync(cookieDir, { recursive: true });
+    ensureDir(cookieDir);
   }
 
   return path.join(cookieDir, `${accountId}.json`);
+}
+
+function ensureDir(dir: string): void {
+  const parts = dir.split(path.sep);
+  let current = parts[0] || path.sep;
+  for (let i = 1; i < parts.length; i++) {
+    current = path.join(current, parts[i]);
+    if (fs.existsSync(current)) {
+      if (!fs.statSync(current).isDirectory()) {
+        fs.unlinkSync(current);
+        fs.mkdirSync(current);
+      }
+    } else {
+      fs.mkdirSync(current);
+    }
+  }
 }
 
 export function cookieExists(cookiePath: string): boolean {
