@@ -1,0 +1,298 @@
+<template>
+  <div class="task-table">
+    <div class="task-table__header">
+      <span class="task-table__count">共 {{ taskStore.groupedTasks.length }} 个内容 / {{ total }} 条任务</span>
+    </div>
+    <el-table :data="taskStore.groupedTasks" v-loading="taskStore.loading" stripe border
+      @row-click="onRowClick">
+      <el-table-column label="内容预览" min-width="240">
+        <template #default="{ row }">
+          <div class="task-table__content-cell">
+            <div class="task-table__cover">
+              <img
+                v-show="row.coverUrl"
+                :src="normalizeCoverUrl(row.coverUrl)"
+                class="task-table__cover-img"
+                @error="onImgError"
+              />
+              <el-icon v-show="!row.coverUrl" :size="20"><VideoCameraFilled /></el-icon>
+            </div>
+            <div class="task-table__content-info">
+              <span class="task-table__title">{{ row.title }}</span>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="发布账号" min-width="200">
+        <template #default="{ row }">
+          <div class="task-table__accounts">
+            <span
+              v-for="(acc, i) in row.accounts"
+              :key="i"
+              class="task-table__account-tag"
+            >
+              <span class="task-table__platform-dot" :class="acc.platform"></span>
+              <span class="task-table__platform-name">{{ platformLabel(acc.platform) }}</span>
+              <span class="task-table__account-name">{{ acc.accountName || '-' }}</span>
+            </span>
+          </div>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="状态" width="100">
+        <template #default="{ row }">
+          <el-tag size="small" :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="创建时间" width="140">
+        <template #default="{ row }">
+          <span class="task-table__time">{{ formatTime(row.createdAt) }}</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="操作" width="140" fixed="right">
+        <template #default="{ row }">
+          <el-button
+            v-if="row.status === 'pending' || row.status === 'failed'"
+            size="small"
+            type="primary"
+            link
+            @click.stop="onExecute(row)"
+          >{{ row.status === 'failed' ? '重新执行' : '执行发布' }}</el-button>
+          <el-button size="small" link @click.stop="onRowClick(row)">详情</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { useTaskStore } from '@/renderer/stores/task';
+import type { TaskStatus, GroupedTask } from '@/renderer/stores/task';
+import { VideoCameraFilled } from '@element-plus/icons-vue';
+
+const taskStore = useTaskStore();
+
+defineProps<{ total: number }>();
+
+const emit = defineEmits<{
+  (e: 'detail', task: GroupedTask): void;
+  (e: 'execute', task: GroupedTask): void;
+}>();
+
+function onRowClick(row: GroupedTask) {
+  emit('detail', row);
+}
+
+function onExecute(row: GroupedTask) {
+  emit('execute', row);
+}
+
+function onImgError(e: Event) {
+  (e.target as HTMLImageElement).style.display = 'none';
+}
+
+function normalizeCoverUrl(url: string): string {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('local-file://')) return url;
+  return `local-file://${url}`;
+}
+
+function platformLabel(platform: string): string {
+  const labels: Record<string, string> = {
+    douyin: '抖音',
+    xiaohongshu: '小红书',
+    bilibili: 'B站',
+    channels: '视频号',
+    kuaishou: '快手',
+  };
+  return labels[platform] || platform;
+}
+
+function statusLabel(status: TaskStatus): string {
+  const labels: Record<TaskStatus, string> = {
+    pending: '待执行',
+    scheduled: '待执行',
+    running: '执行中',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+    skipped: '已跳过',
+  };
+  return labels[status] || status;
+}
+
+function statusTagType(status: TaskStatus): '' | 'success' | 'warning' | 'danger' | 'info' {
+  const types: Record<TaskStatus, '' | 'success' | 'warning' | 'danger' | 'info'> = {
+    pending: 'info',
+    scheduled: 'info',
+    running: 'warning',
+    completed: 'success',
+    failed: 'danger',
+    cancelled: 'info',
+    skipped: 'info',
+  };
+  return types[status] || '';
+}
+
+function formatTime(iso?: string): string {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+</script>
+
+<style scoped>
+.task-table {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+}
+
+.task-table__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.task-table__count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.task-table__content-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.task-table__cover {
+  width: 48px;
+  height: 48px;
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  color: var(--color-text-placeholder);
+}
+
+.task-table__cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.task-table__content-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.task-table__title {
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-table__accounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.task-table__account-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  background: var(--color-bg-page);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-regular);
+}
+
+.task-table__platform-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.task-table__platform-dot.douyin { background: var(--color-plat-douyin); }
+.task-table__platform-dot.xiaohongshu { background: var(--color-plat-xiaohongshu); }
+.task-table__platform-dot.bilibili { background: var(--color-plat-bilibili); }
+.task-table__platform-dot.channels { background: var(--color-plat-wechat); }
+.task-table__platform-dot.kuaishou { background: var(--color-plat-kuaishou); }
+
+.task-table__platform-name {
+  color: var(--color-text-secondary);
+}
+
+.task-table__account-name {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+}
+
+.task-table__time {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.task-table :deep(.el-table) {
+  --el-table-border-color: var(--color-border);
+  --el-table-header-bg-color: var(--color-bg-page);
+  --el-table-row-hover-bg-color: var(--color-primary-lighter);
+}
+
+.task-table :deep(.el-table__header th) {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.task-table :deep(.el-table__row) {
+  cursor: pointer;
+}
+
+.task-table :deep(.el-tag) {
+  --el-tag-border-radius: var(--radius-full);
+}
+
+.task-table :deep(.el-tag--success) {
+  --el-tag-bg-color: var(--color-success-light);
+  --el-tag-text-color: var(--color-success);
+  --el-tag-border-color: transparent;
+}
+
+.task-table :deep(.el-tag--warning) {
+  --el-tag-bg-color: var(--color-warning-light);
+  --el-tag-text-color: var(--color-warning);
+  --el-tag-border-color: transparent;
+}
+
+.task-table :deep(.el-tag--danger) {
+  --el-tag-bg-color: var(--color-danger-light);
+  --el-tag-text-color: var(--color-danger);
+  --el-tag-border-color: transparent;
+}
+
+.task-table :deep(.el-tag--info) {
+  --el-tag-bg-color: var(--color-primary-lighter);
+  --el-tag-text-color: var(--color-primary);
+  --el-tag-border-color: transparent;
+}
+</style>
