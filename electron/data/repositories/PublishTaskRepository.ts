@@ -61,6 +61,20 @@ export class PublishTaskRepository extends BaseRepository<PublishTask> {
       return db.prepare('SELECT * FROM publish_tasks WHERE id = ?').get(id) as PublishTask;
     });
   }
+
+  async markFinalFailed(id: string, errorMessage: string): Promise<PublishTask> {
+    return runAsync((db) => {
+      const task = db.prepare('SELECT retry_count FROM publish_tasks WHERE id = ?').get(id) as Pick<PublishTask, 'retry_count'> | undefined;
+      if (!task) throw new Error(`PublishTask ${id} not found`);
+
+      const newRetryCount = task.retry_count + 1;
+      db.prepare(
+        `UPDATE publish_tasks SET status = 'failed', error_message = ?, retry_count = ?, updated_at = datetime('now') WHERE id = ?`
+      ).run(errorMessage, newRetryCount, id);
+
+      return db.prepare('SELECT * FROM publish_tasks WHERE id = ?').get(id) as PublishTask;
+    });
+  }
 }
 
 export const publishTaskRepo = new PublishTaskRepository();
