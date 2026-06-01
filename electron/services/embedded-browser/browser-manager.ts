@@ -135,6 +135,23 @@ export class BrowserManager {
     tab.contentView.setBounds(bounds);
   }
 
+  layoutEmbeddedToMainContent(accountId: string): void {
+    const tab = this.tabs.get(accountId);
+    if (!tab || !this.mainWindow) return;
+
+    const [contentWidth, contentHeight] = this.mainWindow.getContentSize();
+    const mainSidebarWidth = 150;
+    const titlebarHeight = 38;
+    const headerHeight = 56;
+
+    tab.contentView.setBounds({
+      x: mainSidebarWidth,
+      y: titlebarHeight + headerHeight,
+      width: Math.max(400, contentWidth - mainSidebarWidth),
+      height: Math.max(300, contentHeight - titlebarHeight - headerHeight),
+    });
+  }
+
   async createTab(accountId: string, platform: Platform, url: string): Promise<WebContentsView> {
     if (this.tabs.size >= MAX_CONCURRENT_TABS) {
       logger.warn(`达到最大标签数限制 ${MAX_CONCURRENT_TABS}，关闭最老的标签`);
@@ -237,6 +254,10 @@ export class BrowserManager {
 
   hasTab(accountId: string): boolean {
     return this.tabs.has(accountId);
+  }
+
+  hasStandaloneTab(accountId: string): boolean {
+    return !!this.tabs.get(accountId)?.window;
   }
 
   getView(accountId: string): WebContentsView | undefined {

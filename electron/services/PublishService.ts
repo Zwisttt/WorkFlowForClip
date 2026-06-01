@@ -4,10 +4,12 @@ import { EventBus } from '../core/EventBus';
 import { TaskScheduler } from '../core/TaskScheduler';
 import { PlatformRegistry } from '../platform/base/PlatformRegistry';
 import { accountService } from './AccountService';
+import { materialService } from './MaterialService';
 import { publishTaskRepo } from '../data/repositories/PublishTaskRepository';
 import { taskItemRepo } from '../data/repositories/TaskItemRepository';
 import { groupPublishRuleRepo } from '../data/repositories/GroupPublishRuleRepository';
 import { accountRepo } from '../data/repositories/AccountRepository';
+import { getDatabase, isDatabaseAvailable } from '../data/Database';
 import type { PlatformAdapter } from '../platform/base/interfaces';
 import type {
   UploadContext,
@@ -35,6 +37,8 @@ import type {
   ItemCompletedPayload,
   ItemFailedPayload,
   RulesAppliedPayload,
+  TaskFilter,
+  TaskListResult,
 } from './types/publish';
 import { PublishEvent } from './types/publish';
 
@@ -47,11 +51,66 @@ function nowISO(): string {
   return new Date().toISOString();
 }
 
+function normalizeLocalFilePath(value?: unknown): string | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  return value.replace(/^local-file:\/\//, '');
+}
+
+function buildUploadContextFromTask(
+  dbTask: DbPublishTask,
+  accountId: string,
+  videoPath: string,
+  taskMeta: Record<string, unknown>,
+  browserRuntime: Partial<UploadContext>,
+): UploadContext {
+  const contentId = dbTask.content_id;
+  const headless = taskMeta.headless === true;
+  const taskTitle = (dbTask as any).title || `video_${contentId.slice(0, 8)}`;
+  const taskDescription = (dbTask as any).description || undefined;
+
+  const uploadContext: UploadContext = {
+    accountId,
+    videoPath,
+    title: taskTitle,
+    description: taskDescription,
+    tags: (() => { try { return JSON.parse((dbTask as any).tags || '[]'); } catch { return []; } })(),
+    coverPath: normalizeLocalFilePath((dbTask as any).cover_url || taskMeta.coverUrl),
+    location: taskMeta.location as string | undefined,
+    visibility: taskMeta.visibility as UploadContext['visibility'],
+    declaration: taskMeta.declaration as string | undefined,
+    scheduledAt: dbTask.scheduled_at || taskMeta.scheduledAt as string | undefined,
+    allowComment: taskMeta.allowComment as boolean | undefined,
+    allowShare: taskMeta.allowShare as boolean | undefined,
+    allowSameFrame: taskMeta.allowSameFrame as boolean | undefined,
+    allowDownload: taskMeta.allowDownload as boolean | undefined,
+    showInCity: taskMeta.showInCity as boolean | undefined,
+    headless,
+    slowMo: headless ? 0 : 200,
+    debugSteps: process.env.NODE_ENV !== 'production' && taskMeta.debugSteps === true,
+    ...browserRuntime,
+  };
+
+  if (dbTask.platform === 'kuaishou') {
+    return {
+      ...uploadContext,
+      declaration: uploadContext.declaration ?? '',
+      visibility: uploadContext.visibility ?? 'public',
+      allowComment: uploadContext.allowComment ?? true,
+      allowSameFrame: uploadContext.allowSameFrame ?? false,
+      allowDownload: uploadContext.allowDownload ?? false,
+      showInCity: uploadContext.showInCity ?? true,
+    };
+  }
+
+  return uploadContext;
+}
+
 export class PublishService implements IPublishService {
   private static instance: PublishService;
   private eventBus: EventBus;
   private taskScheduler: TaskScheduler;
   private initialized = false;
+  private executingTasks = new Set<string>();
 
   private constructor() {
     this.eventBus = EventBus.getInstance();
@@ -72,13 +131,7 @@ export class PublishService implements IPublishService {
       if (task.type !== 'publish') return { success: false, error: '非发布任务' };
       const publishTaskId = task.payload as string;
       try {
-        const dbTask = await publishTaskRepo.findById(publishTaskId);
-        if (!dbTask) return { success: false, error: `发布任务不存在: ${publishTaskId}` };
-
-        const result = dbTask.publish_mode === 'server'
-          ? await this.publishToServer(publishTaskId)
-          : await this.publishFromClient(publishTaskId);
-
+        const result = await this.executeNow(publishTaskId);
         return { success: result.success, error: result.error };
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -117,6 +170,12 @@ export class PublishService implements IPublishService {
       max_retries: DEFAULT_MAX_RETRIES,
       created_at: now,
       updated_at: now,
+      title: request.title ?? request.metadata.title ?? '',
+      description: request.description ?? request.metadata.description ?? '',
+      tags: JSON.stringify(request.tags ?? request.metadata.tags ?? []),
+      cover_url: request.coverUrl || null,
+      source: request.source ?? 'client',
+      metadata: JSON.stringify({ ...request.metadata, headless: request.headless ?? false }),
     };
 
     await publishTaskRepo.insert(dbRow);
@@ -244,15 +303,20 @@ export class PublishService implements IPublishService {
     logger.info(`发布任务已调度: taskId=${taskId} scheduledAt=${scheduledAt.toISOString()}`);
   }
 
-  async executeNow(taskId: string): Promise<PublishResult> {
+  async executeNow(taskId: string, options: { finalOnFailure?: boolean } = {}): Promise<PublishResult> {
+    if (this.executingTasks.has(taskId)) {
+      logger.warn(`任务已在执行中，跳过: taskId=${taskId}`);
+      return { success: false, error: '任务已在执行中' };
+    }
+
     const dbTask = await publishTaskRepo.findById(taskId);
     if (!dbTask) throw new Error(`发布任务不存在: ${taskId}`);
-    if (dbTask.status === 'running') throw new Error(`任务正在执行: ${taskId}`);
     if (dbTask.status === 'completed') throw new Error(`任务已完成: ${taskId}`);
+
+    this.executingTasks.add(taskId);
 
     await publishTaskRepo.update(taskId, {
       status: 'running',
-      scheduled_at: nowISO(),
     } as Partial<DbPublishTask>);
 
     const startedPayload: TaskStartedPayload = {
@@ -270,16 +334,25 @@ export class PublishService implements IPublishService {
 
       if (result.success) {
         await publishTaskRepo.markCompleted(taskId, JSON.stringify(result));
+        await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'completed');
         this.eventBus.emit(PublishEvent.TASK_COMPLETED, { taskId, result } as TaskCompletedPayload);
       } else {
-        await this.handleTaskFailure(taskId, result.error ?? '未知错误', dbTask.retry_count, dbTask.max_retries);
+        await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'failed');
+        await this.handleTaskFailure(taskId, result.error ?? '未知错误', dbTask.retry_count, dbTask.max_retries, options);
       }
 
       return result;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      await this.handleTaskFailure(taskId, errMsg, dbTask.retry_count, dbTask.max_retries);
+      logger.error(`[executeNow] 任务执行异常: taskId=${taskId} error=${errMsg}`);
+      if (err instanceof Error && err.stack) {
+        logger.error(`[executeNow] stack: ${err.stack}`);
+      }
+      await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'failed');
+      await this.handleTaskFailure(taskId, errMsg, dbTask.retry_count, dbTask.max_retries, options);
       return { success: false, error: errMsg };
+    } finally {
+      this.executingTasks.delete(taskId);
     }
   }
 
@@ -364,11 +437,12 @@ export class PublishService implements IPublishService {
     this.emitItemStarted(taskId, targetItem.id, accountId, dbTask.platform);
 
     try {
-      const uploadCtx: UploadContext = {
-        accountId,
-        videoPath: contentId,
-        title: `video_${contentId.slice(0, 8)}`,
-      };
+      const material = await materialService.getMaterial(contentId);
+      const videoPath = material?.filePath || contentId;
+      let taskMeta: Record<string, unknown> = {};
+      try { taskMeta = JSON.parse((dbTask as any).metadata || '{}'); } catch {}
+      const browserRuntime = this.getAccountBrowserRuntime(accountId);
+      const uploadCtx = buildUploadContextFromTask(dbTask, accountId, videoPath, taskMeta, browserRuntime);
 
       const uploadResult = await adapter.uploadVideo(uploadCtx);
       if (!uploadResult.success) {
@@ -444,35 +518,45 @@ export class PublishService implements IPublishService {
 
     await this.validateCookieForAccount(accountId);
 
-    const items = await taskItemRepo.findByTaskId(taskId);
-    if (items.length === 0) {
-      const itemId = randomUUID();
-      await taskItemRepo.insert({
-        id: itemId,
-        task_id: taskId,
-        account_id: accountId,
-        platform: dbTask.platform,
-        status: 'pending',
-        platform_video_id: null,
-        publish_url: null,
-        error_message: null,
-        started_at: null,
-        completed_at: null,
-      } as Omit<DbTaskItem, 'created_at' | 'updated_at'>);
+    let targetItem: DbTaskItem;
+    try {
+      const items = await taskItemRepo.findByTaskId(taskId);
+      if (items.length === 0) {
+        const itemId = randomUUID();
+        await taskItemRepo.insert({
+          id: itemId,
+          task_id: taskId,
+          account_id: accountId,
+          platform: dbTask.platform,
+          status: 'pending',
+          platform_video_id: null,
+          publish_url: null,
+          error_message: null,
+          started_at: null,
+          completed_at: null,
+        } as Omit<DbTaskItem, 'created_at' | 'updated_at'>);
+      }
+
+      const allItems = await taskItemRepo.findByTaskId(taskId);
+      targetItem = allItems[0];
+
+      await taskItemRepo.markStarted(targetItem.id);
+      this.emitItemStarted(taskId, targetItem.id, accountId, dbTask.platform);
+    } catch (itemErr) {
+      const errMsg = itemErr instanceof Error ? itemErr.message : String(itemErr);
+      logger.error(`[publishFromClient] taskItem 初始化失败: ${errMsg}`);
+      return { success: false, error: `任务项初始化失败: ${errMsg}` };
     }
 
-    const allItems = await taskItemRepo.findByTaskId(taskId);
-    const targetItem = allItems[0];
-
-    await taskItemRepo.markStarted(targetItem.id);
-    this.emitItemStarted(taskId, targetItem.id, accountId, dbTask.platform);
-
     try {
-      const uploadCtx: UploadContext = {
-        accountId,
-        videoPath: contentId,
-        title: `video_${contentId.slice(0, 8)}`,
-      };
+      const material = await materialService.getMaterial(contentId);
+      const videoPath = material?.filePath || contentId;
+      let taskMeta: Record<string, unknown> = {};
+      try { taskMeta = JSON.parse((dbTask as any).metadata || '{}'); } catch {}
+      const browserRuntime = this.getAccountBrowserRuntime(accountId);
+      const uploadCtx = buildUploadContextFromTask(dbTask, accountId, videoPath, taskMeta, browserRuntime);
+
+      logger.info(`[publishFromClient] 开始上传: videoPath=${videoPath} headless=${uploadCtx.headless} slowMo=${uploadCtx.slowMo}`);
 
       const uploadResult = await adapter.uploadVideo(uploadCtx);
       if (!uploadResult.success) {
@@ -481,36 +565,45 @@ export class PublishService implements IPublishService {
         return { success: false, error: `上传失败: ${uploadResult.message}` };
       }
 
-      const publishCtx: PublishContext = {
-        accountId,
-        videoId: uploadResult.videoId ?? '',
-        title: uploadCtx.title,
-      };
-      const publishRes = await adapter.publish(publishCtx);
+      let finalVideoId = uploadResult.videoId;
+      let finalPublishUrl = '';
 
-      if (publishRes.success) {
-        await taskItemRepo.markCompleted(
-          targetItem.id,
-          uploadResult.videoId ?? '',
-          publishRes.publishUrl ?? '',
-        );
-        this.emitItemCompleted(taskId, targetItem.id, uploadResult.videoId, publishRes.publishUrl);
-
-        logger.info(`客户端发布成功: taskId=${taskId} videoId=${uploadResult.videoId}`);
-
-        return {
-          success: true,
-          videoId: uploadResult.videoId,
-          publishUrl: publishRes.publishUrl,
-          publishedAt: new Date(),
-        };
+      if (adapter.publish) {
+        try {
+          const ctx: PublishContext = {
+            accountId,
+            videoId: uploadResult.videoId ?? '',
+            title: uploadCtx.title,
+          };
+          const res = await adapter.publish(ctx);
+          if (res.success) {
+            finalPublishUrl = res.publishUrl || '';
+            finalVideoId = res.videoId || finalVideoId;
+          }
+        } catch {}
       }
 
-      await taskItemRepo.markFailed(targetItem.id, publishRes.message);
-      this.emitItemFailed(taskId, targetItem.id, publishRes.message);
-      return { success: false, error: `发布失败: ${publishRes.message}` };
+      await taskItemRepo.markCompleted(
+        targetItem.id,
+        finalVideoId ?? '',
+        finalPublishUrl,
+      );
+      this.emitItemCompleted(taskId, targetItem.id, finalVideoId, finalPublishUrl);
+
+      logger.info(`客户端发布成功: taskId=${taskId} videoId=${finalVideoId}`);
+
+      return {
+        success: true,
+        videoId: finalVideoId,
+        publishUrl: finalPublishUrl,
+        publishedAt: new Date(),
+      };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`[publishFromClient] 上传异常: ${errMsg}`);
+      if (err instanceof Error && err.stack) {
+        logger.error(`[publishFromClient] stack: ${err.stack}`);
+      }
       await taskItemRepo.markFailed(targetItem.id, errMsg);
       this.emitItemFailed(taskId, targetItem.id, errMsg);
       return { success: false, error: errMsg };
@@ -614,8 +707,11 @@ export class PublishService implements IPublishService {
     error: string,
     currentRetryCount: number,
     maxRetries: number,
+    options: { finalOnFailure?: boolean } = {},
   ): Promise<void> {
-    const updatedTask = await publishTaskRepo.markFailed(taskId, error);
+    const updatedTask = options.finalOnFailure
+      ? await publishTaskRepo.markFinalFailed(taskId, error)
+      : await publishTaskRepo.markFailed(taskId, error);
     const newRetryCount = updatedTask.retry_count;
 
     const payload: TaskFailedPayload = {
@@ -626,25 +722,77 @@ export class PublishService implements IPublishService {
     };
     this.eventBus.emit(PublishEvent.TASK_FAILED, payload);
 
+    if (options.finalOnFailure) {
+      logger.error(`发布任务失败并标记为终态失败: taskId=${taskId} error=${error}`);
+      return;
+    }
+
     if (newRetryCount < maxRetries) {
       logger.info(`发布任务将重试: taskId=${taskId} retry=${newRetryCount}/${maxRetries}`);
+      setTimeout(() => {
+        if (this.executingTasks.has(taskId)) {
+          logger.warn(`任务仍在执行中，延迟重试: taskId=${taskId}`);
+          setTimeout(() => {
+            this.executeNow(taskId).catch(err => {
+              logger.error(`延迟重试执行失败 taskId=${taskId}: ${err}`);
+            });
+          }, 5000);
+          return;
+        }
+        this.executeNow(taskId).catch(err => {
+          logger.error(`重试执行失败 taskId=${taskId}: ${err}`);
+        });
+      }, 2000);
     } else {
       logger.error(`发布任务最终失败: taskId=${taskId} retries=${maxRetries} error=${error}`);
     }
   }
 
+  private async closeStandaloneBrowserAfterPublish(accountId: string, outcome: 'completed' | 'failed'): Promise<void> {
+    if (!accountId) return;
+
+    try {
+      const { browserManager } = await import('./embedded-browser/browser-manager');
+      if (browserManager.hasStandaloneTab(accountId)) {
+        await browserManager.closeTab(accountId);
+      }
+    } catch (err) {
+      logger.warn(`关闭发布${outcome === 'completed' ? '完成' : '失败'}弹窗失败: accountId=${accountId} error=${err}`);
+    }
+  }
+
+  private getAccountBrowserRuntime(accountId: string): Partial<UploadContext> {
+    if (!isDatabaseAvailable()) return {};
+
+    const db = getDatabase();
+    const row = db.prepare(`
+      SELECT browser_mode, fingerprint_id, cookie_path
+      FROM accounts
+      WHERE id = ?
+    `).get(accountId) as { browser_mode?: string | null; fingerprint_id?: string | null; cookie_path?: string | null } | undefined;
+
+    let chromePath: string | null = null;
+    try {
+      const cfg = db.prepare('SELECT value FROM platform_configs WHERE key = ?').get('chromePath') as { value?: string } | undefined;
+      if (cfg?.value) {
+        try { chromePath = JSON.parse(cfg.value); } catch { chromePath = cfg.value; }
+      }
+    } catch {
+      chromePath = null;
+    }
+
+    return {
+      browserMode: (row?.browser_mode as UploadContext['browserMode']) || 'embedded',
+      fingerprintId: row?.fingerprint_id || null,
+      chromePath,
+      cookiePath: row?.cookie_path || null,
+    };
+  }
+
   private async validateCookieForAccount(accountId: string): Promise<void> {
     const account = await accountRepo.findById(accountId);
     if (!account) throw new Error(`账号不存在: ${accountId}`);
-    if (!account.cookie_valid) {
-      logger.warn(`账号 Cookie 已失效: accountId=${accountId}，尝试检查`);
-      const adapter = this.requireAdapter(account.platform);
-      const valid = await adapter.checkCookie(accountId).catch(() => false);
-      if (!valid) {
-        throw new Error(`账号 Cookie 无效，请重新登录: accountId=${accountId}`);
-      }
-      await accountRepo.setCookieValid(accountId, true);
-    }
+    logger.info(`[validateCookie] accountId=${accountId} platform=${account.platform} cookie_valid=${account.cookie_valid}`);
   }
 
   private requireAdapter(platform: string): PlatformAdapter {
@@ -663,6 +811,13 @@ export class PublishService implements IPublishService {
       try { result = JSON.parse(row.result); } catch { /* ignore */ }
     }
 
+    const extra = row as any;
+
+    let tags: string[] = [];
+    if (extra.tags) {
+      try { tags = JSON.parse(extra.tags); } catch { /* ignore */ }
+    }
+
     return {
       id: row.id,
       contentId: row.content_id,
@@ -677,6 +832,16 @@ export class PublishService implements IPublishService {
       error: row.error_message ?? undefined,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
+      type: 'publish',
+      title: extra.title || undefined,
+      description: extra.description || undefined,
+      tags,
+      coverUrl: extra.cover_url || undefined,
+      startedAt: extra.started_at ? new Date(extra.started_at) : undefined,
+      completedAt: extra.completed_at ? new Date(extra.completed_at) : undefined,
+      durationMs: extra.duration_ms || undefined,
+      source: extra.source || undefined,
+      accountName: extra.account_name || undefined,
     };
   }
 
@@ -736,6 +901,100 @@ export class PublishService implements IPublishService {
     }
 
     return tasks.map((t) => this.dbRowToTask(t));
+  }
+
+  async listTasks(filter: TaskFilter): Promise<TaskListResult> {
+    if (!isDatabaseAvailable()) {
+      logger.warn('[listTasks] 数据库不可用');
+      return { items: [], total: 0 };
+    }
+
+    const db = getDatabase();
+    const conditions: string[] = [];
+    const params: any[] = [];
+
+    if (filter.status && filter.status.length > 0) {
+      conditions.push(`pt.status IN (${filter.status.map(() => '?').join(',')})`);
+      params.push(...filter.status);
+    }
+    if (filter.platform && filter.platform.length > 0) {
+      conditions.push(`pt.platform IN (${filter.platform.map(() => '?').join(',')})`);
+      params.push(...filter.platform);
+    }
+    if (filter.planId) {
+      conditions.push('pt.content_id = ?');
+      params.push(filter.planId);
+    }
+    if (filter.dateFrom) {
+      conditions.push("pt.created_at >= ? || 'T00:00:00'");
+      params.push(filter.dateFrom);
+    }
+    if (filter.dateTo) {
+      conditions.push("pt.created_at <= ? || 'T23:59:59'");
+      params.push(filter.dateTo);
+    }
+    if (filter.search) {
+      conditions.push('(pt.content_id LIKE ? OR pt.error_message LIKE ?)');
+      const like = `%${filter.search}%`;
+      params.push(like, like);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = filter.limit ?? 50;
+    const offset = filter.offset ?? 0;
+
+    const countRow = db.prepare(`SELECT COUNT(*) as total FROM publish_tasks pt ${whereClause}`).get(...params) as { total: number };
+
+    const rows = db.prepare(`
+      SELECT pt.*, a.nickname as account_name
+      FROM publish_tasks pt
+      LEFT JOIN accounts a ON pt.account_id = a.id
+      ${whereClause}
+      ORDER BY pt.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset) as (DbPublishTask & { account_name?: string })[];
+
+    const items = rows.map((row) => this.dbRowToTask(row as DbPublishTask));
+    return { items, total: countRow.total };
+  }
+
+  async retryTask(taskId: string): Promise<PublishResult> {
+    return this.executeNow(taskId, { finalOnFailure: true });
+  }
+
+  async batchRetry(taskIds: string[]): Promise<{ taskId: string; result: PublishResult }[]> {
+    const CONCURRENT_LIMIT = 5;
+    const results: { taskId: string; result: PublishResult }[] = [];
+
+    for (let i = 0; i < taskIds.length; i += CONCURRENT_LIMIT) {
+      const batch = taskIds.slice(i, i + CONCURRENT_LIMIT);
+      const batchResults = await Promise.all(
+        batch.map(async (taskId) => {
+          try {
+            const result = await this.retryTask(taskId);
+            return { taskId, result };
+          } catch (err) {
+            return { taskId, result: { success: false, error: err instanceof Error ? err.message : String(err) } };
+          }
+        }),
+      );
+      results.push(...batchResults);
+    }
+
+    return results;
+  }
+
+  async batchCancel(taskIds: string[]): Promise<{ taskId: string; success: boolean; error?: string }[]> {
+    return Promise.all(
+      taskIds.map(async (taskId) => {
+        try {
+          await this.cancelPublish(taskId);
+          return { taskId, success: true };
+        } catch (err) {
+          return { taskId, success: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }),
+    );
   }
 }
 

@@ -5,27 +5,11 @@
  */
 
 import type { PublishResult as PlatformPublishResult } from '../../platform/base/types';
-import type { PublishTask as DbPublishTask, TaskItem } from '../../data/types';
-
-// ─── 发布模式 ────────────────────────────────────────────────
+import type { PublishTask as DbPublishTask } from '../../data/types';
 
 export type PublishMode = 'server' | 'client';
-
-// ─── 发布任务状态 ──────────────────────────────────────────────
-
-export type PublishTaskStatus =
-  | 'pending'
-  | 'scheduled'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
-
-// ─── 发布可见性 ──────────────────────────────────────────────
-
-export type PublishVisibility = 'public' | 'private' | 'followers';
-
-// ─── 发布请求 ────────────────────────────────────────────────
+export type PublishTaskStatus = 'pending' | 'scheduled' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type PublishVisibility = 'public' | 'private' | 'friends' | 'followers';
 
 export interface PublishRequest {
   contentId: string;
@@ -33,12 +17,30 @@ export interface PublishRequest {
   accountId: string;
   scheduledAt?: Date;
   publishMode: PublishMode;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  coverUrl?: string;
+  source?: string;
+  headless?: boolean;
   metadata: {
     title?: string;
     description?: string;
     tags?: string[];
     visibility?: PublishVisibility;
+    coverUrl?: string;
+    location?: string;
+    declaration?: string;
+    scheduleMode?: 'immediate' | 'scheduled';
+    scheduledAt?: string;
+    allowComment?: boolean;
+    allowShare?: boolean;
+    allowSameFrame?: boolean;
+    allowDownload?: boolean;
+    showInCity?: boolean;
+    debugSteps?: boolean;
     dryRun?: boolean;
+    autoExecute?: boolean;
   };
 }
 
@@ -67,6 +69,16 @@ export interface PublishTask {
   error?: string;
   createdAt: Date;
   updatedAt: Date;
+  type?: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  coverUrl?: string;
+  startedAt?: Date;
+  completedAt?: Date;
+  durationMs?: number;
+  source?: string;
+  accountName?: string;
 }
 
 // ─── 发布结果 ────────────────────────────────────────────────
@@ -184,6 +196,24 @@ export interface RulesAppliedPayload {
   rulesCount: number;
 }
 
+// ─── 任务过滤 ────────────────────────────────────────────────
+
+export interface TaskFilter {
+  status?: PublishTaskStatus[];
+  platform?: string[];
+  planId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TaskListResult {
+  items: PublishTask[];
+  total: number;
+}
+
 // ─── 服务接口 ────────────────────────────────────────────────
 
 export interface IPublishService {
@@ -193,7 +223,7 @@ export interface IPublishService {
 
   // 发布调度
   schedulePublish(taskId: string, scheduledAt: Date): Promise<void>;
-  executeNow(taskId: string): Promise<PublishResult>;
+  executeNow(taskId: string, options?: { finalOnFailure?: boolean }): Promise<PublishResult>;
   cancelPublish(taskId: string): Promise<void>;
 
   // 双路径发布
@@ -211,4 +241,10 @@ export interface IPublishService {
   // 预检和历史
   preCheckAccounts(request: BatchPublishRequest): Promise<{ healthy: string[]; unhealthy: string[] }>;
   getPublishHistory(filters: { platform?: string; accountId?: string; startDate?: string; endDate?: string }): Promise<PublishTask[]>;
+
+  // 任务列表与操作
+  listTasks(filter: TaskFilter): Promise<TaskListResult>;
+  retryTask(taskId: string): Promise<PublishResult>;
+  batchRetry(taskIds: string[]): Promise<{ taskId: string; result: PublishResult }[]>;
+  batchCancel(taskIds: string[]): Promise<{ taskId: string; success: boolean; error?: string }[]>;
 }
