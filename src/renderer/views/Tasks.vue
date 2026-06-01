@@ -78,7 +78,7 @@
         <div class="timeline-day__header">
           <span class="timeline-day__date">{{ formatDate(date) }}</span>
           <span class="timeline-day__count">{{ dayTasks.length }} 条任务</span>
-          <span class="timeline-day__success">{{ dayTasks.filter(t => t.status === 'success').length }} 成功</span>
+          <span class="timeline-day__success">{{ dayTasks.filter(t => t.status === 'completed').length }} 成功</span>
         </div>
         <div class="timeline-day__tasks">
           <div v-for="task in dayTasks" :key="task.id" class="timeline-task"
@@ -186,19 +186,19 @@ const statCards = computed(() => [
   { label: '全部', value: taskStore.stats.total, color: 'var(--color-text-primary)' },
   { label: '等待中', value: taskStore.stats.pending, color: 'var(--color-info)' },
   { label: '进行中', value: taskStore.stats.running, color: 'var(--color-primary)' },
-  { label: '已完成', value: taskStore.stats.success, color: 'var(--color-success)' },
+  { label: '已完成', value: taskStore.stats.completed, color: 'var(--color-success)' },
   { label: '失败', value: taskStore.stats.failed, color: 'var(--color-danger)' },
 ]);
 
 const successRate = computed(() => {
-  const { total, success } = taskStore.stats;
+  const { total, completed } = taskStore.stats;
   if (total === 0) return 0;
-  return Math.round((success / total) * 100);
+  return Math.round((completed / total) * 100);
 });
 
 const recentTasks = computed(() => {
   return taskStore.tasks
-    .filter(t => t.status === 'success' || t.status === 'failed' || t.status === 'cancelled')
+    .filter(t => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
     .sort((a, b) => {
       const timeA = a.completedAt || a.updatedAt;
       const timeB = b.completedAt || b.updatedAt;
@@ -304,8 +304,9 @@ function platformLabel(platform: string): string {
 function statusLabel(status: TaskStatus): string {
   const labels: Record<TaskStatus, string> = {
     pending: '等待中',
+    scheduled: '已定时',
     running: '进行中',
-    success: '已完成',
+    completed: '已完成',
     failed: '失败',
     cancelled: '已取消',
     skipped: '已跳过',
@@ -316,8 +317,9 @@ function statusLabel(status: TaskStatus): string {
 function statusType(status: TaskStatus): '' | 'success' | 'warning' | 'danger' | 'info' {
   const types: Record<TaskStatus, '' | 'success' | 'warning' | 'danger' | 'info'> = {
     pending: 'info',
+    scheduled: 'warning',
     running: '',
-    success: 'success',
+    completed: 'success',
     failed: 'danger',
     cancelled: 'warning',
     skipped: 'info',

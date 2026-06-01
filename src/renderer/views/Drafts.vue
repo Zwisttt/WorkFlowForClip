@@ -13,12 +13,12 @@ const editingDraft = ref<Draft | null>(null);
 
 interface Draft {
   id: string;
-  type: 'video' | 'image';
-  title: string;
+  type?: 'video' | 'image';
+  title?: string;
   description?: string;
   coverPath?: string;
   filePath?: string;
-  status: 'draft' | 'ready';
+  status: 'editing' | 'ready' | 'published';
 }
 
 onMounted(async () => {
@@ -67,9 +67,9 @@ function getPlatformConfig(draft: Draft, platform: string) {
     <div class="draft-toolbar">
       <el-button type="primary" @click="createDraft">新建草稿</el-button>
 
-      <el-radio-group v-model="draftStore.filterStatus" @change="draftStore.loadDrafts">
+      <el-radio-group v-model="draftStore.filterStatus" @change="() => draftStore.loadDrafts()">
         <el-radio-button label="">全部</el-radio-button>
-        <el-radio-button label="draft">草稿</el-radio-button>
+        <el-radio-button label="editing">草稿</el-radio-button>
         <el-radio-button label="ready">就绪</el-radio-button>
       </el-radio-group>
     </div>
@@ -88,7 +88,7 @@ function getPlatformConfig(draft: Draft, platform: string) {
       <el-table-column prop="status" label="状态" width="80">
         <template #default="{ row }">
           <el-tag :type="row.status === 'ready' ? 'success' : 'info'" size="small">
-            {{ row.status === 'ready' ? '就绪' : '草稿' }}
+            {{ row.status === 'ready' ? '就绪' : row.status === 'published' ? '已发布' : '草稿' }}
           </el-tag>
         </template>
       </el-table-column>
@@ -104,7 +104,7 @@ function getPlatformConfig(draft: Draft, platform: string) {
           <el-button type="primary" size="small" @click="editDraft(row)">编辑</el-button>
           <el-button size="small" @click="duplicateDraft(row)">复制</el-button>
           <el-button
-            v-if="row.status === 'draft'"
+            v-if="row.status === 'editing'"
             type="success"
             size="small"
             @click="markAsReady(row)"

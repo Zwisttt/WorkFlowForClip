@@ -213,6 +213,11 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 开发中遮罩 -->
+    <div class="dev-overlay">
+      <span class="dev-overlay__text">开发中</span>
+    </div>
   </div>
 </template>
 
@@ -434,6 +439,27 @@ observer.observe(document.documentElement, { attributes: true, attributeFilter: 
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+  position: relative;
+}
+
+/* ── Development Overlay ── */
+.dev-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+.dev-overlay__text {
+  font-size: 48px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.12);
+  letter-spacing: 12px;
+  user-select: none;
 }
 
 .stats-tabs {

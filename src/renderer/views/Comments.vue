@@ -119,12 +119,38 @@ async function executeTask(taskId: string) {
         @cancel="showTemplateEditor = false"
       />
     </el-dialog>
+
+    <!-- 开发中遮罩 -->
+    <div class="dev-overlay">
+      <span class="dev-overlay__text">开发中</span>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .comment-view {
   padding: 20px;
+  position: relative;
+}
+
+/* ── Development Overlay ── */
+.dev-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+.dev-overlay__text {
+  font-size: 48px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.12);
+  letter-spacing: 12px;
+  user-select: none;
 }
 
 .comment-section {
