@@ -39,6 +39,49 @@ UPDATE tasks SET status = @status, error = @error, started_at = @started_at, com
 WHERE id = @id;
 `;
 
+const REQUIRED_TASK_COLUMNS: Record<string, string> = {
+  platform: "ALTER TABLE tasks ADD COLUMN platform TEXT NOT NULL DEFAULT ''",
+  accountId: "ALTER TABLE tasks ADD COLUMN accountId TEXT NOT NULL DEFAULT ''",
+  error: 'ALTER TABLE tasks ADD COLUMN error TEXT',
+};
+
+function ensureTasksSchema(db: any): void {
+  const rows = db.prepare('PRAGMA table_info(tasks)').all() as { name: string }[];
+  const columns = new Set(rows.map((row) => row.name));
+  const applied: string[] = [];
+
+  for (const [column, sql] of Object.entries(REQUIRED_TASK_COLUMNS)) {
+    if (!columns.has(column)) {
+      db.exec(sql);
+      columns.add(column);
+      applied.push(column);
+    }
+  }
+
+  if (columns.has('error') && columns.has('error_message')) {
+    db.exec('UPDATE tasks SET error = error_message WHERE error IS NULL AND error_message IS NOT NULL');
+  }
+
+  if (applied.length > 0) {
+    logger.info(`Schema fix: added missing task column(s): ${applied.join(', ')}`);
+  }
+}
+
+function parsePayload(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw ?? {};
+  try {
+    return JSON.parse(raw || '{}');
+  } catch {
+    return raw;
+  }
+}
+
+function payloadField(payload: unknown, key: string): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === 'string' && value ? value : undefined;
+}
+
 export class QueueManager implements IQueueManager {
   private static instance: QueueManager;
 
@@ -169,6 +212,7 @@ export class QueueManager implements IQueueManager {
 
     try {
       db.exec(CREATE_TABLE_SQL);
+      ensureTasksSchema(db);
       const insertStmt = db.prepare(INSERT_SQL);
       const updateStmt = db.prepare(UPDATE_STATUS_SQL);
 
@@ -226,6 +270,7 @@ export class QueueManager implements IQueueManager {
 
     try {
       db.exec(CREATE_TABLE_SQL);
+      ensureTasksSchema(db);
 
       const rows = db.prepare('SELECT * FROM tasks ORDER BY priority DESC, created_at ASC').all() as Record<string, unknown>[];
 
@@ -233,13 +278,14 @@ export class QueueManager implements IQueueManager {
       this.taskMap.clear();
 
       for (const row of rows) {
+        const payload = parsePayload(row.payload);
         const task: ITask = {
           id: row.id as string,
           type: row.type as ITask['type'],
-          platform: row.platform as string,
-          accountId: row.accountId as string,
+          platform: (row.platform as string) || payloadField(payload, 'platform') || 'unknown',
+          accountId: (row.accountId as string) || payloadField(payload, 'accountId') || payloadField(payload, 'account_id') || '',
           priority: row.priority as number,
-          payload: JSON.parse((row.payload as string) || '{}'),
+          payload,
           status: row.status as TaskStatus,
           createdAt: (row.created_at as string) || new Date().toISOString(),
           scheduledAt: (row.scheduled_at as string) || undefined,
