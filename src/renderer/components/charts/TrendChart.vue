@@ -35,6 +35,7 @@ import {
   DataZoomComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import { LegacyGridContainLabel } from 'echarts/features';
 import { isDark, cssVar } from './theme';
 
 use([
@@ -45,6 +46,7 @@ use([
   LegendComponent,
   DataZoomComponent,
   CanvasRenderer,
+  LegacyGridContainLabel,
 ]);
 
 export interface TrendSeries {

@@ -47,6 +47,7 @@ import {
   RadarComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import { LegacyGridContainLabel } from 'echarts/features';
 import { isDark, PLATFORM_COLORS, cssVar } from './theme';
 
 use([
@@ -57,6 +58,7 @@ use([
   LegendComponent,
   RadarComponent,
   CanvasRenderer,
+  LegacyGridContainLabel,
 ]);
 
 export interface PlatformMetric {

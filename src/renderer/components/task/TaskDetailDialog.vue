@@ -135,8 +135,9 @@ const typeMap: Record<string, string> = {
 
 const statusMap: Record<TaskStatus, string> = {
   pending: '等待中',
+  scheduled: '已定时',
   running: '进行中',
-  success: '已完成',
+  completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
   skipped: '已跳过',
@@ -144,8 +145,9 @@ const statusMap: Record<TaskStatus, string> = {
 
 const statusTagTypeMap: Record<TaskStatus, string> = {
   pending: 'info',
+  scheduled: 'warning',
   running: '',
-  success: 'success',
+  completed: 'success',
   failed: 'danger',
   cancelled: 'warning',
   skipped: 'info',
@@ -158,7 +160,7 @@ const statusTagType = computed(() => statusTagTypeMap[props.task?.status || 'pen
 
 const progressStatus = computed(() => {
   if (!props.task) return undefined;
-  if (props.task.status === 'success') return 'success' as const;
+  if (props.task.status === 'completed') return 'success' as const;
   if (props.task.status === 'failed') return 'exception' as const;
   return undefined;
 });

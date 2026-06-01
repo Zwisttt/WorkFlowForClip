@@ -8,7 +8,7 @@
       <div class="task-item__icon-wrap" :class="`task-item__icon-wrap--${task.status}`">
         <el-icon :size="16">
           <Loading v-if="task.status === 'running'" />
-          <CircleCheckFilled v-else-if="task.status === 'success'" />
+          <CircleCheckFilled v-else-if="task.status === 'completed'" />
           <CircleCloseFilled v-else-if="task.status === 'failed'" />
           <Clock v-else-if="task.status === 'pending'" />
           <RemoveFilled v-else-if="task.status === 'skipped'" />
@@ -81,7 +81,7 @@
         重试
       </el-button>
       <el-button
-        v-if="task.status === 'success'"
+        v-if="task.status === 'completed'"
         text
         size="small"
         @click="$emit('view', task)"
@@ -132,8 +132,9 @@ const typeMap: Record<string, string> = {
 
 const statusMap: Record<TaskStatus, string> = {
   pending: '等待中',
+  scheduled: '已定时',
   running: '进行中',
-  success: '已完成',
+  completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
   skipped: '已跳过',
@@ -141,8 +142,9 @@ const statusMap: Record<TaskStatus, string> = {
 
 const statusTagTypeMap: Record<TaskStatus, string> = {
   pending: 'info',
+  scheduled: 'warning',
   running: '',
-  success: 'success',
+  completed: 'success',
   failed: 'danger',
   cancelled: 'warning',
   skipped: 'info',
@@ -162,7 +164,7 @@ const progressColor = computed(() =>
 );
 
 const timeLabel = computed(() => {
-  if (props.task.status === 'success' && props.task.completedAt) {
+  if (props.task.status === 'completed' && props.task.completedAt) {
     return `完成: ${formatTime(props.task.completedAt)}`;
   }
   if (props.task.status === 'failed') {
@@ -210,7 +212,7 @@ function formatTime(iso: string) {
   border-left: 3px solid var(--color-primary);
 }
 
-.task-item--success {
+.task-item--completed {
   border-left: 3px solid var(--color-success);
 }
 

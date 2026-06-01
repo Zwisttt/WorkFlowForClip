@@ -340,11 +340,12 @@ async function clearAllGroups() {
 }
 
 const PLATFORM_HOMEPAGE: Record<string, string> = {
-  douyin: 'https://creator.douyin.com',
-  xiaohongshu: 'https://creator.xiaohongshu.com',
-  kuaishou: 'https://cp.kuaishou.com/article/publish/video',
+  douyin: 'https://creator.douyin.com/',
+  xiaohongshu: 'https://creator.xiaohongshu.com/',
+  kuaishou: 'https://cp.kuaishou.com/',
   bilibili: 'https://member.bilibili.com/platform/home',
-  weixin_video: 'https://channels.weixin.qq.com',
+  channels: 'https://channels.weixin.qq.com/',
+  weixin_video: 'https://channels.weixin.qq.com/',
 };
 
 async function openHomepage() {
@@ -354,7 +355,7 @@ async function openHomepage() {
     return;
   }
 
-  const url = PLATFORM_HOMEPAGE[props.account.platform];
+  const url = props.account.homepageUrl || PLATFORM_HOMEPAGE[props.account.platform];
   if (!url) return;
   await window.matrixflow.browser.openAccountBrowser(props.account.id, url);
 }
