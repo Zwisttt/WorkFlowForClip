@@ -234,7 +234,8 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
 
   const browser = await chromium.launch({
     channel: 'chrome',
-    headless: false,
+    headless: ctx.headless ?? false,
+    slowMo: ctx.slowMo ?? 200,
     args: CHROME_ARGS,
   });
   const context = await browser.newContext({ storageState: cookiePath });

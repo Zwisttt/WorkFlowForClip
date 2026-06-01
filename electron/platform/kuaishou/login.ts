@@ -189,18 +189,28 @@ export async function qrCodeLogin(
     logger.info('Cookie 已失效，准备扫码登录');
   }
 
-  const browser = await chromium.launch({
+  const userDataDir = getUserDataDir(accountId);
+
+  const context = await chromium.launchPersistentContext(userDataDir, {
     channel: 'chrome',
     headless,
     args: CHROME_ARGS,
   });
-  const context = await browser.newContext();
+  context.setDefaultNavigationTimeout(120000);
 
   try {
-    const page = await context.newPage();
+    const allPages = context.pages();
+    const page = allPages.length > 0 ? allPages[0] : await context.newPage();
 
     logger.info('打开快手创作者中心...');
-    await page.goto(KUAISHOU_URLS.loginPage);
+    await page.goto(KUAISHOU_URLS.loginPage, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    if (page.url().includes('/article/publish') || page.url().includes('/article/manage')) {
+      logger.info('快手已登录，cookie 有效');
+      await saveCookie(context, cookiePath);
+      return { success: true, cookiePath, message: '快手已登录，cookie有效' };
+    }
 
     const qrSrc = await extractQrCodeSrc(page);
     const qrPath = await saveQrCodeImage(qrSrc, accountId);
@@ -219,11 +229,6 @@ export async function qrCodeLogin(
     await saveCookie(context, cookiePath);
     logger.info(`Cookie 已保存: ${cookiePath}`);
 
-    const verifySuccess = await validateExistingCookie(cookiePath);
-    if (!verifySuccess) {
-      return { success: false, cookiePath, message: 'Cookie 保存后验证失败' };
-    }
-
     return { success: true, cookiePath, message: '扫码登录成功' };
   } catch (error) {
     return {
@@ -233,8 +238,21 @@ export async function qrCodeLogin(
     };
   } finally {
     await context.close();
-    await browser.close();
   }
+}
+
+function getUserDataDir(accountId: string): string {
+  const { app } = require('electron');
+  const userDataPath = app.getPath('userData');
+  const dir = path.join(userDataPath, 'browser_data', 'kuaishou', accountId);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const singletonLock = path.join(dir, 'SingletonLock');
+  if (fs.existsSync(singletonLock)) {
+    fs.unlinkSync(singletonLock);
+  }
+  return dir;
 }
 
 export async function getQRCode(accountId: string): Promise<string> {
