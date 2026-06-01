@@ -33,15 +33,33 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'publish',
-        name: 'Publish',
-        component: () => import('@/renderer/views/Publish.vue'),
-        meta: { title: '发布管理', icon: 'Calendar' },
+        redirect: '/publish/tasks',
+      },
+      {
+        path: 'publish/video',
+        name: 'PublishVideo',
+        component: () => import('@/renderer/views/publish/VideoPublish.vue'),
+        meta: { title: '视频发布', icon: 'VideoCamera' },
+      },
+      {
+        path: 'publish/tasks',
+        name: 'PublishTasks',
+        component: () => import('@/renderer/views/publish/Tasks.vue'),
+        meta: { title: '任务管理', icon: 'List' },
+      },
+      {
+        path: 'publish/drafts',
+        name: 'PublishDrafts',
+        component: () => import('@/renderer/views/publish/Drafts.vue'),
+        meta: { title: '草稿管理', icon: 'Document' },
       },
       {
         path: 'tasks',
-        name: 'Tasks',
-        component: () => import('@/renderer/views/Tasks.vue'),
-        meta: { title: '任务管理', icon: 'List' },
+        redirect: '/publish/tasks',
+      },
+      {
+        path: 'drafts',
+        redirect: '/publish/drafts',
       },
       {
         path: 'groups',
@@ -60,12 +78,6 @@ const routes: RouteRecordRaw[] = [
         name: 'MultiPanel',
         component: () => import('@/renderer/views/MultiPanel.vue'),
         meta: { title: '多开面板', icon: 'Monitor' },
-      },
-      {
-        path: 'drafts',
-        name: 'Drafts',
-        component: () => import('@/renderer/views/Drafts.vue'),
-        meta: { title: '草稿管理', icon: 'Document' },
       },
       {
         path: 'comments',
