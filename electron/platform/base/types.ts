@@ -41,6 +41,22 @@ export interface UploadContext {
   coverPath?: string;
   coverRatio?: string;
   coverDimensions?: { width: number; height: number };
+  location?: string;
+  visibility?: 'public' | 'private' | 'friends' | 'followers' | string;
+  declaration?: string;
+  scheduledAt?: string | Date | null;
+  allowComment?: boolean;
+  allowShare?: boolean;
+  allowSameFrame?: boolean;
+  allowDownload?: boolean;
+  showInCity?: boolean;
+  headless?: boolean;
+  slowMo?: number;
+  debugSteps?: boolean;
+  browserMode?: 'embedded' | 'external_chrome' | 'external_fingerprint' | 'chrome' | 'fingerprint';
+  fingerprintId?: string | null;
+  chromePath?: string | null;
+  cookiePath?: string | null;
 }
 
 export interface UploadResult {

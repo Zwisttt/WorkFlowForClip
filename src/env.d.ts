@@ -39,6 +39,9 @@ interface MatrixFlowAPI {
     cancelTask: (taskId: string) => Promise<any>;
     retryTask: (taskId: string) => Promise<any>;
     listTasks: (filter?: any) => Promise<any[]>;
+    listPlans?: () => Promise<any>;
+    batchRetry: (taskIds: string[]) => Promise<any>;
+    batchCancel: (taskIds: string[]) => Promise<any>;
   };
 
   task: {
@@ -135,11 +138,12 @@ interface MatrixFlowAPI {
   };
 
   draft: {
-    create: (data: any) => Promise<IpcResult<any>>;
-    update: (draftId: string, updates: any) => Promise<IpcResult<any>>;
+    save: (snapshot: any, existingId?: string) => Promise<IpcResult<any>>;
+    get: (id: string) => Promise<IpcResult<any>>;
+    list: (filter?: any) => Promise<IpcResult<any[]>>;
     delete: (draftId: string) => Promise<IpcResult<void>>;
-    list: (status?: string) => Promise<IpcResult<any[]>>;
-    duplicate: (draftId: string) => Promise<IpcResult<any>>;
+    publish: (id: string) => Promise<IpcResult<void>>;
+    revoke: (id: string) => Promise<IpcResult<void>>;
   };
 
   comment: {
@@ -239,6 +243,7 @@ interface MatrixFlowAPI {
     getLibraryPath: () => Promise<IpcResult<string>>;
     setLibraryPath: (path: string) => Promise<IpcResult<void>>;
     regenerateThumbnails: () => Promise<IpcResult<{ success: number; failed: number }>>;
+    captureFrame: (filePath: string, timestamp?: string) => Promise<IpcResult<{ imagePath: string }>>;
     openInFolder: (filePath: string) => Promise<IpcResult<void>>;
   };
 
@@ -271,6 +276,9 @@ declare module 'echarts/components' {
   export const LegendComponent: any;
   export const DataZoomComponent: any;
   export const RadarComponent: any;
+}
+declare module 'echarts/features' {
+  export const LegacyGridContainLabel: any;
 }
 declare module 'echarts/renderers' {
   export const CanvasRenderer: any;
