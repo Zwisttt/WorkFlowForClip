@@ -60,6 +60,22 @@ const api = {
       ipcRenderer.invoke('publish:preCheck', request),
     history: (filters: any): Invoke<any> =>
       ipcRenderer.invoke('publish:history', filters),
+    createTask: (data: any): Promise<any> =>
+      ipcRenderer.invoke('publish:createTask', data),
+    updateTask: (taskId: string, data: any): Promise<any> =>
+      ipcRenderer.invoke('publish:updateTask', taskId, data),
+    deleteTask: (taskId: string): Promise<any> =>
+      ipcRenderer.invoke('publish:deleteTask', taskId),
+    cancelTask: (taskId: string): Promise<any> =>
+      ipcRenderer.invoke('publish:cancelTask', taskId),
+    retryTask: (taskId: string): Promise<any> =>
+      ipcRenderer.invoke('publish:retryTask', taskId),
+    listTasks: (filter?: any): Promise<any[]> =>
+      ipcRenderer.invoke('publish:listTasks', filter),
+    batchRetry: (taskIds: string[]): Promise<any> =>
+      ipcRenderer.invoke('task:batchRetry', taskIds),
+    batchCancel: (taskIds: string[]): Promise<any> =>
+      ipcRenderer.invoke('task:batchCancel', taskIds),
   },
 
   task: {
@@ -217,16 +233,18 @@ const api = {
   },
 
   draft: {
-    create: (data: any) =>
-      ipcRenderer.invoke('draft:create', data),
-    update: (draftId: string, updates: any) =>
-      ipcRenderer.invoke('draft:update', { draftId, updates }),
+    save: (snapshot: any, existingId?: string) =>
+      ipcRenderer.invoke('draft:save', { snapshot, existingId }),
+    get: (id: string) =>
+      ipcRenderer.invoke('draft:get', { id }),
+    list: (filter?: any) =>
+      ipcRenderer.invoke('draft:list', { filter }),
     delete: (draftId: string) =>
-      ipcRenderer.invoke('draft:delete', { draftId }),
-    list: (status?: string) =>
-      ipcRenderer.invoke('draft:list', { status }),
-    duplicate: (draftId: string) =>
-      ipcRenderer.invoke('draft:duplicate', { draftId }),
+      ipcRenderer.invoke('draft:delete', { id: draftId }),
+    publish: (id: string) =>
+      ipcRenderer.invoke('draft:publish', { id }),
+    revoke: (id: string) =>
+      ipcRenderer.invoke('draft:revoke', { id }),
   },
 
   comment: {
@@ -366,6 +384,8 @@ const api = {
       ipcRenderer.invoke('material:regenerateThumbnails'),
     openInFolder: (filePath: string): Invoke<void> =>
       ipcRenderer.invoke('material:openInFolder', filePath),
+    captureFrame: (filePath: string, timestamp?: string): Invoke<{ imagePath: string }> =>
+      ipcRenderer.invoke('material:captureFrame', { filePath, timestamp }),
   },
 
   materialGroup: {

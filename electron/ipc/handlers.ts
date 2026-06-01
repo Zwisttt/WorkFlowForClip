@@ -48,18 +48,19 @@ import type {
   PublishTaskStatusDetail,
   PublishRequest,
   BatchPublishRequest,
+  TaskFilter,
 } from '../services/types/publish';
 import type { PlatformConfig, PlatformCapabilities, CookieResult } from '../platform/base/types';
 import type { PublishEvent } from '../core/types/eventbus';
 
 import { createBrowserLauncher } from '../services/browser-launcher';
-import type { IBrowserLauncher, BrowserType } from '../services/types';
+import type { IBrowserLauncher } from '../services/types';
 import type { BrowserContext } from 'patchright';
 
 const logger = new Logger('IPC');
 
-// Module-level map for concurrent embedded browser contexts
-const embeddedContexts = new Map<string, { launcher: IBrowserLauncher; context: BrowserContext }>();
+// Module-level map for account browser contexts that must stay alive after IPC returns.
+const accountBrowserContexts = new Map<string, { launcher: IBrowserLauncher; context: BrowserContext }>();
 
 const CHANNEL = {
   ACCOUNT_LIST: 'account:list',
@@ -73,6 +74,15 @@ const CHANNEL = {
 
   TASK_LIST: 'task:list',
   TASK_RETRY: 'task:retry',
+  TASK_BATCH_RETRY: 'task:batchRetry',
+  TASK_BATCH_CANCEL: 'task:batchCancel',
+
+  DRAFT_SAVE: 'draft:save',
+  DRAFT_GET: 'draft:get',
+  DRAFT_LIST: 'draft:list',
+  DRAFT_DELETE: 'draft:delete',
+  DRAFT_PUBLISH: 'draft:publish',
+  DRAFT_REVOKE: 'draft:revoke',
 
   PLATFORM_LIST: 'platform:list',
   PLATFORM_LOGIN: 'platform:login',
@@ -129,11 +139,6 @@ const CHANNEL = {
   PANEL_CLOSE: 'panel:close',
   PANEL_FOCUS: 'panel:focus',
   PANEL_LIST: 'panel:list',
-  DRAFT_CREATE: 'draft:create',
-  DRAFT_UPDATE: 'draft:update',
-  DRAFT_DELETE: 'draft:delete',
-  DRAFT_LIST: 'draft:list',
-  DRAFT_DUPLICATE: 'draft:duplicate',
   COMMENT_TEMPLATE_CREATE: 'comment:template:create',
   COMMENT_TEMPLATE_UPDATE: 'comment:template:update',
   COMMENT_TEMPLATE_DELETE: 'comment:template:delete',
@@ -206,6 +211,7 @@ const CHANNEL = {
   MATERIAL_GET_LIBRARY_PATH: 'material:getLibraryPath',
   MATERIAL_SET_LIBRARY_PATH: 'material:setLibraryPath',
   MATERIAL_REGENERATE_THUMBNAILS: 'material:regenerateThumbnails',
+  MATERIAL_CAPTURE_FRAME: 'material:captureFrame',
   MATERIAL_OPEN_IN_FOLDER: 'material:openInFolder',
 
   MATERIAL_GROUP_LIST: 'materialGroup:list',
@@ -351,6 +357,52 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.TASK_RETRY, async (_e, taskId: string): Promise<IpcResult<PublishResult>> => {
     return wrap(() => publishService.executeNow(taskId));
+  });
+
+  ipcMain.handle(CHANNEL.TASK_BATCH_RETRY, async (_e, taskIds: string[]): Promise<IpcResult<void>> => {
+    return wrap(async () => {
+      await publishService.batchRetry(taskIds);
+    });
+  });
+
+  ipcMain.handle(CHANNEL.TASK_BATCH_CANCEL, async (_e, taskIds: string[]): Promise<IpcResult<void>> => {
+    return wrap(async () => {
+      await publishService.batchCancel(taskIds);
+    });
+  });
+
+  // ─── 草稿管理 ──────────────────────────────────────────
+
+  ipcMain.handle(CHANNEL.DRAFT_SAVE, async (_e, { snapshot, existingId }: { snapshot: any; existingId?: string }): Promise<IpcResult<any>> => {
+    return wrap(async () => {
+      return draftService.saveDraft(snapshot, existingId);
+    });
+  });
+
+  ipcMain.handle(CHANNEL.DRAFT_GET, async (_e, { id }: { id: string }): Promise<IpcResult<any>> => {
+    return wrap(async () => { const d = draftService.getDraft(id); if (!d) throw new Error('草稿不存在'); return d; });
+  });
+
+  ipcMain.handle(CHANNEL.DRAFT_DELETE, async (_e, { id }: { id: string }): Promise<IpcResult<void>> => {
+    return wrap(async () => {
+      await draftService.deleteDraft(id);
+    });
+  });
+
+  ipcMain.handle(CHANNEL.DRAFT_PUBLISH, async (_e, { id }: { id: string }): Promise<IpcResult<void>> => {
+    return wrap(async () => {
+      await draftService.publishDraft(id);
+    });
+  });
+
+  ipcMain.handle(CHANNEL.DRAFT_REVOKE, async (_e, { id }: { id: string }): Promise<IpcResult<void>> => {
+    return wrap(async () => {
+      await draftService.revokeDraft(id);
+    });
+  });
+
+  ipcMain.handle(CHANNEL.DRAFT_LIST, async (_e, { filter }: { filter?: any }): Promise<IpcResult<any[]>> => {
+    return wrap(async () => draftService.listDrafts(filter));
   });
 
   // ─── 平台管理 ──────────────────────────────────────────
@@ -583,7 +635,19 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.PUBLISH_CREATE_TASK, async (_e, data: PublishRequest) => {
     try {
-      const task = await publishService.createPublishTask(data);
+      const request = { ...data };
+      if (typeof request.scheduledAt === 'string') {
+        (request as any).scheduledAt = new Date(request.scheduledAt);
+      }
+      const task = await publishService.createPublishTask(request as PublishRequest);
+
+      const shouldAutoExecute = (request.metadata as Record<string, unknown> | undefined)?.autoExecute !== false;
+      if (!request.scheduledAt && shouldAutoExecute) {
+        publishService.executeNow(task.id).catch(err => {
+          logger.error(`[PUBLISH_CREATE_TASK] 自动执行失败 taskId=${task.id}: ${err}`);
+        });
+      }
+
       return { success: true, data: task };
     } catch (error) {
       return { success: false, message: `${error}` };
@@ -619,18 +683,22 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.PUBLISH_RETRY_TASK, async (_e, taskId: string) => {
     try {
-      await publishService.executeNow(taskId);
-      return { success: true };
+      const result = await publishService.retryTask(taskId);
+      if (!result.success) {
+        return { success: false, data: result, message: result.error || '发布任务执行失败' };
+      }
+      return { success: true, data: result };
     } catch (error) {
       return { success: false, message: `${error}` };
     }
   });
 
-  ipcMain.handle(CHANNEL.PUBLISH_LIST_TASKS, async (_e, filter?: { contentId?: string }) => {
+  ipcMain.handle(CHANNEL.PUBLISH_LIST_TASKS, async (_e, filter?: TaskFilter) => {
     try {
-      return await publishService.getContentTasks(filter?.contentId ?? '');
-    } catch {
-      return [];
+      return await publishService.listTasks(filter ?? {});
+    } catch (err) {
+      logger.error(`[PUBLISH_LIST_TASKS] ${err}`);
+      return { items: [], total: 0 };
     }
   });
 
@@ -835,30 +903,6 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.PANEL_LIST, () => {
     return ok(multiPanelService.getActivePanels());
-  });
-
-  ipcMain.handle(CHANNEL.DRAFT_CREATE, async (_, data) => {
-    const draft = draftService.createDraft(data);
-    return ok(draft);
-  });
-
-  ipcMain.handle(CHANNEL.DRAFT_UPDATE, async (_, { draftId, updates }) => {
-    const draft = draftService.updateDraft(draftId, updates);
-    return draft ? ok(draft) : fail('草稿不存在');
-  });
-
-  ipcMain.handle(CHANNEL.DRAFT_DELETE, async (_, { draftId }) => {
-    const success = draftService.deleteDraft(draftId);
-    return success ? ok(null) : fail('删除失败');
-  });
-
-  ipcMain.handle(CHANNEL.DRAFT_LIST, async (_, { status }) => {
-    return ok(draftService.listDrafts(status));
-  });
-
-  ipcMain.handle(CHANNEL.DRAFT_DUPLICATE, async (_, { draftId }) => {
-    const draft = draftService.duplicateDraft(draftId);
-    return draft ? ok(draft) : fail('复制失败');
   });
 
   ipcMain.handle(CHANNEL.COMMENT_TEMPLATE_CREATE, async (_, data) => {
@@ -1240,6 +1284,46 @@ export function registerIpcHandlers(): void {
     return wrap(() => materialService.regenerateThumbnails());
   });
 
+  ipcMain.handle(CHANNEL.MATERIAL_CAPTURE_FRAME, async (_e, payload: { filePath: string; timestamp?: string }): Promise<IpcResult<{ imagePath: string }>> => {
+    return wrap(async () => {
+      const { spawn } = await import('child_process');
+      const path = await import('path');
+      const fs = await import('fs');
+      const os = await import('os');
+
+      const videoPath = payload.filePath;
+      const timestamp = payload.timestamp || '00:00:00';
+      const outputPath = path.join(os.tmpdir(), `matrixflow_capture_${Date.now()}.jpg`);
+
+      return new Promise((resolve, reject) => {
+        const proc = spawn('ffmpeg', [
+          '-y',
+          '-ss', timestamp,
+          '-i', videoPath,
+          '-vframes', '1',
+          '-q:v', '2',
+          outputPath,
+        ]);
+
+        let stderr = '';
+        proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
+        proc.on('close', (code) => {
+          if (code !== 0) {
+            return reject(new Error(`ffmpeg 退出码 ${code}: ${stderr}`));
+          }
+          if (fs.existsSync(outputPath)) {
+            resolve({ imagePath: outputPath });
+          } else {
+            reject(new Error('截帧图片未生成'));
+          }
+        });
+
+        proc.on('error', (err) => reject(new Error(`ffmpeg 启动失败: ${err.message}`)));
+      });
+    });
+  });
+
   ipcMain.handle(CHANNEL.MATERIAL_OPEN_IN_FOLDER, async (_e, filePath: string): Promise<IpcResult<void>> => {
     return wrap(async () => {
       const { shell } = await import('electron');
@@ -1284,26 +1368,38 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNEL.ACCOUNT_OPEN_BROWSER, async (_e, accountId: string, url: string): Promise<IpcResult<null>> => {
     try {
       const db = getDatabase();
-      const row = db.prepare('SELECT browser_mode FROM accounts WHERE id = ?').get(accountId) as any;
-      const browserMode = row?.browser_mode || 'embedded';
+      const row = db.prepare('SELECT platform, browser_mode, fingerprint_id FROM accounts WHERE id = ?').get(accountId) as any;
+      if (!row) return { success: false, message: '账号不存在' };
+
+      const rawBrowserMode = row.browser_mode || 'embedded';
+      const browserMode = rawBrowserMode === 'external_chrome'
+        ? 'chrome'
+        : rawBrowserMode === 'external_fingerprint'
+          ? 'fingerprint'
+          : rawBrowserMode;
 
       if (browserMode === 'embedded') {
-        const platform = (db.prepare('SELECT platform FROM accounts WHERE id = ?').get(accountId) as any)?.platform || 'kuaishou';
         const { browserManager } = await import('../services/embedded-browser/browser-manager');
+        if (browserManager.hasTab(accountId) && !browserManager.hasStandaloneTab(accountId)) {
+          await browserManager.closeTab(accountId);
+        }
 
         if (browserManager.hasTab(accountId)) {
           const view = browserManager.getView(accountId);
           if (view) {
-            view.webContents.loadURL(url);
+            if (url) {
+              await view.webContents.loadURL(url);
+            }
             browserManager.switchTab(accountId);
             return { success: true };
           }
         }
 
-        await browserManager.createTab(accountId, platform, url);
+        await browserManager.createTab(accountId, row.platform || 'kuaishou', url);
         return { success: true };
-      } else {
-        // chrome / fingerprint 模式走 browser:openUrl
+      }
+
+      if (browserMode === 'chrome') {
         let chromePath: string | null = null;
         try {
           const stmt = db.prepare('SELECT value FROM platform_configs WHERE key = ?');
@@ -1322,11 +1418,33 @@ export function registerIpcHandlers(): void {
           if (d && fs.existsSync(d)) chromePath = d;
         }
         if (chromePath && fs.existsSync(chromePath)) {
-          execFile(chromePath, [url]);
+          const userDataDir = path.join(process.cwd(), 'storage', 'browser_data', 'chrome', accountId);
+          fs.mkdirSync(userDataDir, { recursive: true });
+          execFile(chromePath, [`--user-data-dir=${userDataDir}`, url]);
           return { success: true };
         }
         return { success: false, message: '未找到 Chrome 浏览器' };
       }
+
+      if (browserMode === 'fingerprint') {
+        const fingerprintId = row.fingerprint_id;
+        if (!fingerprintId) return { success: false, message: '账号未绑定指纹浏览器配置' };
+
+        let entry = accountBrowserContexts.get(accountId);
+        if (!entry) {
+          const launcher = createBrowserLauncher({ type: 'fingerprint', fingerprintId });
+          const context = await launcher.launch({ type: 'fingerprint', fingerprintId }, accountId);
+          entry = { launcher, context };
+          accountBrowserContexts.set(accountId, entry);
+        }
+
+        const pages = entry.context.pages();
+        const page = pages[0] || await entry.context.newPage();
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        return { success: true };
+      }
+
+      return { success: false, message: `未知浏览器类型: ${rawBrowserMode}` };
     } catch (e) {
       return { success: false, message: `打开浏览器失败: ${e}` };
     }
