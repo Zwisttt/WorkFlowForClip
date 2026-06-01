@@ -194,6 +194,34 @@ describe('PublishTaskRepository', () => {
     });
   });
 
+  describe('markFinalFailed', () => {
+    it('sets status to failed even when retries remain', async () => {
+      const taskData = { retry_count: 1 };
+      const updated = { ...mockTask, status: 'failed', retry_count: 2 };
+      const getRetryStmt = { get: vi.fn().mockReturnValue(taskData) };
+      const updateStmt = { run: vi.fn() };
+      const getResultStmt = { get: vi.fn().mockReturnValue(updated) };
+      mockDb.prepare
+        .mockReturnValueOnce(getRetryStmt)
+        .mockReturnValueOnce(updateStmt)
+        .mockReturnValueOnce(getResultStmt);
+
+      const result = await repo.markFinalFailed('pt-1', 'Publish failed');
+
+      expect(result.status).toBe('failed');
+      expect(updateStmt.run).toHaveBeenCalledWith('Publish failed', 2, 'pt-1');
+    });
+
+    it('throws when task not found', async () => {
+      const getRetryStmt = { get: vi.fn().mockReturnValue(undefined) };
+      mockDb.prepare.mockReturnValueOnce(getRetryStmt);
+
+      await expect(repo.markFinalFailed('nonexistent', 'error')).rejects.toThrow(
+        'PublishTask nonexistent not found'
+      );
+    });
+  });
+
   describe('findById', () => {
     it('returns task when found', async () => {
       stmt.get.mockReturnValue(mockTask);

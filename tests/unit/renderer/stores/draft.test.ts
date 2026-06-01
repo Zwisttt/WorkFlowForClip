@@ -9,19 +9,21 @@ let mock: MatrixflowMock;
 function makeDraft(overrides: Record<string, unknown> = {}) {
   return {
     id: 'draft-1',
-    type: 'video' as const,
     title: 'Test Draft',
-    description: 'Test description',
-    platformConfigs: {},
-    status: 'draft' as const,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    materialId: 'mat-1',
+    status: 'editing',
+    snapshot: {
+      materialId: 'mat-1',
+      materialPath: '/tmp/video.mp4',
+      title: 'Test Draft',
+      description: '',
+      platformConfigs: [],
+    },
+    sourceDraftId: null,
+    createdAt: '2026-05-01T00:00:00.000Z',
+    updatedAt: '2026-05-01T00:00:00.000Z',
     ...overrides,
   };
-}
-
-function okResult<T>(data: T) {
-  return { success: true, data };
 }
 
 beforeEach(() => {
@@ -45,43 +47,33 @@ describe('useDraftStore', () => {
       expect(store.loading).toBe(false);
     });
 
-    it('starts with empty filterStatus', () => {
+    it('starts with empty filter', () => {
       const store = useDraftStore();
-      expect(store.filterStatus).toBe('');
+      expect(store.filter).toEqual({});
     });
   });
 
-  describe('loadDrafts', () => {
-    it('loads drafts from IPC', async () => {
+  describe('fetchDrafts', () => {
+    it('loads drafts from IPC and populates state', async () => {
       const drafts = [makeDraft({ id: 'd-1' }), makeDraft({ id: 'd-2' })];
-      mock.draft.list.mockResolvedValue(okResult(drafts));
+      mock.draft.list.mockResolvedValue({ success: true, data: drafts });
 
       const store = useDraftStore();
-      await store.loadDrafts();
+      await store.fetchDrafts();
 
       expect(store.drafts).toEqual(drafts);
       expect(mock.draft.list).toHaveBeenCalled();
-    });
-
-    it('passes filterStatus to IPC when set', async () => {
-      mock.draft.list.mockResolvedValue(okResult([]));
-
-      const store = useDraftStore();
-      store.filterStatus = 'ready';
-      await store.loadDrafts();
-
-      expect(mock.draft.list).toHaveBeenCalledWith('ready');
     });
 
     it('manages loading state', async () => {
       let loadingDuringCall = false;
       mock.draft.list.mockImplementation(async () => {
         loadingDuringCall = useDraftStore().loading;
-        return okResult([]);
+        return { success: true, data: [] };
       });
 
       const store = useDraftStore();
-      await store.loadDrafts();
+      await store.fetchDrafts();
 
       expect(loadingDuringCall).toBe(true);
       expect(store.loading).toBe(false);
@@ -91,64 +83,72 @@ describe('useDraftStore', () => {
       mock.draft.list.mockRejectedValue(new Error('IPC fail'));
 
       const store = useDraftStore();
-      await expect(store.loadDrafts()).rejects.toThrow('IPC fail');
+      await expect(store.fetchDrafts()).rejects.toThrow('IPC fail');
       expect(store.loading).toBe(false);
     });
-  });
 
-  describe('createDraft', () => {
-    it('creates draft and prepends to list', async () => {
-      const newDraft = makeDraft({ id: 'new-1' });
-      mock.draft.create.mockResolvedValue(okResult(newDraft));
+    it('handles non-IpcResult response gracefully', async () => {
+      const drafts = [makeDraft({ id: 'd-1' })];
+      mock.draft.list.mockResolvedValue(drafts);
 
       const store = useDraftStore();
-      const result = await store.createDraft({
-        type: 'video',
-        title: 'New Draft',
-        platformConfigs: {},
-        status: 'draft',
-      });
+      await store.fetchDrafts();
 
-      expect(result).toEqual(newDraft);
-      expect(store.drafts[0]).toEqual(newDraft);
-    });
-
-    it('returns null when IPC returns unsuccessful result', async () => {
-      mock.draft.create.mockResolvedValue({ success: false, data: undefined });
-
-      const store = useDraftStore();
-      const result = await store.createDraft({
-        type: 'video',
-        title: 'Fail',
-        platformConfigs: {},
-        status: 'draft',
-      });
-
-      expect(result).toBeNull();
-      expect(store.drafts).toHaveLength(0);
+      expect(store.drafts).toEqual(drafts);
     });
   });
 
-  describe('updateDraft', () => {
-    it('updates draft in list', async () => {
-      const updated = makeDraft({ id: 'd-1', title: 'Updated' });
-      mock.draft.update.mockResolvedValue(okResult(updated));
+  describe('saveDraft', () => {
+    it('saves snapshot and returns draft id', async () => {
+      mock.draft.save.mockResolvedValue({ success: true, data: { id: 'draft-new' } });
 
       const store = useDraftStore();
-      store.drafts = [makeDraft({ id: 'd-1', title: 'Original' })];
-      const result = await store.updateDraft('d-1', { title: 'Updated' });
+      const snapshot = { materialId: 'mat-1', materialPath: '/tmp/v.mp4', title: 'New' };
+      const id = await store.saveDraft(snapshot);
 
-      expect(result).toEqual(updated);
-      expect(store.drafts[0].title).toBe('Updated');
+      expect(id).toBe('draft-new');
+      expect(mock.draft.save).toHaveBeenCalledWith(snapshot, undefined);
+    });
+
+    it('passes existingId for update', async () => {
+      mock.draft.save.mockResolvedValue({ success: true, data: { id: 'draft-1' } });
+
+      const store = useDraftStore();
+      const snapshot = { materialId: 'mat-1', materialPath: '/tmp/v.mp4', title: 'Updated' };
+      const id = await store.saveDraft(snapshot, 'draft-1');
+
+      expect(id).toBe('draft-1');
+      expect(mock.draft.save).toHaveBeenCalledWith(snapshot, 'draft-1');
     });
 
     it('returns null when IPC returns unsuccessful result', async () => {
-      mock.draft.update.mockResolvedValue({ success: false, data: undefined });
+      mock.draft.save.mockResolvedValue({ success: false, message: 'fail' });
 
       const store = useDraftStore();
-      const result = await store.updateDraft('d-1', { title: 'Fail' });
+      const id = await store.saveDraft({ title: 'Fail' });
 
-      expect(result).toBeNull();
+      expect(id).toBeNull();
+    });
+
+    it('returns null when window.matrixflow is unavailable', async () => {
+      removeMatrixflowMock();
+      (globalThis as any).window = {};
+
+      const store = useDraftStore();
+      const id = await store.saveDraft({ title: 'No IPC' });
+
+      expect(id).toBeNull();
+    });
+  });
+
+  describe('getDraft', () => {
+    it('calls IPC getDraft', async () => {
+      mock.draft.get.mockResolvedValue({ success: true, data: { id: 'd-1' } });
+
+      const store = useDraftStore();
+      await store.getDraft('d-1');
+
+      expect(mock.draft.get).toHaveBeenCalledWith('d-1');
     });
   });
 
@@ -157,76 +157,55 @@ describe('useDraftStore', () => {
       mock.draft.delete.mockResolvedValue({ success: true });
 
       const store = useDraftStore();
-      store.drafts = [makeDraft({ id: 'd-1' }), makeDraft({ id: 'd-2' })];
-      const result = await store.deleteDraft('d-1');
+      store.drafts = [makeDraft({ id: 'd-1' }), makeDraft({ id: 'd-2' })] as any;
+      await store.deleteDraft('d-1');
 
-      expect(result).toBe(true);
       expect(store.drafts).toHaveLength(1);
       expect(store.drafts[0].id).toBe('d-2');
     });
+  });
 
-    it('returns false when IPC returns unsuccessful result', async () => {
-      mock.draft.delete.mockResolvedValue({ success: false });
+  describe('publishDraft', () => {
+    it('publishes draft and updates status', async () => {
+      mock.draft.publish.mockResolvedValue({ success: true, data: null });
 
       const store = useDraftStore();
-      store.drafts = [makeDraft({ id: 'd-1' })];
-      const result = await store.deleteDraft('d-1');
+      store.drafts = [makeDraft({ id: 'd-1', status: 'editing' })] as any;
+      const result = await store.publishDraft('d-1');
 
-      expect(result).toBe(false);
-      expect(store.drafts).toHaveLength(1);
+      expect(store.drafts[0].status).toBe('ready');
     });
   });
 
-  describe('duplicateDraft', () => {
-    it('duplicates draft and prepends copy', async () => {
-      const copy = makeDraft({ id: 'd-copy', title: 'Test Draft (副本)' });
-      mock.draft.duplicate.mockResolvedValue(okResult(copy));
+  describe('revokeDraft', () => {
+    it('revokes draft and updates status', async () => {
+      mock.draft.revoke.mockResolvedValue({ success: true, data: null });
 
       const store = useDraftStore();
-      store.drafts = [makeDraft({ id: 'd-1' })];
-      const result = await store.duplicateDraft('d-1');
+      store.drafts = [makeDraft({ id: 'd-1', status: 'ready' })] as any;
+      await store.revokeDraft('d-1');
 
-      expect(result).toEqual(copy);
-      expect(store.drafts).toHaveLength(2);
-      expect(store.drafts[0].id).toBe('d-copy');
-    });
-
-    it('returns null when IPC returns unsuccessful result', async () => {
-      mock.draft.duplicate.mockResolvedValue({ success: false, data: undefined });
-
-      const store = useDraftStore();
-      const result = await store.duplicateDraft('d-1');
-
-      expect(result).toBeNull();
+      expect(store.drafts[0].status).toBe('editing');
     });
   });
 
-  describe('getPlatformConfig', () => {
-    it('returns platform config for existing draft', () => {
+  describe('computed', () => {
+    it('editingDrafts filters by editing status', () => {
       const store = useDraftStore();
       store.drafts = [
-        makeDraft({
-          id: 'd-1',
-          platformConfigs: { douyin: { title: '抖音标题' } },
-        }),
-      ];
-
-      const config = store.getPlatformConfig('d-1', 'douyin');
-      expect(config).toEqual({ title: '抖音标题' });
+        makeDraft({ id: '1', status: 'editing' }),
+        makeDraft({ id: '2', status: 'ready' }),
+      ] as any;
+      expect(store.editingDrafts).toHaveLength(1);
     });
 
-    it('returns null for non-existent platform', () => {
+    it('readyDrafts filters by ready status', () => {
       const store = useDraftStore();
-      store.drafts = [makeDraft({ id: 'd-1', platformConfigs: {} })];
-
-      const config = store.getPlatformConfig('d-1', 'xiaohongshu');
-      expect(config).toBeNull();
-    });
-
-    it('returns null for non-existent draft', () => {
-      const store = useDraftStore();
-      const config = store.getPlatformConfig('d-999', 'douyin');
-      expect(config).toBeNull();
+      store.drafts = [
+        makeDraft({ id: '1', status: 'editing' }),
+        makeDraft({ id: '2', status: 'ready' }),
+      ] as any;
+      expect(store.readyDrafts).toHaveLength(1);
     });
   });
 });

@@ -62,7 +62,7 @@ describe('useTaskStore', () => {
       const store = useTaskStore();
       store.tasks = [
         makeTask({ id: '1', status: 'failed' }),
-        makeTask({ id: '2', status: 'success' }),
+        makeTask({ id: '2', status: 'completed' }),
       ];
       expect(store.failedTasks).toHaveLength(1);
     });
@@ -75,7 +75,7 @@ describe('useTaskStore', () => {
 
     it('hasFailedTasks is false when no failed tasks', () => {
       const store = useTaskStore();
-      store.tasks = [makeTask({ status: 'success' })];
+      store.tasks = [makeTask({ status: 'completed' })];
       expect(store.hasFailedTasks).toBe(false);
     });
 
@@ -84,15 +84,16 @@ describe('useTaskStore', () => {
       store.tasks = [
         makeTask({ id: '1', status: 'pending' }),
         makeTask({ id: '2', status: 'running' }),
-        makeTask({ id: '3', status: 'success' }),
+        makeTask({ id: '3', status: 'completed' }),
         makeTask({ id: '4', status: 'failed' }),
         makeTask({ id: '5', status: 'skipped' }),
       ];
+      store.total = 5;
       const s = store.stats;
       expect(s.total).toBe(5);
       expect(s.pending).toBe(1);
       expect(s.running).toBe(1);
-      expect(s.success).toBe(1);
+      expect(s.completed).toBe(1);
       expect(s.failed).toBe(1);
       expect(s.skipped).toBe(1);
     });
@@ -109,17 +110,18 @@ describe('useTaskStore', () => {
   describe('fetchTasks', () => {
     it('fetches tasks from IPC and populates state', async () => {
       const tasks = [makeTask({ id: '1' }), makeTask({ id: '2' })];
-      mock.publish.listTasks.mockResolvedValue(tasks);
+      mock.publish.listTasks.mockResolvedValue({ items: tasks, total: 2 });
 
       const store = useTaskStore();
       await store.fetchTasks();
 
       expect(store.tasks).toEqual(tasks);
+      expect(store.total).toBe(2);
       expect(mock.publish.listTasks).toHaveBeenCalled();
     });
 
     it('passes filter to IPC', async () => {
-      mock.publish.listTasks.mockResolvedValue([]);
+      mock.publish.listTasks.mockResolvedValue({ items: [], total: 0 });
 
       const store = useTaskStore();
       await store.fetchTasks({ contentId: 'c-1' });
@@ -131,7 +133,7 @@ describe('useTaskStore', () => {
       let loadingDuringCall = false;
       mock.publish.listTasks.mockImplementation(async () => {
         loadingDuringCall = useTaskStore().loading;
-        return [];
+        return { items: [], total: 0 };
       });
 
       const store = useTaskStore();
@@ -145,18 +147,37 @@ describe('useTaskStore', () => {
       mock.publish.listTasks.mockRejectedValue(new Error('IPC fail'));
 
       const store = useTaskStore();
-      await expect(store.fetchTasks()).rejects.toThrow('IPC fail');
+      await store.fetchTasks();
       expect(store.loading).toBe(false);
+      expect(store.tasks).toEqual([]);
+      expect(store.total).toBe(0);
     });
 
-    it('does nothing when window.matrixflow is undefined', async () => {
-      removeMatrixflowMock();
-      (globalThis as Record<string, unknown>).window = {};
+    it('handles null result gracefully', async () => {
+      mock.publish.listTasks.mockResolvedValue(null);
 
       const store = useTaskStore();
       await store.fetchTasks();
 
       expect(store.tasks).toEqual([]);
+      expect(store.total).toBe(0);
+    });
+  });
+
+  describe('createTask', () => {
+    it('calls IPC createTask with data', async () => {
+      mock.publish.createTask.mockResolvedValue({ success: true, data: { id: 'new-task' } });
+
+      const store = useTaskStore();
+      const result = await store.createTask({
+        contentId: 'mat-1',
+        accountId: 'acc-1',
+        platform: 'douyin',
+        publishMode: 'client',
+        metadata: { title: 'Test' },
+      });
+
+      expect(mock.publish.createTask).toHaveBeenCalled();
     });
   });
 
@@ -182,6 +203,17 @@ describe('useTaskStore', () => {
 
       expect(mock.publish.retryTask).toHaveBeenCalledWith('t-1');
     });
+
+    it('throws when IPC retryTask reports publish failure', async () => {
+      mock.publish.retryTask.mockResolvedValue({
+        success: false,
+        message: '视频发布失败',
+        data: { success: false, error: '视频发布失败' },
+      });
+
+      const store = useTaskStore();
+      await expect(store.retryTask('t-1')).rejects.toThrow('视频发布失败');
+    });
   });
 
   describe('retryAllFailed', () => {
@@ -192,7 +224,7 @@ describe('useTaskStore', () => {
       store.tasks = [
         makeTask({ id: '1', status: 'failed' }),
         makeTask({ id: '2', status: 'failed' }),
-        makeTask({ id: '3', status: 'success' }),
+        makeTask({ id: '3', status: 'completed' }),
       ];
       await store.retryAllFailed();
 
@@ -225,9 +257,9 @@ describe('useTaskStore', () => {
     it('updates status for matching task', () => {
       const store = useTaskStore();
       store.tasks = [makeTask({ id: 't-1', status: 'pending' })];
-      store.updateTaskStatus('t-1', 'success');
+      store.updateTaskStatus('t-1', 'completed');
 
-      expect(store.tasks[0].status).toBe('success');
+      expect(store.tasks[0].status).toBe('completed');
     });
 
     it('merges additional data', () => {
@@ -237,6 +269,34 @@ describe('useTaskStore', () => {
 
       expect(store.tasks[0].status).toBe('failed');
       expect(store.tasks[0].errorCode).toBe('TIMEOUT');
+    });
+  });
+
+  describe('selection', () => {
+    it('toggleSelect toggles task selection', () => {
+      const store = useTaskStore();
+      store.tasks = [makeTask({ id: 't-1' }), makeTask({ id: 't-2' })];
+      store.toggleSelect('t-1');
+      expect(store.selectedIds.has('t-1')).toBe(true);
+      store.toggleSelect('t-1');
+      expect(store.selectedIds.has('t-1')).toBe(false);
+    });
+
+    it('toggleSelectAll selects/deselects all', () => {
+      const store = useTaskStore();
+      store.tasks = [makeTask({ id: 't-1' }), makeTask({ id: 't-2' })];
+      store.toggleSelectAll();
+      expect(store.selectedCount).toBe(2);
+      store.toggleSelectAll();
+      expect(store.selectedCount).toBe(0);
+    });
+
+    it('clearSelection clears all', () => {
+      const store = useTaskStore();
+      store.tasks = [makeTask({ id: 't-1' })];
+      store.toggleSelect('t-1');
+      store.clearSelection();
+      expect(store.selectedCount).toBe(0);
     });
   });
 

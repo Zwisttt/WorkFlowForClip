@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { QueueManager, generateId } from '@electron/core/QueueManager';
 import type { ITask, TaskStatus } from '@electron/core/types/task';
 import { EventBus } from '@electron/core/EventBus';
+import { getDatabase } from '@electron/data/Database';
 
 // Mock Database module
 vi.mock('@electron/data/Database', () => {
@@ -387,6 +388,46 @@ describe('QueueManager', () => {
 
     it('restore 不抛出异常', async () => {
       await expect(queue.restore()).resolves.toBeUndefined();
+    });
+
+    it('persist 会补齐旧 tasks 表缺失的队列字段', async () => {
+      const db = getDatabase() as any;
+      const tableInfoStmt = {
+        all: vi.fn(() => [
+          { name: 'id' },
+          { name: 'type' },
+          { name: 'payload' },
+          { name: 'status' },
+          { name: 'priority' },
+          { name: 'scheduled_at' },
+          { name: 'started_at' },
+          { name: 'completed_at' },
+          { name: 'error_message' },
+          { name: 'retry_count' },
+          { name: 'max_retries' },
+          { name: 'created_at' },
+          { name: 'updated_at' },
+        ]),
+      };
+      const stmt = {
+        run: vi.fn(),
+        all: vi.fn(() => []),
+        get: vi.fn(() => undefined),
+      };
+
+      db.exec.mockClear();
+      db.prepare.mockImplementation((sql: string) => {
+        if (sql === 'PRAGMA table_info(tasks)') return tableInfoStmt;
+        return stmt;
+      });
+
+      queue.enqueue(makeTask({ id: 't1' }));
+      await expect(queue.persist()).resolves.toBeUndefined();
+
+      expect(db.exec).toHaveBeenCalledWith("ALTER TABLE tasks ADD COLUMN platform TEXT NOT NULL DEFAULT ''");
+      expect(db.exec).toHaveBeenCalledWith("ALTER TABLE tasks ADD COLUMN accountId TEXT NOT NULL DEFAULT ''");
+      expect(db.exec).toHaveBeenCalledWith('ALTER TABLE tasks ADD COLUMN error TEXT');
+      expect(db.exec).toHaveBeenCalledWith('UPDATE tasks SET error = error_message WHERE error IS NULL AND error_message IS NOT NULL');
     });
   });
 

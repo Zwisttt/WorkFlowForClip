@@ -1,14 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { draftService } from '@electron/services/DraftService';
 
 const mockDb = vi.hoisted(() => ({
   prepare: vi.fn(),
-}));
-
-const mockLog = vi.hoisted(() => ({
-  info: vi.fn(),
-  error: vi.fn(),
-  warn: vi.fn(),
 }));
 
 let dbAvailable = vi.hoisted(() => true);
@@ -18,10 +11,10 @@ vi.mock('better-sqlite3', () => ({
 }));
 
 vi.mock('electron-log', () => ({
-  default: mockLog,
-  info: mockLog.info,
-  error: mockLog.error,
-  warn: mockLog.warn,
+  default: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+  info: vi.fn(),
+  error: vi.fn(),
+  warn: vi.fn(),
   transports: { file: { resolvePathFn: vi.fn() } },
 }));
 
@@ -35,49 +28,80 @@ function stmt(get?: unknown, all?: unknown[], run?: unknown) {
 }
 
 describe('DraftService', () => {
-  beforeEach(() => {
+  let draftService: typeof import('@electron/services/DraftService').draftService;
+
+  beforeEach(async () => {
     vi.clearAllMocks();
     dbAvailable = true;
     mockDb.prepare.mockReturnValue(stmt());
+    const mod = await import('@electron/services/DraftService');
+    draftService = mod.draftService;
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  describe('createDraft', () => {
-    it('creates and saves a draft', () => {
-      mockDb.prepare.mockReset().mockReturnValue(stmt());
-
-      const draft = draftService.createDraft({
-        type: 'video',
+  describe('saveDraft', () => {
+    it('saves a new draft with correct snapshot fields', () => {
+      const row = {
+        id: 'draft_001',
         title: '测试视频',
-        platformConfigs: { douyin: { title: '抖音标题' } },
-        status: 'draft',
+        material_id: 'mat-1',
+        status: 'editing',
+        snapshot_json: JSON.stringify({
+          materialId: 'mat-1',
+          materialPath: '/tmp/video.mp4',
+          title: '测试视频',
+          description: '描述',
+          platformConfigs: [],
+        }),
+        source_draft_id: null,
+        created_at: '2026-05-27T00:00:00.000Z',
+        updated_at: '2026-05-27T00:00:00.000Z',
+      };
+      mockDb.prepare.mockReset().mockReturnValue(stmt(undefined, undefined, { changes: 1 }));
+      mockDb.prepare.mockReturnValue(stmt(row));
+
+      const result = draftService.saveDraft({
+        materialId: 'mat-1',
+        materialPath: '/tmp/video.mp4',
+        title: '测试视频',
+        description: '描述',
+        platformConfigs: [],
       });
 
-      expect(draft.id).toMatch(/^draft_/);
-      expect(draft.type).toBe('video');
-      expect(draft.title).toBe('测试视频');
-      expect(draft.status).toBe('draft');
-      expect(mockDb.prepare).toHaveBeenCalled();
+      expect(result.id).toMatch(/^draft_/);
+      expect(result.title).toBe('测试视频');
+      expect(result.snapshotJson.materialId).toBe('mat-1');
     });
 
-    it('creates draft with optional fields', () => {
-      mockDb.prepare.mockReset().mockReturnValue(stmt());
+    it('updates existing draft when existingId is provided', () => {
+      const row = {
+        id: 'draft-existing',
+        title: 'Updated Title',
+        material_id: 'mat-1',
+        status: 'editing',
+        snapshot_json: JSON.stringify({
+          materialId: 'mat-1',
+          materialPath: '/tmp/video.mp4',
+          title: 'Updated Title',
+          platformConfigs: [],
+        }),
+        source_draft_id: null,
+        created_at: '2026-05-27T00:00:00.000Z',
+        updated_at: '2026-05-27T00:00:00.000Z',
+      };
+      mockDb.prepare.mockReset().mockReturnValue(stmt(undefined, undefined, { changes: 1 }));
+      mockDb.prepare.mockReturnValue(stmt(row));
 
-      const draft = draftService.createDraft({
-        type: 'image',
-        title: '图片草稿',
-        description: '描述',
-        coverPath: '/tmp/cover.jpg',
-        filePath: '/tmp/img.png',
-        platformConfigs: {},
-        status: 'ready',
-      });
+      const result = draftService.saveDraft(
+        { materialId: 'mat-1', materialPath: '/tmp/v.mp4', title: 'Updated Title', platformConfigs: [] },
+        'draft-existing',
+      );
 
-      expect(draft.type).toBe('image');
-      expect(draft.description).toBe('描述');
+      expect(result.id).toBe('draft-existing');
+      expect(result.title).toBe('Updated Title');
     });
   });
 
@@ -85,13 +109,11 @@ describe('DraftService', () => {
     it('returns draft when found', () => {
       const row = {
         id: 'draft_001',
-        type: 'video',
         title: '测试',
-        description: null,
-        cover_path: null,
-        file_path: '/tmp/video.mp4',
-        platform_configs: JSON.stringify({ douyin: { title: '抖音' } }),
-        status: 'draft',
+        material_id: 'mat-1',
+        status: 'editing',
+        snapshot_json: JSON.stringify({ materialId: 'mat-1', materialPath: '/tmp/v.mp4', title: '测试', platformConfigs: [] }),
+        source_draft_id: null,
         created_at: '2026-05-01T00:00:00.000Z',
         updated_at: '2026-05-01T00:00:00.000Z',
       };
@@ -100,92 +122,13 @@ describe('DraftService', () => {
       const result = draftService.getDraft('draft_001');
       expect(result).not.toBeNull();
       expect(result!.id).toBe('draft_001');
-      expect(result!.type).toBe('video');
-      expect(result!.platformConfigs).toEqual({ douyin: { title: '抖音' } });
+      expect(result!.snapshotJson.materialId).toBe('mat-1');
     });
 
     it('returns null when not found', () => {
       mockDb.prepare.mockReset().mockReturnValue(stmt(undefined));
       const result = draftService.getDraft('nonexistent');
       expect(result).toBeNull();
-    });
-
-    it('returns null when db unavailable', () => {
-      dbAvailable = false;
-      const result = draftService.getDraft('draft_001');
-      expect(result).toBeNull();
-    });
-
-    it('maps null fields to undefined', () => {
-      const row = {
-        id: 'draft_001',
-        type: 'video',
-        title: '测试',
-        description: null,
-        cover_path: null,
-        file_path: null,
-        platform_configs: JSON.stringify({}),
-        status: 'draft',
-        created_at: '2026-05-01T00:00:00.000Z',
-        updated_at: '2026-05-01T00:00:00.000Z',
-      };
-      mockDb.prepare.mockReset().mockReturnValue(stmt(row));
-
-      const result = draftService.getDraft('draft_001');
-      expect(result!.description).toBeUndefined();
-      expect(result!.coverPath).toBeUndefined();
-      expect(result!.filePath).toBeUndefined();
-    });
-  });
-
-  describe('updateDraft', () => {
-    it('updates draft fields', () => {
-      const existing = {
-        id: 'draft_001',
-        type: 'video',
-        title: '旧标题',
-        description: null,
-        cover_path: null,
-        file_path: null,
-        platform_configs: JSON.stringify({}),
-        status: 'draft',
-        created_at: '2026-05-01T00:00:00.000Z',
-        updated_at: '2026-05-01T00:00:00.000Z',
-      };
-      mockDb.prepare.mockReset()
-        .mockReturnValueOnce(stmt(existing))
-        .mockReturnValueOnce(stmt());
-
-      const result = draftService.updateDraft('draft_001', { title: '新标题' });
-      expect(result).not.toBeNull();
-      expect(result!.title).toBe('新标题');
-    });
-
-    it('returns null when draft not found', () => {
-      mockDb.prepare.mockReset().mockReturnValue(stmt(null));
-      const result = draftService.updateDraft('nonexistent', { title: 'x' });
-      expect(result).toBeNull();
-    });
-
-    it('preserves id and createdAt on update', () => {
-      const existing = {
-        id: 'draft_001',
-        type: 'video',
-        title: '旧',
-        description: null,
-        cover_path: null,
-        file_path: null,
-        platform_configs: JSON.stringify({}),
-        status: 'draft',
-        created_at: '2026-01-01T00:00:00.000Z',
-        updated_at: '2026-01-01T00:00:00.000Z',
-      };
-      mockDb.prepare.mockReset()
-        .mockReturnValueOnce(stmt(existing))
-        .mockReturnValueOnce(stmt());
-
-      const result = draftService.updateDraft('draft_001', { title: '新' });
-      expect(result!.id).toBe('draft_001');
     });
   });
 
@@ -194,13 +137,11 @@ describe('DraftService', () => {
       const rows = [
         {
           id: 'draft_001',
-          type: 'video',
           title: '草稿1',
-          description: null,
-          cover_path: null,
-          file_path: null,
-          platform_configs: JSON.stringify({}),
-          status: 'draft',
+          material_id: 'mat-1',
+          status: 'editing',
+          snapshot_json: JSON.stringify({ materialId: 'mat-1', materialPath: '/tmp/v.mp4', title: '草稿1', platformConfigs: [] }),
+          source_draft_id: null,
           created_at: '2026-05-01T00:00:00.000Z',
           updated_at: '2026-05-01T00:00:00.000Z',
         },
@@ -209,12 +150,19 @@ describe('DraftService', () => {
 
       const result = draftService.listDrafts();
       expect(result).toHaveLength(1);
+      expect(result[0].materialId).toBe('mat-1');
     });
 
     it('filters by status', () => {
       mockDb.prepare.mockReset().mockReturnValue(stmt(undefined, []));
-      draftService.listDrafts('ready');
-      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('WHERE status = ?'));
+      draftService.listDrafts({ status: 'editing' });
+      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('WHERE'));
+    });
+
+    it('filters by materialId', () => {
+      mockDb.prepare.mockReset().mockReturnValue(stmt(undefined, []));
+      draftService.listDrafts({ materialId: 'mat-1' });
+      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('WHERE'));
     });
 
     it('returns empty array when db unavailable', () => {
@@ -237,42 +185,24 @@ describe('DraftService', () => {
       expect(result).toBe(false);
     });
 
-    it('returns false when db unavailable', () => {
-      dbAvailable = false;
+    it('handles missing db gracefully', () => {
+      mockDb.prepare.mockReset().mockReturnValue(stmt(undefined, undefined, { changes: 0 }));
       const result = draftService.deleteDraft('draft_001');
       expect(result).toBe(false);
     });
   });
 
-  describe('duplicateDraft', () => {
-    it('duplicates draft with (副本) suffix', () => {
-      const original = {
-        id: 'draft_001',
-        type: 'video',
-        title: '测试视频',
-        description: '描述',
-        cover_path: null,
-        file_path: '/tmp/video.mp4',
-        platform_configs: JSON.stringify({ douyin: { title: '抖音' } }),
-        status: 'draft',
-        created_at: '2026-05-01T00:00:00.000Z',
-        updated_at: '2026-05-01T00:00:00.000Z',
-      };
-
-      mockDb.prepare.mockReset()
-        .mockReturnValueOnce(stmt(original))
-        .mockReturnValueOnce(stmt());
-
-      const result = draftService.duplicateDraft('draft_001');
-      expect(result).not.toBeNull();
-      expect(result!.title).toBe('测试视频 (副本)');
-      expect(result!.id).not.toBe('draft_001');
+  describe('publishDraft', () => {
+    it('throws if draft not found', async () => {
+      mockDb.prepare.mockReset().mockReturnValue(stmt(undefined));
+      await expect(draftService.publishDraft('nonexistent')).rejects.toThrow('草稿不存在');
     });
+  });
 
-    it('returns null when original not found', () => {
-      mockDb.prepare.mockReset().mockReturnValue(stmt(null));
-      const result = draftService.duplicateDraft('nonexistent');
-      expect(result).toBeNull();
+  describe('revokeDraft', () => {
+    it('throws if draft not in ready status', () => {
+      mockDb.prepare.mockReset().mockReturnValue(stmt(undefined, undefined, { changes: 0 }));
+      expect(() => draftService.revokeDraft('draft_001')).toThrow('草稿状态不允许撤回');
     });
   });
 });

@@ -104,11 +104,15 @@ export interface MatrixflowMock {
     list: ReturnType<typeof vi.fn>;
   };
   draft: {
-    create: ReturnType<typeof vi.fn>;
+    save: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     delete: ReturnType<typeof vi.fn>;
     list: ReturnType<typeof vi.fn>;
     duplicate: ReturnType<typeof vi.fn>;
+    publish: ReturnType<typeof vi.fn>;
+    revoke: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
   };
   comment: {
     template: {
@@ -228,7 +232,7 @@ export function createMatrixflowMock(): MatrixflowMock {
       cancelTask: fn({ success: true }),
       deleteTask: fn({ success: true }),
       retryTask: fn({ success: true }),
-      listTasks: fn([]),
+      listTasks: fn({ items: [], total: 0 }),
     },
 
     task: {
@@ -297,11 +301,15 @@ export function createMatrixflowMock(): MatrixflowMock {
     },
 
     draft: {
+      save: fn(okResult({ id: 'draft-1' })),
+      get: fn(okResult({})),
       create: fn(okResult({})),
       update: fn(okResult({})),
       delete: fn(okResult(null)),
       list: fn(okResult([])),
       duplicate: fn(okResult({})),
+      publish: fn(okResult(null)),
+      revoke: fn(okResult(null)),
     },
 
     comment: {

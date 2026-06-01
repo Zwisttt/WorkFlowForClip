@@ -36,7 +36,9 @@ const mockPublishService = {
   cancelPublish: vi.fn().mockResolvedValue(undefined),
   getTaskStatus: vi.fn().mockResolvedValue({ taskId: 'task-1', status: 'pending' }),
   getContentTasks: vi.fn().mockResolvedValue([]),
+  listTasks: vi.fn().mockResolvedValue({ items: [], total: 0 }),
   executeNow: vi.fn().mockResolvedValue({ success: true }),
+  retryTask: vi.fn().mockResolvedValue({ success: true }),
   updateTask: vi.fn().mockResolvedValue(undefined),
   deleteTask: vi.fn().mockResolvedValue(undefined),
   preCheckAccounts: vi.fn().mockResolvedValue({ valid: true }),
@@ -49,6 +51,7 @@ vi.mock('@electron/services/PublishService', () => ({
 
 const mockContentService = {
   getAllContents: vi.fn().mockResolvedValue([]),
+  getContent: vi.fn().mockResolvedValue({ id: 'content-1' }),
   importContent: vi.fn().mockResolvedValue({ id: 'content-1' }),
   deleteContent: vi.fn().mockResolvedValue(undefined),
   updateContent: vi.fn().mockResolvedValue({ id: 'content-1' }),
@@ -56,6 +59,15 @@ const mockContentService = {
 
 vi.mock('@electron/services/ContentService', () => ({
   contentService: mockContentService,
+}));
+
+const mockMaterialService = {
+  initialize: vi.fn().mockResolvedValue(undefined),
+  getMaterial: vi.fn().mockResolvedValue(null),
+};
+
+vi.mock('@electron/services/MaterialService', () => ({
+  materialService: mockMaterialService,
 }));
 
 const mockGroupService = {
@@ -150,12 +162,36 @@ vi.mock('@electron/services/MultiPanelService', () => ({
   multiPanelService: mockMultiPanelService,
 }));
 
+const mockEmbeddedView = {
+  webContents: {
+    loadURL: vi.fn().mockResolvedValue(undefined),
+  },
+};
+
+const mockBrowserManager = {
+  hasTab: vi.fn().mockReturnValue(false),
+  hasStandaloneTab: vi.fn().mockReturnValue(false),
+  getView: vi.fn().mockReturnValue(null),
+  switchTab: vi.fn(),
+  closeTab: vi.fn().mockResolvedValue(undefined),
+  createTab: vi.fn().mockResolvedValue(mockEmbeddedView),
+  layoutEmbeddedToMainContent: vi.fn(),
+};
+
+vi.mock('@electron/services/embedded-browser/browser-manager', () => ({
+  browserManager: mockBrowserManager,
+}));
+
 const mockDraftService = {
   createDraft: vi.fn().mockReturnValue({ id: 'draft-1' }),
   updateDraft: vi.fn().mockReturnValue({ id: 'draft-1' }),
+  saveDraft: vi.fn().mockReturnValue({ id: 'draft-1', title: 'Test', materialId: 'mat-1', status: 'editing', snapshot: {}, sourceDraftId: null, createdAt: new Date(), updatedAt: new Date() }),
+  getDraft: vi.fn().mockReturnValue({ id: 'draft-1' }),
   deleteDraft: vi.fn().mockReturnValue(true),
   listDrafts: vi.fn().mockReturnValue([]),
   duplicateDraft: vi.fn().mockReturnValue({ id: 'draft-2' }),
+  publishDraft: vi.fn().mockResolvedValue(undefined),
+  revokeDraft: vi.fn().mockReturnValue(undefined),
 };
 
 vi.mock('@electron/services/DraftService', () => ({
@@ -287,7 +323,7 @@ describe('IPC Handlers', () => {
         'stats:overview', 'stats:platform', 'stats:trend',
         'ai:prePublishCheck', 'ai:optimizeRule', 'ai:getCostSummary', 'ai:getAlerts', 'ai:dismissAlert',
         'panel:open', 'panel:close', 'panel:focus', 'panel:list',
-        'draft:create', 'draft:update', 'draft:delete', 'draft:list', 'draft:duplicate',
+        'draft:save', 'draft:get', 'draft:delete', 'draft:list', 'draft:publish', 'draft:revoke',
         'comment:template:create', 'comment:template:update', 'comment:template:delete', 'comment:template:list',
         'comment:schedule', 'comment:execute', 'comment:task:list',
         'license:status', 'license:activate', 'license:activate:offline', 'license:offline:request', 'license:deactivate',
@@ -351,6 +387,49 @@ describe('IPC Handlers', () => {
       expect(mockAccountService.validateCookie).toHaveBeenCalledWith('acc-1');
     });
 
+    it('account:openBrowser opens embedded homepage in standalone browser window', async () => {
+      const url = 'https://cp.kuaishou.com/article/publish/video';
+      const prepare = vi.fn(() => ({
+        get: vi.fn(() => ({ platform: 'kuaishou', browser_mode: 'embedded', fingerprint_id: null })),
+        run: vi.fn(),
+      }));
+      mockGetDatabase.mockReturnValueOnce({ prepare });
+      mockBrowserManager.hasTab.mockReturnValueOnce(false);
+
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      const handler = await getHandler('account:openBrowser');
+
+      const result = await handler(fakeEvent, 'acc-1', url);
+      expect(result.success).toBe(true);
+      expect(mockBrowserManager.createTab).toHaveBeenCalledWith('acc-1', 'kuaishou', url);
+      expect(mockMultiPanelService.openPanel).not.toHaveBeenCalled();
+      expect(mockBrowserManager.layoutEmbeddedToMainContent).not.toHaveBeenCalled();
+    });
+
+    it('account:openBrowser focuses existing standalone browser window', async () => {
+      const url = 'https://creator.douyin.com';
+      const prepare = vi.fn(() => ({
+        get: vi.fn(() => ({ platform: 'douyin', browser_mode: 'embedded', fingerprint_id: null })),
+        run: vi.fn(),
+      }));
+      mockGetDatabase.mockReturnValueOnce({ prepare });
+      mockBrowserManager.hasTab.mockReturnValueOnce(true).mockReturnValueOnce(true);
+      mockBrowserManager.hasStandaloneTab.mockReturnValueOnce(true);
+      mockBrowserManager.getView.mockReturnValueOnce(mockEmbeddedView);
+
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      const handler = await getHandler('account:openBrowser');
+
+      const result = await handler(fakeEvent, 'acc-1', url);
+      expect(result.success).toBe(true);
+      expect(mockEmbeddedView.webContents.loadURL).toHaveBeenCalledWith(url);
+      expect(mockBrowserManager.switchTab).toHaveBeenCalledWith('acc-1');
+      expect(mockBrowserManager.createTab).not.toHaveBeenCalled();
+      expect(mockMultiPanelService.openPanel).not.toHaveBeenCalled();
+    });
+
     it('account:add returns failure on service error', async () => {
       mockAccountService.bindAccount.mockRejectedValueOnce(new Error('login failed'));
       const { registerIpcHandlers } = await import('@electron/ipc/handlers');
@@ -392,6 +471,89 @@ describe('IPC Handlers', () => {
       const result = await handler(fakeEvent, 'task-1');
       expect(result.success).toBe(true);
       expect(mockPublishService.getTaskStatus).toHaveBeenCalledWith('task-1');
+    });
+
+    it('publish:retryTask returns actual execution result', async () => {
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      mockPublishService.retryTask.mockResolvedValueOnce({ success: true, videoId: 'v-1' });
+      const handler = await getHandler('publish:retryTask');
+
+      const result = await handler(fakeEvent, 'task-1');
+      expect(result).toEqual({ success: true, data: { success: true, videoId: 'v-1' } });
+      expect(mockPublishService.retryTask).toHaveBeenCalledWith('task-1');
+    });
+
+    it('publish:retryTask returns failure when execution fails', async () => {
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      mockPublishService.retryTask.mockResolvedValueOnce({ success: false, error: '视频发布失败' });
+      const handler = await getHandler('publish:retryTask');
+
+      const result = await handler(fakeEvent, 'task-1');
+      expect(result).toEqual({
+        success: false,
+        data: { success: false, error: '视频发布失败' },
+        message: '视频发布失败',
+      });
+    });
+
+    it('publish:createTask converts string scheduledAt to Date', async () => {
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      const handler = await getHandler('publish:createTask');
+
+      const isoString = '2026-05-28T10:00:00.000Z';
+      const result = await handler(fakeEvent, {
+        contentId: 'mat-1',
+        accountId: 'acc-1',
+        platform: 'douyin',
+        scheduledAt: isoString,
+        publishMode: 'client',
+        metadata: { title: 'Test' },
+      });
+      expect(result.success).toBe(true);
+      expect(mockPublishService.createPublishTask).toHaveBeenCalledWith(
+        expect.objectContaining({ scheduledAt: expect.any(Date) }),
+      );
+    });
+
+    it('publish:createTask works without scheduledAt', async () => {
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      const handler = await getHandler('publish:createTask');
+
+      const result = await handler(fakeEvent, {
+        contentId: 'mat-1',
+        accountId: 'acc-1',
+        platform: 'douyin',
+        publishMode: 'client',
+        metadata: { title: 'Test' },
+      });
+      expect(result.success).toBe(true);
+      expect(mockPublishService.createPublishTask).toHaveBeenCalled();
+    });
+
+    it('publish:listTasks returns items with total', async () => {
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      mockPublishService.listTasks.mockResolvedValue({ items: [{ id: 't-1' }], total: 1 });
+      const handler = await getHandler('publish:listTasks');
+
+      const result = await handler(fakeEvent);
+      expect(mockPublishService.listTasks).toHaveBeenCalledWith({});
+      expect(result).toEqual({ items: [{ id: 't-1' }], total: 1 });
+    });
+
+    it('publish:listTasks uses listTasks when filter provided', async () => {
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      mockPublishService.listTasks.mockResolvedValue({ items: [], total: 0 });
+      const handler = await getHandler('publish:listTasks');
+
+      const result = await handler(fakeEvent, { status: ['pending'], platform: ['douyin'] });
+      expect(mockPublishService.listTasks).toHaveBeenCalledWith({ status: ['pending'], platform: ['douyin'] });
+      expect(result).toEqual({ items: [], total: 0 });
     });
   });
 
@@ -662,24 +824,37 @@ describe('IPC Handlers', () => {
   });
 
   describe('draft:* channels', () => {
-    it('draft:create creates a draft', async () => {
+    it('draft:save saves snapshot and returns draft with id', async () => {
       const { registerIpcHandlers } = await import('@electron/ipc/handlers');
       registerIpcHandlers();
-      const handler = await getHandler('draft:create');
+      const handler = await getHandler('draft:save');
 
-      const result = await handler(fakeEvent, { title: 'Test Draft' });
+      const snapshot = { materialId: 'mat-1', materialPath: '/tmp/v.mp4', title: 'Test', platformConfigs: [] };
+      const result = await handler(fakeEvent, { snapshot });
       expect(result.success).toBe(true);
-      expect(mockDraftService.createDraft).toHaveBeenCalledWith({ title: 'Test Draft' });
+      expect(result.data.id).toBeDefined();
+      expect(mockDraftService.saveDraft).toHaveBeenCalledWith(snapshot, undefined);
     });
 
-    it('draft:update updates a draft', async () => {
+    it('draft:save passes existingId for update', async () => {
       const { registerIpcHandlers } = await import('@electron/ipc/handlers');
       registerIpcHandlers();
-      const handler = await getHandler('draft:update');
+      const handler = await getHandler('draft:save');
 
-      const result = await handler(fakeEvent, { draftId: 'draft-1', updates: { title: 'Updated' } });
+      const snapshot = { materialId: 'mat-1', materialPath: '/tmp/v.mp4', title: 'Updated', platformConfigs: [] };
+      const result = await handler(fakeEvent, { snapshot, existingId: 'draft-existing' });
       expect(result.success).toBe(true);
-      expect(mockDraftService.updateDraft).toHaveBeenCalledWith('draft-1', { title: 'Updated' });
+      expect(mockDraftService.saveDraft).toHaveBeenCalledWith(snapshot, 'draft-existing');
+    });
+
+    it('draft:get returns a draft', async () => {
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      const handler = await getHandler('draft:get');
+
+      const result = await handler(fakeEvent, { id: 'draft-1' });
+      expect(result.success).toBe(true);
+      expect(mockDraftService.getDraft).toHaveBeenCalledWith('draft-1');
     });
 
     it('draft:delete deletes a draft', async () => {
@@ -687,29 +862,39 @@ describe('IPC Handlers', () => {
       registerIpcHandlers();
       const handler = await getHandler('draft:delete');
 
-      const result = await handler(fakeEvent, { draftId: 'draft-1' });
+      const result = await handler(fakeEvent, { id: 'draft-1' });
       expect(result.success).toBe(true);
       expect(mockDraftService.deleteDraft).toHaveBeenCalledWith('draft-1');
     });
 
-    it('draft:list lists drafts by status', async () => {
+    it('draft:list lists drafts with filter', async () => {
       const { registerIpcHandlers } = await import('@electron/ipc/handlers');
       registerIpcHandlers();
       const handler = await getHandler('draft:list');
 
-      const result = await handler(fakeEvent, { status: 'active' });
+      const result = await handler(fakeEvent, { filter: { status: 'editing' } });
       expect(result.success).toBe(true);
-      expect(mockDraftService.listDrafts).toHaveBeenCalledWith('active');
+      expect(mockDraftService.listDrafts).toHaveBeenCalledWith({ status: 'editing' });
     });
 
-    it('draft:duplicate duplicates a draft', async () => {
+    it('draft:publish publishes a draft', async () => {
       const { registerIpcHandlers } = await import('@electron/ipc/handlers');
       registerIpcHandlers();
-      const handler = await getHandler('draft:duplicate');
+      const handler = await getHandler('draft:publish');
 
-      const result = await handler(fakeEvent, { draftId: 'draft-1' });
+      const result = await handler(fakeEvent, { id: 'draft-1' });
       expect(result.success).toBe(true);
-      expect(mockDraftService.duplicateDraft).toHaveBeenCalledWith('draft-1');
+      expect(mockDraftService.publishDraft).toHaveBeenCalledWith('draft-1');
+    });
+
+    it('draft:revoke revokes a draft', async () => {
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      const handler = await getHandler('draft:revoke');
+
+      const result = await handler(fakeEvent, { id: 'draft-1' });
+      expect(result.success).toBe(true);
+      expect(mockDraftService.revokeDraft).toHaveBeenCalledWith('draft-1');
     });
   });
 
