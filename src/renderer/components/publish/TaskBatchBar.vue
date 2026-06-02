@@ -11,6 +11,9 @@
       <el-button size="small" @click="handleBatchSkip" :loading="loading">
         批量跳过
       </el-button>
+      <el-button size="small" type="danger" @click="handleBatchDelete" :loading="loading">
+        批量删除
+      </el-button>
       <el-button size="small" @click="taskStore.clearSelection">
         清除选择
       </el-button>
@@ -20,7 +23,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useTaskStore } from '@/renderer/stores/task';
 
 const taskStore = useTaskStore();
@@ -61,6 +64,26 @@ async function handleBatchSkip() {
     ElMessage.success('批量跳过成功');
   } catch {
     ElMessage.error('批量跳过失败');
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function handleBatchDelete() {
+  loading.value = true;
+  try {
+    await ElMessageBox.confirm(
+      `确定删除已选的 ${taskStore.selectedCount} 项任务？此操作不可恢复。`,
+      '批量删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning', confirmButtonClass: 'el-button--danger' },
+    );
+    await taskStore.batchDelete();
+    ElMessage.success('批量删除成功');
+    await taskStore.fetchTasks();
+  } catch (e: any) {
+    if (e !== 'cancel' && e?.toString() !== 'cancel') {
+      ElMessage.error('批量删除失败');
+    }
   } finally {
     loading.value = false;
   }

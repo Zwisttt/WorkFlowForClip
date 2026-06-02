@@ -4,7 +4,11 @@
       <span class="task-table__count">共 {{ taskStore.groupedTasks.length }} 个内容 / {{ total }} 条任务</span>
     </div>
     <el-table :data="taskStore.groupedTasks" v-loading="taskStore.loading" stripe border
-      @row-click="onRowClick">
+      @row-click="onRowClick"
+      @selection-change="onSelectionChange"
+      ref="tableRef"
+      height="100%">
+      <el-table-column type="selection" width="45" :selectable="() => true" />
       <el-table-column label="内容预览" min-width="240">
         <template #default="{ row }">
           <div class="task-table__content-cell">
@@ -35,6 +39,13 @@
               <span class="task-table__platform-dot" :class="acc.platform"></span>
               <span class="task-table__platform-name">{{ platformLabel(acc.platform) }}</span>
               <span class="task-table__account-name">{{ acc.accountName || '-' }}</span>
+              <el-tooltip
+                v-if="acc.platform === 'kuaishou' && row.tags && row.tags.length > 4"
+                :content="`快手话题上限4个，当前${row.tags.length}个，请修改后发布`"
+                placement="top"
+              >
+                <el-icon class="task-table__warn-icon" :size="14"><WarningFilled /></el-icon>
+              </el-tooltip>
             </span>
           </div>
         </template>
@@ -52,7 +63,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="140" fixed="right">
+      <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button
             v-if="row.status === 'pending' || row.status === 'failed'"
@@ -62,6 +73,7 @@
             @click.stop="onExecute(row)"
           >{{ row.status === 'failed' ? '重新执行' : '执行发布' }}</el-button>
           <el-button size="small" link @click.stop="onRowClick(row)">详情</el-button>
+          <el-button size="small" type="danger" link @click.stop="onDelete(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -71,7 +83,8 @@
 <script setup lang="ts">
 import { useTaskStore } from '@/renderer/stores/task';
 import type { TaskStatus, GroupedTask } from '@/renderer/stores/task';
-import { VideoCameraFilled } from '@element-plus/icons-vue';
+import { ElMessageBox } from 'element-plus';
+import { VideoCameraFilled, WarningFilled } from '@element-plus/icons-vue';
 
 const taskStore = useTaskStore();
 
@@ -80,6 +93,7 @@ defineProps<{ total: number }>();
 const emit = defineEmits<{
   (e: 'detail', task: GroupedTask): void;
   (e: 'execute', task: GroupedTask): void;
+  (e: 'delete', task: GroupedTask): void;
 }>();
 
 function onRowClick(row: GroupedTask) {
@@ -88,6 +102,28 @@ function onRowClick(row: GroupedTask) {
 
 function onExecute(row: GroupedTask) {
   emit('execute', row);
+}
+
+function onSelectionChange(rows: GroupedTask[]) {
+  taskStore.clearSelection();
+  for (const row of rows) {
+    for (const sub of row.subTasks) {
+      taskStore.toggleSelect(sub.id);
+    }
+  }
+}
+
+async function onDelete(row: GroupedTask) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${row.title}」的所有发布任务？此操作不可恢复。`,
+      '删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning', confirmButtonClass: 'el-button--danger' },
+    );
+    emit('delete', row);
+  } catch {
+    // cancelled
+  }
 }
 
 function onImgError(e: Event) {
@@ -147,6 +183,10 @@ function formatTime(iso?: string): string {
 
 <style scoped>
 .task-table {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--color-bg-card);
   border-radius: var(--radius-xl);
   border: 1px solid var(--color-border-light);
@@ -155,6 +195,7 @@ function formatTime(iso?: string): string {
 }
 
 .task-table__header {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -243,6 +284,13 @@ function formatTime(iso?: string): string {
 .task-table__account-name {
   color: var(--color-text-primary);
   font-weight: var(--font-weight-medium);
+}
+
+.task-table__warn-icon {
+  color: var(--el-color-danger, #f56c6c);
+  margin-left: 2px;
+  vertical-align: middle;
+  cursor: pointer;
 }
 
 .task-table__time {

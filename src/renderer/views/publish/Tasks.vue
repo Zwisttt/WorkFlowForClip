@@ -62,6 +62,7 @@
         :total="taskStore.total"
         @detail="onShowDetail"
         @execute="onExecuteGroup"
+        @delete="onDeleteGroup"
       />
 
       <!-- 空状态 -->
@@ -229,6 +230,29 @@ async function onSkip(id: string) {
   }
 }
 
+async function onDeleteGroup(group: GroupedTask) {
+  try {
+    let failedCount = 0;
+    for (const sub of group.subTasks) {
+      try {
+        await taskStore.deleteTask(sub.id);
+      } catch {
+        failedCount++;
+      }
+    }
+    if (failedCount === 0) {
+      ElMessage.success('删除成功');
+    } else if (failedCount < group.subTasks.length) {
+      ElMessage.warning(`${failedCount} 条任务删除失败（可能正在执行中）`);
+    } else {
+      ElMessage.error('删除失败');
+    }
+    await taskStore.fetchTasks();
+  } catch {
+    ElMessage.error('删除失败');
+  }
+}
+
 function onPlanClick(planId: string | null) {
   if (planId) {
     // Navigate to plan detail
@@ -346,7 +370,7 @@ async function handleExport() {
 /* ── 列表区域 ── */
 .page-tasks__list {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
   padding: 0 var(--space-6) var(--space-4);
   display: flex;
   flex-direction: column;
@@ -363,6 +387,7 @@ async function handleExport() {
 
 /* ── 分页 ── */
 .page-tasks__pagination {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -371,7 +396,6 @@ async function handleExport() {
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-light);
   box-shadow: var(--shadow-xs);
-  margin-top: auto;
 }
 
 .page-tasks__pagination-info {

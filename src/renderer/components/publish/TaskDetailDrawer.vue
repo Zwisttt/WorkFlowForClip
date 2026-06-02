@@ -24,6 +24,10 @@
           <span class="label">创建时间</span>
           <span class="value">{{ formatTime(group.createdAt) }}</span>
         </div>
+        <div v-if="group.scheduledAt" class="drawer-row">
+          <span class="label">发布时间</span>
+          <span class="value">{{ formatTime(group.scheduledAt) }}</span>
+        </div>
       </div>
 
       <div class="drawer-section">
@@ -40,6 +44,7 @@
           </div>
           <div class="drawer-subtask__meta">
             <el-tag size="small" :type="statusTagType(sub.status)">{{ statusLabel(sub.status) }}</el-tag>
+            <span v-if="sub.scheduledAt" class="drawer-subtask__time">{{ formatTime(sub.scheduledAt) }}</span>
             <span v-if="sub.durationMs" class="drawer-subtask__duration">{{ formatDuration(sub.durationMs) }}</span>
             <el-button
               v-if="sub.status === 'pending' || sub.status === 'failed'"
@@ -252,6 +257,12 @@ function formatDuration(ms?: number): string {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.drawer-subtask__time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-placeholder);
+  font-family: var(--font-family-mono);
 }
 
 .drawer-subtask__duration {
