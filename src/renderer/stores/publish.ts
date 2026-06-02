@@ -127,7 +127,10 @@ export const usePublishStore = defineStore('publish', () => {
 
   async function deleteTask(taskId: string) {
     if (!window.matrixflow) return;
-    await window.matrixflow.publish.deleteTask(taskId);
+    const result = await window.matrixflow.publish.deleteTask(taskId) as { success?: boolean; message?: string };
+    if (result && result.success === false) {
+      throw new Error(result.message || '删除失败');
+    }
     tasks.value = tasks.value.filter((t) => t.id !== taskId);
   }
 

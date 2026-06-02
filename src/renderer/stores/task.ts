@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { ElMessage } from 'element-plus';
 
 export type TaskStatus = 'pending' | 'scheduled' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
 
@@ -31,6 +32,7 @@ export interface Task {
   progress: number;
   message?: string;
   errorCode?: string;
+  scheduledAt?: string;
   startedAt?: string;
   completedAt?: string;
   durationMs?: number;
@@ -59,6 +61,7 @@ export interface GroupedTask {
   tags?: string[];
   accounts: AccountInfo[];
   status: TaskStatus;
+  scheduledAt?: string;
   createdAt: string;
   updatedAt: string;
   subTasks: Task[];
@@ -149,6 +152,7 @@ export const useTaskStore = defineStore('task', () => {
         tags: first.tags,
         accounts,
         status: worstStatus,
+        scheduledAt: first.scheduledAt,
         createdAt: first.createdAt,
         updatedAt: latest,
         subTasks: group,
@@ -267,29 +271,73 @@ export const useTaskStore = defineStore('task', () => {
     clearSelection();
   }
 
+  async function deleteTask(id: string) {
+    if (!window.matrixflow) return;
+    const result = await window.matrixflow.publish.deleteTask(id) as { success?: boolean; message?: string };
+    if (result && result.success === false) {
+      throw new Error(result.message || '删除失败');
+    }
+    tasks.value = tasks.value.filter((t) => t.id !== id);
+    selectedIds.value.delete(id);
+  }
+
+  async function batchDelete() {
+    if (!window.matrixflow) return;
+    const ids = [...selectedIds.value];
+    const result = await window.matrixflow.publish.batchDelete(ids) as { success?: boolean; message?: string };
+    if (result && result.success === false) {
+      throw new Error(result.message || '批量删除失败');
+    }
+    tasks.value = tasks.value.filter((t) => !selectedIds.value.has(t.id));
+    clearSelection();
+  }
+
   /** 监听主进程推送的任务事件 */
   function listenIpcEvents(): () => void {
-    if (!window.matrixflow?.onTaskProgress) return () => {};
+    const cleanups: (() => void)[] = [];
 
-    const off1 = window.matrixflow.onTaskProgress((taskId: string, progress: number, message?: string) => {
-      updateTaskProgress(taskId, progress, message);
-    });
+    if (window.matrixflow?.onTaskProgress) {
+      const off = window.matrixflow.onTaskProgress((taskId: string, progress: number, message?: string) => {
+        updateTaskProgress(taskId, progress, message);
+      });
+      cleanups.push(off);
+    }
 
-    const off2 = window.matrixflow.onTaskStatusChange?.((taskId: string, status: string, data?: Partial<Task>) => {
-      updateTaskStatus(taskId, status as TaskStatus, data);
-    });
+    if (window.matrixflow?.onTaskStatusChange) {
+      const off = window.matrixflow.onTaskStatusChange((taskId: string, status: string, data?: Partial<Task>) => {
+        updateTaskStatus(taskId, status as TaskStatus, data);
+      });
+      cleanups.push(off);
+    }
 
-    return () => {
-      off1();
-      off2?.();
-    };
+    if (window.matrixflow?.onPublishStatus) {
+      const off = window.matrixflow.onPublishStatus((batch: unknown[]) => {
+        const events = Array.isArray(batch) ? batch : [batch];
+        for (const evt of events) {
+          const e = evt as { type: string; taskId: string; message?: string; progress?: number };
+          if (e.type === 'task_failed') {
+            updateTaskStatus(e.taskId, 'failed');
+            ElMessage.error(e.message || '任务执行失败');
+          } else if (e.type === 'task_done') {
+            updateTaskStatus(e.taskId, 'completed');
+          } else if (e.type === 'task_start') {
+            updateTaskStatus(e.taskId, 'running');
+          } else if (e.type === 'task_progress') {
+            updateTaskProgress(e.taskId, e.progress ?? 0, e.message);
+          }
+        }
+      });
+      cleanups.push(off);
+    }
+
+    return () => cleanups.forEach((fn) => fn());
   }
 
   return {
     tasks, total, loading, selectedIds, filter, selectedCount, allSelectedOnPage,
     groupedTasks, runningTasks, failedTasks, hasFailedTasks, stats,
     fetchTasks, createTask, cancelTask, retryTask, retryAllFailed,
-    batchRetry, batchCancel,
+    batchRetry, batchCancel, batchDelete, deleteTask,
     toggleSelectAll, toggleSelect, clearSelection,
     updateTaskProgress, updateTaskStatus, listenIpcEvents,
   };
