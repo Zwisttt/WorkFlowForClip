@@ -50,6 +50,35 @@ function serializeQuery(query: RiskTextFieldQuery) {
   };
 }
 
+function riskTagToText(tag: unknown): string {
+  if (typeof tag === 'string') return tag;
+  if (tag === null || tag === undefined) return '';
+  if (typeof tag === 'number' || typeof tag === 'boolean') return String(tag);
+  if (typeof tag === 'object') {
+    const record = tag as Record<string, unknown>;
+    for (const key of ['name', 'label', 'value', 'title', 'text']) {
+      const value = record[key];
+      if (typeof value === 'string' || typeof value === 'number') {
+        return String(value);
+      }
+    }
+  }
+  return '';
+}
+
+export function normalizeRiskTags(tags?: readonly unknown[] | null, maxTags = DEFAULT_OPTIONS.maxTags): string[] {
+  return (tags ?? [])
+    .map((tag) => {
+      let value = riskTagToText(tag).trim();
+      value = value.replace(/^#+\s*/, '').trim();
+      value = value.replace(/^(?:undefined|null)\b[\s:：,，、-]*/i, '').trim();
+      value = value.replace(/^#+\s*/, '').trim();
+      return value.replace(/\s+/g, ' ').trim();
+    })
+    .filter((tag) => tag.length > 0 && !/^(?:undefined|null|nan)$/i.test(tag))
+    .slice(0, maxTags);
+}
+
 // Fengkong abstraction for platform automation. It centralizes human-like
 // typing, randomized write-step delays, and per-tag confirmation behavior.
 export abstract class FengkongAbstractClass {
@@ -83,14 +112,11 @@ export abstract class FengkongAbstractClass {
   }
 
   async humanizedAppendTags(
-    tags: string[],
+    tags: readonly unknown[] | null | undefined,
     options: { newlineBeforeFirst?: boolean; maxTags?: number } = {},
   ): Promise<void> {
     const maxTags = options.maxTags ?? this.options.maxTags;
-    const normalizedTags = tags
-      .map((tag) => tag.trim().replace(/^#+/, ''))
-      .filter(Boolean)
-      .slice(0, maxTags);
+    const normalizedTags = normalizeRiskTags(tags, maxTags);
 
     if (normalizedTags.length === 0) return;
 
@@ -101,10 +127,16 @@ export abstract class FengkongAbstractClass {
 
     for (const tag of normalizedTags) {
       await this.randomWriteStepDelay();
-      await this.typeHumanizedText(`#${tag}`);
+      await this.typeText('#');
+      await this.sleep(this.randomInt(this.options.minKeyDelayMs, this.options.maxKeyDelayMs));
+      await this.typeHumanizedText(tag);
       await this.randomWriteStepDelay();
       await this.pressEnter();
     }
+  }
+
+  async randomActionDelay(): Promise<void> {
+    await this.randomWriteStepDelay();
   }
 
   protected async typeHumanizedText(text: string): Promise<void> {
@@ -331,7 +363,13 @@ export class EmbeddedRiskControl extends FengkongAbstractClass {
   }
 
   protected async typeText(text: string): Promise<void> {
-    await this.wc.insertText(text);
+    if (/^[\x20-\x7E]$/.test(text)) {
+      this.wc.sendInputEvent({ type: 'keyDown', keyCode: text });
+      this.wc.sendInputEvent({ type: 'char', keyCode: text });
+      this.wc.sendInputEvent({ type: 'keyUp', keyCode: text });
+      return;
+    }
+    this.wc.sendInputEvent({ type: 'char', keyCode: text });
   }
 
   protected async pressEnter(): Promise<void> {
