@@ -41,6 +41,7 @@ import type {
   TaskListResult,
 } from './types/publish';
 import { PublishEvent } from './types/publish';
+import type { PublishEvent as BusPublishEvent } from '../core/types/eventbus';
 
 const logger = new Logger('PublishService');
 
@@ -111,6 +112,10 @@ export class PublishService implements IPublishService {
   private taskScheduler: TaskScheduler;
   private initialized = false;
   private executingTasks = new Set<string>();
+  private stuckTaskMonitorTimer: ReturnType<typeof setInterval> | null = null;
+
+  private static readonly TASK_TIMEOUT_MS = 30 * 60 * 1000;
+  private static readonly STUCK_CHECK_INTERVAL_MS = 60 * 1000;
 
   private constructor() {
     this.eventBus = EventBus.getInstance();
@@ -139,6 +144,10 @@ export class PublishService implements IPublishService {
     };
 
     this.initialized = true;
+    this.recoverStaleRunningTasks().catch((err) => {
+      logger.error(`启动时恢复残留任务失败: ${err}`);
+    });
+    this.startStuckTaskMonitor();
     logger.info('发布管理服务已初始化');
   }
 
@@ -315,8 +324,10 @@ export class PublishService implements IPublishService {
 
     this.executingTasks.add(taskId);
 
+    const startedAt = nowISO();
     await publishTaskRepo.update(taskId, {
       status: 'running',
+      started_at: startedAt,
     } as Partial<DbPublishTask>);
 
     const startedPayload: TaskStartedPayload = {
@@ -750,6 +761,12 @@ export class PublishService implements IPublishService {
 
   private async closeStandaloneBrowserAfterPublish(accountId: string, outcome: 'completed' | 'failed'): Promise<void> {
     if (!accountId) return;
+    const keepOnFail = process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === '1'
+      || process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === 'true';
+    if (outcome === 'failed' && keepOnFail) {
+      logger.warn(`调试模式保留发布失败弹窗: accountId=${accountId}`);
+      return;
+    }
 
     try {
       const { browserManager } = await import('./embedded-browser/browser-manager');
@@ -995,6 +1012,149 @@ export class PublishService implements IPublishService {
         }
       }),
     );
+  }
+
+  async batchDelete(taskIds: string[]): Promise<{ taskId: string; success: boolean; error?: string }[]> {
+    return Promise.all(
+      taskIds.map(async (taskId) => {
+        try {
+          await this.deleteTask(taskId);
+          return { taskId, success: true };
+        } catch (err) {
+          return { taskId, success: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }),
+    );
+  }
+
+  // ─── 超时任务监控 ─────────────────────────────────────────
+
+  private startStuckTaskMonitor(): void {
+    if (this.stuckTaskMonitorTimer) return;
+
+    this.stuckTaskMonitorTimer = setInterval(() => {
+      this.forceFailStuckTasks().catch((err) => {
+        logger.error(`超时任务扫描失败: ${err}`);
+      });
+    }, PublishService.STUCK_CHECK_INTERVAL_MS);
+
+    logger.info(`超时任务监控已启动 (阈值=${PublishService.TASK_TIMEOUT_MS / 1000}s, 检查间隔=${PublishService.STUCK_CHECK_INTERVAL_MS / 1000}s)`);
+  }
+
+  stopStuckTaskMonitor(): void {
+    if (this.stuckTaskMonitorTimer) {
+      clearInterval(this.stuckTaskMonitorTimer);
+      this.stuckTaskMonitorTimer = null;
+      logger.info('超时任务监控已停止');
+    }
+  }
+
+  private async recoverStaleRunningTasks(): Promise<void> {
+    const runningPage = await publishTaskRepo.findByStatus('running', { pageSize: 200 });
+    if (runningPage.total === 0) return;
+
+    logger.info(`发现 ${runningPage.total} 个 running 状态任务，执行恢复...`);
+
+    for (const task of runningPage.data) {
+      const startedAt = (task as any).started_at as string | undefined;
+
+      if (!startedAt) {
+        logger.warn(`running 任务缺少 started_at，强制失败: taskId=${task.id}`);
+        await publishTaskRepo.markFinalFailed(task.id, '应用重启，任务状态已失效');
+        const errMsg = '应用重启，任务状态已失效';
+        this.eventBus.emit(PublishEvent.TASK_FAILED, {
+          taskId: task.id,
+          error: errMsg,
+          retryCount: task.retry_count,
+          maxRetries: task.max_retries,
+        } as TaskFailedPayload);
+        this.broadcastTaskFailed(task.id, errMsg);
+        continue;
+      }
+
+      const elapsed = Date.now() - new Date(startedAt).getTime();
+      if (elapsed >= PublishService.TASK_TIMEOUT_MS) {
+        const errMsg = `任务执行超时 (${Math.round(elapsed / 60000)}分钟)，已强制终止`;
+        logger.warn(`重启后发现超时任务 (${Math.round(elapsed / 60000)}分钟)，强制失败: taskId=${task.id}`);
+        await publishTaskRepo.markFinalFailed(task.id, errMsg);
+        this.eventBus.emit(PublishEvent.TASK_FAILED, {
+          taskId: task.id,
+          error: errMsg,
+          retryCount: task.retry_count,
+          maxRetries: task.max_retries,
+        } as TaskFailedPayload);
+        this.broadcastTaskFailed(task.id, errMsg);
+      }
+    }
+
+    logger.info('残留任务恢复完成');
+  }
+
+  private async forceFailStuckTasks(): Promise<number> {
+    const runningPage = await publishTaskRepo.findByStatus('running', { pageSize: 200 });
+    if (runningPage.total === 0) return 0;
+
+    const now = Date.now();
+    let failedCount = 0;
+
+    for (const task of runningPage.data) {
+      const startedAt = (task as any).started_at as string | undefined;
+      if (!startedAt) {
+        logger.warn(`running 任务缺少 started_at，强制失败: taskId=${task.id}`);
+        this.executingTasks.delete(task.id);
+        this.taskScheduler.cancel(task.id);
+        const errMsg = '任务状态异常（缺少启动时间），已强制终止';
+        await publishTaskRepo.markFinalFailed(task.id, errMsg);
+        this.eventBus.emit(PublishEvent.TASK_FAILED, {
+          taskId: task.id,
+          error: errMsg,
+          retryCount: task.retry_count,
+          maxRetries: task.max_retries,
+        } as TaskFailedPayload);
+        this.broadcastTaskFailed(task.id, errMsg);
+        failedCount++;
+        continue;
+      }
+
+      const elapsed = now - new Date(startedAt).getTime();
+      if (elapsed < PublishService.TASK_TIMEOUT_MS) continue;
+
+      logger.warn(`任务执行超时 (${Math.round(elapsed / 1000)}s)，强制失败: taskId=${task.id} title=${(task as any).title || ''}`);
+
+      this.executingTasks.delete(task.id);
+      this.taskScheduler.cancel(task.id);
+
+      const errMsg = `任务执行超时 (${Math.round(elapsed / 60000)}分钟)，已强制终止`;
+      await publishTaskRepo.markFinalFailed(task.id, errMsg);
+
+      this.eventBus.emit(PublishEvent.TASK_FAILED, {
+        taskId: task.id,
+        error: errMsg,
+        retryCount: task.retry_count,
+        maxRetries: task.max_retries,
+      } as TaskFailedPayload);
+      this.broadcastTaskFailed(task.id, errMsg);
+
+      failedCount++;
+    }
+
+    if (failedCount > 0) {
+      logger.info(`超时任务扫描完成: 强制失败 ${failedCount} 个任务`);
+    }
+
+    return failedCount;
+  }
+
+  private broadcastTaskFailed(taskId: string, error: string): void {
+    const busEvent: BusPublishEvent = {
+      type: 'task_failed',
+      taskId,
+      platform: '',
+      accountId: '',
+      message: error,
+      timestamp: Date.now(),
+    };
+    this.eventBus.broadcast(busEvent);
   }
 }
 
