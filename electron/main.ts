@@ -32,6 +32,7 @@ import { autoUpdaterService } from './core/AutoUpdater';
 import { initDatabase, closeDatabase } from './data/Database';
 import { registerAllAdapters, PlatformRegistry } from './platform/adapter';
 import { multiPanelService } from './services/MultiPanelService';
+import { publishService } from './services/PublishService';
 import { materialService } from './services/MaterialService';
 import { browserManager } from './services/embedded-browser/browser-manager';
 
@@ -208,6 +209,9 @@ app.whenReady().then(async () => {
 
   taskScheduler.start();
   logger.info('任务调度器已启动');
+
+  publishService.initialize();
+  logger.info('发布管理服务已初始化');
 
   await selectorUpdateService.initialize();
   logger.info('选择器更新服务已启动');

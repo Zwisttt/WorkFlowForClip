@@ -76,6 +76,8 @@ const api = {
       ipcRenderer.invoke('task:batchRetry', taskIds),
     batchCancel: (taskIds: string[]): Promise<any> =>
       ipcRenderer.invoke('task:batchCancel', taskIds),
+    batchDelete: (taskIds: string[]): Promise<any> =>
+      ipcRenderer.invoke('task:batchDelete', taskIds),
   },
 
   task: {

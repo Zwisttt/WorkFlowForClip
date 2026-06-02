@@ -76,6 +76,7 @@ const CHANNEL = {
   TASK_RETRY: 'task:retry',
   TASK_BATCH_RETRY: 'task:batchRetry',
   TASK_BATCH_CANCEL: 'task:batchCancel',
+  TASK_BATCH_DELETE: 'task:batchDelete',
 
   DRAFT_SAVE: 'draft:save',
   DRAFT_GET: 'draft:get',
@@ -368,6 +369,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNEL.TASK_BATCH_CANCEL, async (_e, taskIds: string[]): Promise<IpcResult<void>> => {
     return wrap(async () => {
       await publishService.batchCancel(taskIds);
+    });
+  });
+
+  ipcMain.handle(CHANNEL.TASK_BATCH_DELETE, async (_e, taskIds: string[]): Promise<IpcResult<void>> => {
+    return wrap(async () => {
+      await publishService.batchDelete(taskIds);
     });
   });
 

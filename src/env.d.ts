@@ -42,6 +42,7 @@ interface MatrixFlowAPI {
     listPlans?: () => Promise<any>;
     batchRetry: (taskIds: string[]) => Promise<any>;
     batchCancel: (taskIds: string[]) => Promise<any>;
+    batchDelete: (taskIds: string[]) => Promise<any>;
   };
 
   task: {
