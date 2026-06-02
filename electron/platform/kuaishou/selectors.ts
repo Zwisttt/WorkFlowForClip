@@ -55,9 +55,9 @@ export const UPLOAD_SELECTORS = {
   descEditor: '.desc-input textarea, [contenteditable="true"], [class*="desc"] textarea',
   descEditorFallback: '.desc-input, [class*="description"] textarea',
 
-  // 话题/标签
-  topicInput: 'input[placeholder*="话题"], input[placeholder*="标签"], [class*="topic"] input',
-  topicSuggestion: '.topic-item, [class*="topic"] li, [class*="suggest"] li',
+  // 话题/标签 — 基于 # + 空格触发建议下拉
+  topicInput: 'input[placeholder*="话题"], input[placeholder*="标签"], [class*="topic"] input, [class*="tag"] input',
+  topicSuggestion: '[class*="tag-suggestion"], [class*="topic-item"], [class*="mention-item"], [class*="suggest"] li, [class*="topic"] li',
   topicTag: '.topic-tag, [class*="tag"] span',
 
   // 封面
@@ -77,9 +77,10 @@ export const UPLOAD_SELECTORS = {
   publishFailedToast: 'get_by_text("发布失败", exact=false)',
   publishDraftToast: 'get_by_text("已保存草稿", exact=false)',
 
-  // 定时发布
+  // 定时发布 — Ant Design picker
   scheduleCheckbox: '[class*="schedule"] input, [class*="timer"] input',
-  scheduleDatePicker: '.semi-input[placeholder="日期和时间"], input[placeholder*="时间"]',
+  scheduleDatePicker: 'div.ant-picker-input input[placeholder*="时间"], div.ant-picker-input input[placeholder*="日期"], input[placeholder*="发布时间"], input[placeholder*="日期"], input[placeholder*="时间"], input[type="datetime-local"]',
+  scheduleConfirmBtn: 'span:has-text("确定"), button:has-text("确定"), button:has-text("确认")',
 } as const;
 
 // ---- 数据统计选择器 ----

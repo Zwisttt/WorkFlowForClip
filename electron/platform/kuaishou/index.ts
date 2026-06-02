@@ -50,7 +50,7 @@ const KUAISHOU_CONFIG: PlatformConfig = {
 
 const KUAISHOU_CAPABILITIES: PlatformCapabilities = {
   serverScheduledPublish: true,
-  maxScheduleDays: 7,
+  maxScheduleDays: 14,
   comment: true,
   image: true,
 };

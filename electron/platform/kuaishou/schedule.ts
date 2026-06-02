@@ -22,13 +22,14 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
   }
 
   const now = new Date();
-  if (scheduledTime <= now) {
-    return { success: false, message: '定时发布时间必须晚于当前时间' };
+  const minScheduleDate = new Date(now.getTime() + 1 * 60 * 60 * 1000);
+  if (scheduledTime < minScheduleDate) {
+    return { success: false, message: '快手定时发布时间必须在当前时间1小时之后' };
   }
 
-  const maxScheduleDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const maxScheduleDate = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
   if (scheduledTime > maxScheduleDate) {
-    return { success: false, message: '快手定时发布最多支持7天' };
+    return { success: false, message: '快手定时发布最多支持14天' };
   }
 
   try {
@@ -52,8 +53,23 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
       const dateStr = `${year}-${month}-${day} ${hours}:${minutes}`;
 
       await datePicker.click();
-      await datePicker.fill(dateStr);
-      await page.keyboard.press('Enter');
+      await page.keyboard.press('Control+KeyA');
+      await page.keyboard.type(dateStr);
+      await page.waitForTimeout(800);
+
+      const pickerOk = page.locator('.ant-picker-ok button, .ant-picker-footer button').first();
+      if (await pickerOk.isVisible().catch(() => false)) {
+        await pickerOk.click();
+        logger.info('已点击日期选择器确定按钮');
+      } else {
+        const confirmBtn = page.locator(UPLOAD_SELECTORS.scheduleConfirmBtn).first();
+        if (await confirmBtn.isVisible().catch(() => false)) {
+          await confirmBtn.click();
+          logger.info('已点击定时发布确定按钮');
+        } else {
+          await page.keyboard.press('Enter');
+        }
+      }
       logger.info(`定时发布时间已设置: ${dateStr}`);
     }
 

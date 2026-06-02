@@ -7,7 +7,7 @@ import { Logger } from '../../core/Logger';
 import { KUAISHOU_URLS } from './selectors';
 import { getCookiePath, saveCookie } from './cookie';
 import type { UploadContext, UploadResult } from '../base/types';
-import { EmbeddedRiskControl, PageRiskControl } from '../base/RiskControl';
+import { EmbeddedRiskControl, PageRiskControl, normalizeRiskTags } from '../base/RiskControl';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
 import type { IBrowserLauncher, BrowserConfig } from '../../services/types';
@@ -135,6 +135,11 @@ function optionSummary(ctx: UploadContext): string {
 
 function shouldDebugSteps(ctx: UploadContext): boolean {
   return ctx.debugSteps === true && process.env.NODE_ENV !== 'production';
+}
+
+function shouldKeepBrowserOnPublishFailure(): boolean {
+  return process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === '1'
+    || process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === 'true';
 }
 
 function errorMessage(error: unknown): string {
@@ -345,6 +350,8 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
   const { videoPath, title, description, tags, accountId } = ctx;
   logger.info('使用账号独立弹窗执行快手发布任务');
   let publishSucceeded = false;
+  let failureMessage = '';
+  let debugWebContents: WebContents | undefined;
 
   try {
     if (browserManager.hasTab(accountId) && !browserManager.hasStandaloneTab(accountId)) {
@@ -362,6 +369,7 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     browserManager.switchTab(accountId);
 
     const wc = view.webContents;
+    debugWebContents = wc;
     await runEmbeddedDebugStep(wc, ctx, '加载快手发布页', async () => {
       if (!wc.getURL().includes('/article/publish/video')) {
         await wc.loadURL(KUAISHOU_URLS.upload);
@@ -372,6 +380,7 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
 
     const isOnUploadPage = wc.getURL().includes('/article/publish/video');
     if (!isOnUploadPage) {
+      failureMessage = '账号浏览器弹窗未进入快手发布页，请先完成账号登录';
       return { success: false, message: '账号浏览器弹窗未进入快手发布页，请先完成账号登录' };
     }
 
@@ -390,7 +399,8 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
       waitForEmbeddedUploadComplete(wc, 180000)
     ));
     if (!uploadComplete.success) {
-      return { success: false, message: uploadComplete.message || '视频上传失败' };
+      failureMessage = uploadComplete.message || '视频上传失败';
+      return { success: false, message: failureMessage };
     }
 
     await runEmbeddedDebugStep(wc, ctx, '设置封面', async () => {
@@ -400,22 +410,31 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
       await applyEmbeddedPublishOptions(wc, ctx);
     });
 
-    const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => (
-      clickEmbeddedPublish(wc, 30000)
-    ));
+    const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
+      logger.info('所有元素设置完成，等待10秒后发布...');
+      await sleep(10000);
+      return clickEmbeddedPublish(wc, 30000);
+    });
     if (publishState === 'success') {
       publishSucceeded = true;
       logger.info('账号浏览器弹窗快手发布成功');
       return { success: true, message: '视频发布成功', videoId: extractVideoId(wc.getURL()) };
     }
 
-    return { success: false, message: publishState === 'failed' ? '视频发布失败' : '视频发布超时' };
+    failureMessage = publishState === 'failed' ? '视频发布失败' : '视频发布超时';
+    return { success: false, message: failureMessage };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    failureMessage = message;
     logger.error(`账号浏览器弹窗发布过程出错: ${message}`);
     return { success: false, message: `账号浏览器弹窗发布过程出错: ${message}` };
   } finally {
-    if (browserManager.hasStandaloneTab(accountId)) {
+    if (!publishSucceeded && debugWebContents && !debugWebContents.isDestroyed()) {
+      await logEmbeddedPublishDiagnostics(debugWebContents, failureMessage || '未知失败原因');
+    }
+    if (!publishSucceeded && shouldKeepBrowserOnPublishFailure()) {
+      logger.warn(`已保留快手发布失败浏览器现场: accountId=${accountId} reason=${failureMessage || '未知失败原因'}`);
+    } else if (browserManager.hasStandaloneTab(accountId)) {
       await browserManager.closeTab(accountId).catch((closeError) => {
         const reason = publishSucceeded ? '成功' : '失败';
         logger.warn(`关闭快手发布${reason}弹窗失败: ${closeError}`);
@@ -743,6 +762,42 @@ async function getEmbeddedUploadDiagnostics(wc: WebContents): Promise<string> {
   return `url=${diagnostic.url || wc.getURL()}, title=${diagnostic.title || ''}, ready=${diagnostic.ready || ''}, fileInputs=${diagnostic.fileInputCount ?? 0}, uploadNodes=${diagnostic.uploadClassCount ?? 0}, buttons=${(diagnostic.buttons || []).join('|')}`;
 }
 
+async function logEmbeddedPublishDiagnostics(wc: WebContents, reason: string): Promise<void> {
+  const diagnostic = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const textOf = (el) => (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
+      const visibleTexts = Array.from(document.querySelectorAll('button, [role="button"], label, .ant-select, .ant-radio-wrapper, .ant-checkbox-wrapper, [role="switch"], [class*="edit-form-item"]'))
+        .filter((el) => el instanceof HTMLElement && isVisible(el))
+        .map(textOf)
+        .filter(Boolean)
+        .slice(0, 40);
+      const sectionLabels = ['作者声明', '查看权限', '发布时间', '互动设置', '作品描述', '封面设置', '添加地点'];
+      const sections = {};
+      for (const label of sectionLabels) {
+        const node = Array.from(document.querySelectorAll('label, span, div, p'))
+          .find((el) => el instanceof HTMLElement && isVisible(el) && textOf(el).includes(label));
+        const container = node?.closest?.('[class*="edit-form-item"], [class*="form-item"], .ant-form-item') || node?.parentElement;
+        sections[label] = container ? textOf(container).slice(0, 500) : '';
+      }
+      return {
+        url: location.href,
+        title: document.title,
+        ready: document.readyState,
+        bodyLength: document.body?.innerText?.length || 0,
+        visibleTexts,
+        sections,
+      };
+    })()
+  `, true).catch((error) => ({ error: error instanceof Error ? error.message : String(error), url: wc.getURL() })) as unknown;
+
+  logger.warn(`[KuaishouDebug] 发布失败页面诊断: reason=${reason} data=${JSON.stringify(diagnostic)}`);
+}
+
 async function closeEmbeddedGuide(wc: WebContents): Promise<void> {
   await wc.executeJavaScript(`
     (() => {
@@ -905,10 +960,7 @@ async function fillEmbeddedDescriptionAndTags(
   logger.info('在内嵌浏览器中填写快手视频标题、描述和话题...');
 
   const titleText = (title || '未命名视频').trim();
-  const normalizedTags = (tags ?? [])
-    .map((tag) => tag.trim().replace(/^#+/, ''))
-    .filter(Boolean)
-    .slice(0, 3);
+  const normalizedTags = normalizeRiskTags(tags, 4);
   const descriptionText = description?.trim() ?? '';
   const riskControl = new EmbeddedRiskControl(wc);
 
@@ -933,15 +985,15 @@ async function fillEmbeddedDescriptionAndTags(
   }, descContent);
 
   if (!descSet) {
-    throw new Error('未找到快手作品描述输入框');
+    throw new Error('未找到快手作品描述框');
   }
 
   await riskControl.humanizedAppendTags(normalizedTags, {
     newlineBeforeFirst: descContent.length > 0,
+    maxTags: 4,
   });
-
   for (const tag of normalizedTags) {
-    logger.info(`已映射快手话题: #${tag}`);
+    logger.info(`快手话题已回车确认: #${tag}`);
   }
 }
 
@@ -1061,10 +1113,12 @@ async function selectEmbeddedLocationSuggestion(wc: WebContents, locationText: s
 
 async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext): Promise<void> {
   logger.info(`在内嵌浏览器中设置快手发布选项: ${optionSummary(ctx)}`);
+  const riskControl = new EmbeddedRiskControl(wc);
 
   if (ctx.location) {
     const mapped = await setEmbeddedLocation(wc, ctx.location);
     if (!mapped) throw new Error('未映射快手添加地点');
+    await riskControl.randomActionDelay();
   }
 
   if (ctx.declaration !== undefined) {
@@ -1079,6 +1133,7 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
       declarationPatterns(ctx.declaration),
     );
     if (ctx.declaration && !mapped) throw new Error('未映射快手作者声明');
+    await riskControl.randomActionDelay();
   }
 
   if (ctx.visibility) {
@@ -1088,6 +1143,7 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
       visibilityPatterns(ctx.visibility),
     );
     if (!mapped) throw new Error('未映射快手查看权限');
+    await riskControl.randomActionDelay();
   }
 
   const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
@@ -1099,16 +1155,20 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
       || await clickEmbeddedText(wc, [/立即发布/]);
     if (!mapped) logger.warn('未确认快手发布时间为立即发布，可能保持平台默认立即发布');
   }
+  await riskControl.randomActionDelay();
 
   if (!(await setEmbeddedSwitchByText(wc, [/允许别人跟我同拍/, /允许别人跟我同框/, /允许同拍/, /允许同框/, /同拍/, /同框/], ctx.allowSameFrame))) {
     throw new Error('未映射快手互动设置: 允许别人跟我同拍');
   }
+  await riskControl.randomActionDelay();
   if (!(await setEmbeddedSwitchByText(wc, [/允许下载此作品/, /允许下载/, /下载此作品/], ctx.allowDownload))) {
     throw new Error('未映射快手互动设置: 允许下载此作品');
   }
+  await riskControl.randomActionDelay();
   if (!(await setEmbeddedSwitchByText(wc, [/作品展示在同城页/, /同城页/, /同城/], ctx.showInCity))) {
     throw new Error('未映射快手互动设置: 作品展示在同城页');
   }
+  await riskControl.randomActionDelay();
 }
 
 async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): Promise<boolean> {
@@ -1153,19 +1213,33 @@ async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): P
   }
 
   await wc.insertText(scheduleTime);
+  await sleep(800);
   await wc.executeJavaScript(`
     (() => {
-      const active = document.activeElement;
-      if (active instanceof HTMLInputElement) {
-        const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        valueSetter?.call(active, active.value);
-        active.dispatchEvent(new Event('input', { bubbles: true }));
-        active.dispatchEvent(new Event('change', { bubbles: true }));
-        active.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const okBtn = Array.from(document.querySelectorAll('.ant-picker-ok button, .ant-picker-footer button'))
+        .find((el) => isVisible(el));
+      if (okBtn instanceof HTMLElement) {
+        okBtn.click();
+        return true;
       }
+      const confirmBtn = Array.from(document.querySelectorAll('button, span, [role="button"]'))
+        .find((el) => {
+          if (!isVisible(el)) return false;
+          const text = (el.innerText || el.textContent || '').trim();
+          return /^确定$|^确认$|^完成$/.test(text);
+        });
+      if (confirmBtn instanceof HTMLElement) {
+        confirmBtn.click();
+        return true;
+      }
+      return false;
     })()
   `, true).catch(() => {});
-  await clickEmbeddedText(wc, [/^确定$/, /^确认$/, /^完成$/]);
   return true;
 }
 
@@ -1719,10 +1793,13 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
   const launched = await launchPatchrightContext(ctx, userDataDir, browserMode, headless, slowMo);
   const { context } = launched;
   context.setDefaultNavigationTimeout(120000);
+  let page: Page | undefined;
+  let uploadSucceeded = false;
+  let failureMessage = '';
 
   try {
     const allPages = context.pages();
-    const page = allPages.length > 0 ? allPages[0] : await context.newPage();
+    page = allPages.length > 0 ? allPages[0] : await context.newPage();
 
     logger.info('导航到快手上传页...');
     await page.goto(KUAISHOU_URLS.upload, { waitUntil: 'domcontentloaded' });
@@ -1734,7 +1811,8 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
       logger.info('页面未跳转到上传页，等待用户手动登录...');
       const loginCompleted = await waitForUserLogin(page, 300000);
       if (!loginCompleted) {
-        return { success: false, message: '等待用户登录超时（5分钟）' };
+        failureMessage = '等待用户登录超时（5分钟）';
+        return { success: false, message: failureMessage };
       }
       logger.info('用户登录成功，继续上传');
       await page.goto(KUAISHOU_URLS.upload, { waitUntil: 'domcontentloaded' });
@@ -1744,11 +1822,25 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
     await saveCookie(context, getCookiePath(accountId));
     logger.info('Cookie 已保存');
 
-    return await doUpload(page, ctx);
+    const result = await doUpload(page, ctx);
+    uploadSucceeded = result.success;
+    if (!result.success) {
+      failureMessage = result.message;
+      await logPagePublishDiagnostics(page, failureMessage);
+    }
+    return result;
   } catch (error) {
-    return { success: false, message: `上传过程出错: ${error}` };
+    failureMessage = `上传过程出错: ${error}`;
+    if (page) {
+      await logPagePublishDiagnostics(page, failureMessage);
+    }
+    return { success: false, message: failureMessage };
   } finally {
-    await launched.close().catch(() => {});
+    if (!uploadSucceeded && !headless && shouldKeepBrowserOnPublishFailure()) {
+      logger.warn(`已保留快手发布失败浏览器现场: accountId=${accountId} reason=${failureMessage || '未知失败原因'}`);
+    } else {
+      await launched.close().catch(() => {});
+    }
   }
 }
 
@@ -1845,6 +1937,9 @@ async function doUpload(
 
   // 点击发布
   return await runPageDebugStep(page, ctx, '提交发布', async () => {
+    logger.info('所有元素设置完成，等待10秒后发布...');
+    await page.waitForTimeout(10000);
+
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const publishBtn = page.getByText('发布', { exact: true }).first();
@@ -2096,10 +2191,12 @@ async function selectPageLocationSuggestion(page: Page, locationText: string): P
 
 async function applyKuaishouPublishOptions(page: Page, ctx: UploadContext): Promise<void> {
   logger.info(`设置快手发布选项: ${optionSummary(ctx)}`);
+  const riskControl = new PageRiskControl(page);
 
   if (ctx.location) {
     const mapped = await setKuaishouLocation(page, ctx.location);
     if (!mapped) throw new Error('未映射快手添加地点');
+    await riskControl.randomActionDelay();
   }
 
   if (ctx.declaration !== undefined) {
@@ -2114,6 +2211,7 @@ async function applyKuaishouPublishOptions(page: Page, ctx: UploadContext): Prom
       declarationPatterns(ctx.declaration),
     );
     if (ctx.declaration && !mapped) throw new Error('未映射快手作者声明');
+    await riskControl.randomActionDelay();
   }
 
   if (ctx.visibility) {
@@ -2123,6 +2221,7 @@ async function applyKuaishouPublishOptions(page: Page, ctx: UploadContext): Prom
       visibilityPatterns(ctx.visibility),
     );
     if (!mapped) throw new Error('未映射快手查看权限');
+    await riskControl.randomActionDelay();
   }
 
   const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
@@ -2134,16 +2233,20 @@ async function applyKuaishouPublishOptions(page: Page, ctx: UploadContext): Prom
       || await clickPageText(page, [/立即发布/]);
     if (!mapped) logger.warn('未确认快手发布时间为立即发布，可能保持平台默认立即发布');
   }
+  await riskControl.randomActionDelay();
 
   if (!(await setSwitchByText(page, [/允许别人跟我同拍/, /允许别人跟我同框/, /允许同拍/, /允许同框/, /同拍/, /同框/], ctx.allowSameFrame))) {
     throw new Error('未映射快手互动设置: 允许别人跟我同拍');
   }
+  await riskControl.randomActionDelay();
   if (!(await setSwitchByText(page, [/允许下载此作品/, /允许下载/, /下载此作品/], ctx.allowDownload))) {
     throw new Error('未映射快手互动设置: 允许下载此作品');
   }
+  await riskControl.randomActionDelay();
   if (!(await setSwitchByText(page, [/作品展示在同城页/, /同城页/, /同城/], ctx.showInCity))) {
     throw new Error('未映射快手互动设置: 作品展示在同城页');
   }
+  await riskControl.randomActionDelay();
 }
 
 async function setScheduleTime(page: Page, scheduleTime: string): Promise<boolean> {
@@ -2160,11 +2263,15 @@ async function setScheduleTime(page: Page, scheduleTime: string): Promise<boolea
     await input.waitFor({ state: 'visible', timeout: 10000 });
     await input.click();
     await page.keyboard.press('Control+KeyA');
-    await input.fill(scheduleTime).catch(async () => {
-      await page.keyboard.type(scheduleTime);
-    });
-    await page.keyboard.press('Enter');
-    await clickPageText(page, [/^确定$/, /^确认$/, /^完成$/]);
+    await page.keyboard.type(scheduleTime);
+    await page.waitForTimeout(800);
+
+    const pickerOk = page.locator('.ant-picker-ok button, .ant-picker-footer button').first();
+    if (await pickerOk.isVisible().catch(() => false)) {
+      await pickerOk.click();
+    } else {
+      await clickPageText(page, [/^确定$/, /^确认$/, /^完成$/]);
+    }
     await page.waitForTimeout(800);
     return true;
   } catch (error) {
@@ -2186,6 +2293,42 @@ async function clickPageText(page: Page, patterns: TextPattern[]): Promise<boole
     }
   }
   return false;
+}
+
+async function logPagePublishDiagnostics(page: Page, reason: string): Promise<void> {
+  const diagnostic = await page.evaluate(() => {
+    const win = globalThis as any;
+    const doc = win.document;
+    const isVisible = (el: any) => {
+      const rect = el.getBoundingClientRect();
+      const style = win.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const textOf = (el: any) => (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ');
+    const visibleTexts = (Array.from(doc.querySelectorAll('button, [role="button"], label, .ant-select, .ant-radio-wrapper, .ant-checkbox-wrapper, [role="switch"], [class*="edit-form-item"]')) as any[])
+      .filter((el: any) => isVisible(el))
+      .map(textOf)
+      .filter(Boolean)
+      .slice(0, 40);
+    const sectionLabels = ['作者声明', '查看权限', '发布时间', '互动设置', '作品描述', '封面设置', '添加地点'];
+    const sections: Record<string, string> = {};
+    for (const label of sectionLabels) {
+      const node = (Array.from(doc.querySelectorAll('label, span, div, p')) as any[])
+        .find((el: any) => isVisible(el) && textOf(el).includes(label));
+      const container = node?.closest?.('[class*="edit-form-item"], [class*="form-item"], .ant-form-item') || node?.parentElement;
+      sections[label] = container ? textOf(container).slice(0, 500) : '';
+    }
+    return {
+      url: win.location.href,
+      title: doc.title,
+      ready: doc.readyState,
+      bodyLength: doc.body?.innerText?.length || 0,
+      visibleTexts,
+      sections,
+    };
+  }).catch((error) => ({ error: error instanceof Error ? error.message : String(error), url: page.url() })) as unknown;
+
+  logger.warn(`[KuaishouDebug] 发布失败页面诊断: reason=${reason} data=${JSON.stringify(diagnostic)}`);
 }
 
 async function selectAntSelectNearLabel(
@@ -2472,10 +2615,7 @@ async function fillDescriptionAndTags(
 ): Promise<void> {
   logger.info('填写视频标题、描述和话题...');
   const titleText = (title || '未命名视频').trim();
-  const normalizedTags = (tags ?? [])
-    .map((tag) => tag.trim().replace(/^#+/, ''))
-    .filter(Boolean)
-    .slice(0, 3);
+  const normalizedTags = normalizeRiskTags(tags, 4);
   const descriptionText = description?.trim() ?? '';
   const riskControl = new PageRiskControl(page);
 
@@ -2500,15 +2640,15 @@ async function fillDescriptionAndTags(
   }, descContent);
 
   if (!descSet) {
-    throw new Error('未找到快手作品描述输入框');
+    throw new Error('未找到快手作品描述框');
   }
 
   await riskControl.humanizedAppendTags(normalizedTags, {
     newlineBeforeFirst: descContent.length > 0,
+    maxTags: 4,
   });
-
   for (const tag of normalizedTags) {
-    logger.info(`已映射快手话题: #${tag}`);
+    logger.info(`快手话题已回车确认: #${tag}`);
   }
 }
 

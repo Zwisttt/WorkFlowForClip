@@ -33,12 +33,26 @@ export async function fillVideoMetadata(
   if (tags && tags.length > 0) {
     const topicInput = page.locator(UPLOAD_SELECTORS.topicInput).first();
     if (await topicInput.isVisible().catch(() => false)) {
-      for (const tag of tags) {
+      for (const rawTag of tags.slice(0, 4)) {
+        const cleanTag = rawTag.trim().replace(/^#+/, '');
+        if (!cleanTag) continue;
+
         await topicInput.click();
-        await topicInput.fill(`#${tag}`);
+        await page.keyboard.type('#');
+        await page.keyboard.type(' ');
+        await page.waitForTimeout(800);
+        await page.keyboard.type(cleanTag);
+        await page.waitForTimeout(1500);
+
+        const suggestion = page.locator(UPLOAD_SELECTORS.topicSuggestion).first();
+        if (await suggestion.isVisible().catch(() => false)) {
+          await suggestion.click();
+          logger.info(`话题已选择(建议): ${cleanTag}`);
+        } else {
+          logger.info(`话题已添加(文本): ${cleanTag}`);
+        }
+
         await page.waitForTimeout(500);
-        await page.keyboard.press('Enter');
-        logger.info(`话题已添加: ${tag}`);
       }
     }
   }
