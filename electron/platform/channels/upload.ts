@@ -19,6 +19,7 @@ import {
   applyLocation,
   applyOriginalStatement,
   applySchedule,
+  formatChannelsScheduleDateTime,
   formatChannelsShortTitle,
   setShortTitle,
 } from './publish';
@@ -179,6 +180,60 @@ async function waitForUploadComplete(page: Page, maxWaitMs: number = 180000): Pr
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function sendEmbeddedMouseClick(wc: WebContents, x: number, y: number): void {
+  const roundedX = Math.round(x);
+  const roundedY = Math.round(y);
+  wc.sendInputEvent({ type: 'mouseMove', x: roundedX, y: roundedY });
+  wc.sendInputEvent({
+    type: 'mouseDown',
+    x: roundedX,
+    y: roundedY,
+    button: 'left',
+    clickCount: 1,
+  });
+  wc.sendInputEvent({
+    type: 'mouseUp',
+    x: roundedX,
+    y: roundedY,
+    button: 'left',
+    clickCount: 1,
+  });
+}
+
+function sendEmbeddedKeyPress(wc: WebContents, keyCode: string): void {
+  wc.sendInputEvent({ type: 'keyDown', keyCode });
+  wc.sendInputEvent({ type: 'keyUp', keyCode });
+}
+
+async function executeInEmbeddedFrames<T>(
+  wc: WebContents,
+  script: string,
+  stopWhen?: (result: T) => boolean,
+): Promise<Array<{ url: string; result: T }>> {
+  const mainFrame = wc.mainFrame;
+  if (!mainFrame) {
+    try {
+      const result = await wc.executeJavaScript(script, true) as T;
+      return [{ url: '', result }];
+    } catch {
+      return [];
+    }
+  }
+
+  const frames = Array.from(new Set([mainFrame, ...mainFrame.framesInSubtree]));
+  const results: Array<{ url: string; result: T }> = [];
+  for (const frame of frames) {
+    try {
+      const result = await frame.executeJavaScript(script, true) as T;
+      results.push({ url: frame.url, result });
+      if (stopWhen?.(result)) break;
+    } catch {
+      // Frames may be cross-origin or replaced while the Wujie page updates.
+    }
+  }
+  return results;
 }
 
 export function shouldKeepBrowserOnPublishFailure(failureMessage: string): boolean {
@@ -1233,108 +1288,418 @@ export async function applyEmbeddedOriginalStatement(wc: WebContents, ctx: Uploa
   return true;
 }
 
-function formatScheduleDateTime(value?: string | Date | null): {
-  dateTimeText: string;
-  dateText: string;
-  timeText: string;
-} | null {
+export function formatEmbeddedScheduleDateTime(value?: string | Date | null) {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  const pad = (num: number) => String(num).padStart(2, '0');
-  const dateText = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-  const timeText = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  return {
-    dateTimeText: `${dateText} ${timeText}`,
-    dateText,
-    timeText,
-  };
+  return formatChannelsScheduleDateTime(date);
 }
 
-async function applyEmbeddedSchedule(wc: WebContents, scheduledAt?: string | Date | null): Promise<boolean> {
-  const formatted = formatScheduleDateTime(scheduledAt);
+export async function applyEmbeddedSchedule(wc: WebContents, scheduledAt?: string | Date | null): Promise<boolean> {
+  const formatted = formatEmbeddedScheduleDateTime(scheduledAt);
   if (!formatted) {
     return true;
   }
 
-  let result = await wc.executeJavaScript(`
+  const verifyScheduleValues = async () => wc.executeJavaScript(`
     ((payload) => {
       ${EMBEDDED_DOM_HELPERS}
-      const setNativeValue = (el, value) => {
-        if (!el) return false;
-        const view = el.ownerDocument?.defaultView || window;
-        const proto = Object.getPrototypeOf(el);
-        const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
-        el.focus();
-        if (descriptor && typeof descriptor.set === 'function') {
-          descriptor.set.call(el, value);
-        } else {
-          el.value = value;
-        }
-        el.dispatchEvent(new view.Event('input', { bubbles: true }));
-        el.dispatchEvent(new view.Event('change', { bubbles: true }));
-        el.dispatchEvent(new view.KeyboardEvent('keyup', { bubbles: true }));
-        return true;
-      };
-
-      const scheduleLabels = queryAll('label, span, div').filter((el) => {
-        if (!isVisible(el)) return false;
-        const text = textOf(el);
-        return /^定时$|^定时发表$|^定时发布$/.test(text);
-      });
-      const toggled = scheduleLabels.length > 0 ? clickElement(scheduleLabels[scheduleLabels.length - 1]) : false;
-
-      const inputs = queryAll('input').filter((input) => {
-        const placeholder = input.getAttribute('placeholder') || '';
-        return /发表时间|发布时间|请选择时间|请选择日期|日期|时间/.test(placeholder);
-      });
-
-      let dateFilled = false;
-      let timeFilled = false;
-      for (const input of inputs) {
-        const placeholder = input.getAttribute('placeholder') || '';
-        if (/时间/.test(placeholder) && !/发表时间|发布时间|日期/.test(placeholder)) {
-          timeFilled = setNativeValue(input, payload.timeText) || timeFilled;
-        } else {
-          dateFilled = setNativeValue(input, payload.dateTimeText) || dateFilled;
-        }
-      }
-
-      const exactDateInput = queryAll('input[placeholder="请选择发表时间"], input[placeholder*="发表时间"], input[placeholder*="发布时间"]')
-        .find((input) => isVisible(input)) || inputs[0];
-      if (exactDateInput && !dateFilled) {
-        dateFilled = setNativeValue(exactDateInput, payload.dateTimeText);
-      }
-
+      const normalize = (value) => String(value || '').replace(/[^\\d]/g, '');
+      const mainInput = queryAll(
+        'input[placeholder="请选择发表时间"], input[placeholder*="发表时间"], input[placeholder*="发布时间"]'
+      ).find((input) => isVisible(input));
+      const mainValue = mainInput?.value || mainInput?.getAttribute('value') || '';
+      const normalized = normalize(mainValue);
+      const expectedDate = normalize(payload.dateText);
+      const expectedTime = normalize(payload.timeText);
       return {
-        toggled,
-        inputCount: inputs.length,
-        dateFilled,
-        timeFilled,
+        verified: normalized.includes(expectedDate) && normalized.includes(expectedTime),
+        mainValue,
       };
     })(${JSON.stringify(formatted)})
   `, true).catch((error) => ({
-    toggled: false,
-    inputCount: 0,
-    dateFilled: false,
-    timeFilled: false,
+    verified: false,
+    mainValue: '',
     error: String(error),
-  })) as {
-    toggled: boolean;
-    inputCount: number;
-    dateFilled: boolean;
-    timeFilled: boolean;
+  })) as Promise<{
+    verified: boolean;
+    mainValue: string;
     error?: string;
-  };
+  }>;
 
-  if (!result.dateFilled) {
-    await sleep(800);
-    const retry = await wc.executeJavaScript(`
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    let opened = await wc.executeJavaScript(`
+      ((payload) => {
+        ${EMBEDDED_DOM_HELPERS}
+        const findMainInput = () => queryAll(
+          'input[placeholder="请选择发表时间"], input[placeholder*="发表时间"], input[placeholder*="发布时间"]'
+        ).find((input) => isVisible(input));
+        let mainInput = findMainInput();
+        let toggled = false;
+        if (!mainInput) {
+          const scheduleLabels = queryAll('label, span, div').filter((el) => {
+            if (!isVisible(el)) return false;
+            return /^定时$|^定时发表$|^定时发布$/.test(textOf(el));
+          });
+          toggled = scheduleLabels.length > 0
+            ? clickElement(scheduleLabels[scheduleLabels.length - 1])
+            : false;
+          mainInput = findMainInput();
+        }
+        if (mainInput) {
+          mainInput.scrollIntoView?.({ block: 'center', inline: 'center' });
+          mainInput.focus?.();
+        }
+        const rect = mainInput?.getBoundingClientRect?.();
+        let x = rect ? rect.left + rect.width / 2 : 0;
+        let y = rect ? rect.top + rect.height / 2 : 0;
+        let ownerWindow = mainInput?.ownerDocument?.defaultView;
+        while (ownerWindow && ownerWindow !== window) {
+          const frameElement = ownerWindow.frameElement;
+          if (!frameElement) break;
+          const frameRect = frameElement.getBoundingClientRect();
+          x += frameRect.left;
+          y += frameRect.top;
+          ownerWindow = frameElement.ownerDocument?.defaultView;
+        }
+        return {
+          toggled,
+          opened: !!mainInput && !!rect,
+          x,
+          y,
+          mainValue: mainInput?.value || '',
+          placeholder: mainInput?.getAttribute('placeholder') || '',
+        };
+      })(${JSON.stringify(formatted)})
+    `, true).catch((error) => ({
+      toggled: false,
+      opened: false,
+      x: 0,
+      y: 0,
+      mainValue: '',
+      placeholder: '',
+      error: String(error),
+    })) as {
+      toggled: boolean;
+      opened: boolean;
+      x: number;
+      y: number;
+      mainValue: string;
+      placeholder: string;
+      error?: string;
+    };
+
+    if (!opened.opened && opened.toggled) {
+      await sleep(500);
+      const reopened = await wc.executeJavaScript(`
+        (() => {
+          ${EMBEDDED_DOM_HELPERS}
+          const mainInput = queryAll(
+            'input[placeholder="请选择发表时间"], input[placeholder*="发表时间"], input[placeholder*="发布时间"]'
+          ).find((input) => isVisible(input));
+          if (mainInput) {
+            mainInput.scrollIntoView?.({ block: 'center', inline: 'center' });
+            mainInput.focus?.();
+          }
+          const rect = mainInput?.getBoundingClientRect?.();
+          let x = rect ? rect.left + rect.width / 2 : 0;
+          let y = rect ? rect.top + rect.height / 2 : 0;
+          let ownerWindow = mainInput?.ownerDocument?.defaultView;
+          while (ownerWindow && ownerWindow !== window) {
+            const frameElement = ownerWindow.frameElement;
+            if (!frameElement) break;
+            const frameRect = frameElement.getBoundingClientRect();
+            x += frameRect.left;
+            y += frameRect.top;
+            ownerWindow = frameElement.ownerDocument?.defaultView;
+          }
+          return {
+            opened: !!mainInput && !!rect,
+            x,
+            y,
+            mainValue: mainInput?.value || '',
+            placeholder: mainInput?.getAttribute('placeholder') || '',
+          };
+        })()
+      `, true).catch((error) => ({
+        opened: false,
+        x: 0,
+        y: 0,
+        mainValue: '',
+        placeholder: '',
+        error: String(error),
+      })) as {
+        opened: boolean;
+        x: number;
+        y: number;
+        mainValue: string;
+        placeholder: string;
+        error?: string;
+      };
+      opened = {
+        ...opened,
+        ...reopened,
+        toggled: true,
+        error: opened.error || reopened.error,
+      };
+    }
+
+    if (!opened.opened) {
+      logger.warn(`视频号账号浏览器设置定时失败: 未能打开日期选择器 ${opened.error || ''}`);
+      return false;
+    }
+    sendEmbeddedMouseClick(wc, opened.x, opened.y);
+
+    let calendarReady = false;
+    let calendarDebug: string[] = [];
+    for (let waitAttempt = 1; waitAttempt <= 10; waitAttempt += 1) {
+      await sleep(200);
+      const frameStates = await executeInEmbeddedFrames<{
+        ready: boolean;
+        tables: number;
+        days: number;
+        overlays: string[];
+      }>(wc, `
+        (() => {
+          ${EMBEDDED_DOM_HELPERS}
+          const tables = queryAll(
+            'table.weui-desktop-picker__table, table[class*="picker"], [role="grid"], [class*="calendar"]'
+          ).filter((el) => isVisible(el));
+          const days = queryAll(
+            'table.weui-desktop-picker__table a, [role="gridcell"], [class*="calendar"] a, [class*="picker"] a'
+          ).filter((el) => isVisible(el));
+          const overlays = queryAll(
+            '[class*="picker"], [class*="popover"], [class*="dropdown"], [role="dialog"]'
+          ).filter((el) => isVisible(el)).slice(0, 20).map((el) => (
+            String(el.className || '') + ':' + textOf(el).slice(0, 120)
+          ));
+          return {
+            ready: tables.length > 0 || days.length >= 7,
+            tables: tables.length,
+            days: days.length,
+            overlays,
+          };
+        })()
+      `, result => result.ready);
+      calendarDebug = frameStates.map(({ url, result }) =>
+        `${url || '(main)'} tables=${result.tables} days=${result.days} overlays=${result.overlays.join('|')}`
+      );
+      if (frameStates.some(({ result }) => result.ready)) {
+        calendarReady = true;
+        break;
+      }
+    }
+    if (!calendarReady) {
+      logger.warn(
+        `视频号账号浏览器日期选择器未打开: target=${formatted.dateTimeText} `
+        + JSON.stringify(calendarDebug)
+      );
+      return false;
+    }
+
+    let datePicked = false;
+    let dateDebug: string[] = [];
+    for (let dateAttempt = 1; dateAttempt <= 3; dateAttempt += 1) {
+      const pickedFrames = await executeInEmbeddedFrames<{
+        targetFound: boolean;
+        clickedNext: boolean;
+        targetText: string;
+        targetClass: string;
+        x: number;
+        y: number;
+        debug: string[];
+      }>(wc, `
+        ((payload) => {
+          ${EMBEDDED_DOM_HELPERS}
+          const normalize = (value) => String(value || '')
+            .replace(/[年月]/g, '-')
+            .replace(/[日号]/g, '')
+            .replace(/[/.]/g, '-')
+            .replace(/\\s+/g, '');
+          const pad = (value) => String(value).padStart(2, '0');
+          const dateVariants = [
+            payload.dateText,
+            payload.dateText.replace(/-/g, '/'),
+            payload.dateText.replace(/-0/g, '-'),
+            String(payload.year) + '年' + payload.month + '月' + payload.day + '日',
+          ].map(normalize);
+          const isDisabled = (el) => {
+            const cls = [
+              String(el.className || ''),
+              String(el.closest?.('td')?.className || ''),
+              String(el.closest?.('a')?.className || ''),
+            ].join(' ');
+            return /disabled|disable/.test(cls)
+              || el.getAttribute?.('aria-disabled') === 'true';
+          };
+          const inCalendar = (el) => !!el.closest?.(
+            'table, [role="grid"], [class*="picker"], [class*="calendar"], [class*="date"]'
+          );
+          const candidates = queryAll(
+            'table.weui-desktop-picker__table a, [role="gridcell"], [class*="calendar"] a, ' +
+            '[class*="picker"] a, [data-date], [data-value]'
+          ).filter((el) => isVisible(el) && !isDisabled(el) && inCalendar(el));
+          const debug = candidates.slice(0, 80).map((el) => {
+            const attrs = [
+              el.getAttribute?.('data-date'),
+              el.getAttribute?.('data-value'),
+              el.getAttribute?.('aria-label'),
+              el.getAttribute?.('title'),
+            ].filter(Boolean).join('|');
+            return textOf(el) + ':' + attrs + ':' + String(el.className || '');
+          });
+          const exact = candidates.find((el) => {
+            const attrs = [
+              el.getAttribute?.('data-date'),
+              el.getAttribute?.('data-value'),
+              el.getAttribute?.('aria-label'),
+              el.getAttribute?.('title'),
+            ].filter(Boolean).join('|');
+            const haystack = normalize(attrs);
+            return dateVariants.some((variant) => haystack.includes(variant));
+          });
+          const dayOnly = candidates.find((el) => {
+            if (textOf(el) !== String(payload.day)) return false;
+            const calendarText = textOf(el.closest?.(
+              '[class*="picker"], [class*="calendar"], table, [role="grid"]'
+            ));
+            const normalizedCalendar = normalize(calendarText);
+            return calendarText.includes(String(payload.month) + '月')
+              || calendarText.includes(pad(payload.month) + '月')
+              || normalizedCalendar.includes('-' + pad(payload.month) + '-')
+              || !/\\d{1,2}月/.test(calendarText);
+          });
+          const target = exact || dayOnly;
+          if (target) {
+            target.scrollIntoView?.({ block: 'center', inline: 'center' });
+            const rect = target.getBoundingClientRect();
+            let x = rect.left + rect.width / 2;
+            let y = rect.top + rect.height / 2;
+            let ownerWindow = target.ownerDocument?.defaultView;
+            while (ownerWindow && ownerWindow !== window) {
+              const frameElement = ownerWindow.frameElement;
+              if (!frameElement) break;
+              const frameRect = frameElement.getBoundingClientRect();
+              x += frameRect.left;
+              y += frameRect.top;
+              ownerWindow = frameElement.ownerDocument?.defaultView;
+            }
+            return {
+              targetFound: true,
+              clickedNext: false,
+              targetText: textOf(target),
+              targetClass: [
+                String(target.className || ''),
+                String(target.closest?.('td')?.className || ''),
+              ].join(' '),
+              x,
+              y,
+              debug,
+            };
+          }
+
+          const mainInput = queryAll(
+            'input[placeholder="请选择发表时间"], input[placeholder*="发表时间"], input[placeholder*="发布时间"]'
+          ).find((input) => isVisible(input));
+          const currentMatch = String(mainInput?.value || '').match(/(\\d{4})[-/]?(\\d{1,2})/);
+          const currentMonthKey = currentMatch
+            ? Number(currentMatch[1]) * 12 + Number(currentMatch[2])
+            : 0;
+          const targetMonthKey = payload.year * 12 + payload.month;
+          const nextButtons = queryAll('button, [role="button"]').filter((el) => {
+            if (!isVisible(el) || isDisabled(el) || !inCalendar(el)) return false;
+            const signature = [
+              textOf(el),
+              el.getAttribute?.('aria-label'),
+              el.getAttribute?.('title'),
+              String(el.className || ''),
+            ].filter(Boolean).join(' ');
+            return /下一|next|right|icon__right|后一个月/i.test(signature);
+          });
+          const clickedNext = targetMonthKey > currentMonthKey && nextButtons.length > 0
+            ? clickElement(nextButtons[nextButtons.length - 1])
+            : false;
+          return {
+            targetFound: false,
+            clickedNext,
+            targetText: '',
+            targetClass: '',
+            x: 0,
+            y: 0,
+            debug,
+          };
+        })(${JSON.stringify({
+          ...formatted,
+          year: Number(formatted.dateText.slice(0, 4)),
+          month: Number(formatted.dateText.slice(5, 7)),
+          day: Number(formatted.dateText.slice(8, 10)),
+        })})
+      `, result => result.targetFound || result.clickedNext);
+      const pickedFrame = pickedFrames.find(({ result }) => result.targetFound)
+        || pickedFrames.find(({ result }) => result.clickedNext);
+      const picked: {
+        targetFound: boolean;
+        clickedNext: boolean;
+        targetText: string;
+        targetClass: string;
+        x: number;
+        y: number;
+        debug: string[];
+      } = pickedFrame?.result || {
+        targetFound: false,
+        clickedNext: false,
+        targetText: '',
+        targetClass: '',
+        x: 0,
+        y: 0,
+        debug: ['no accessible date picker frame'],
+      };
+
+      dateDebug = pickedFrames.flatMap(({ url, result }) =>
+        result.debug.map(line => `${url || '(main)'} ${line}`)
+      );
+      if (dateDebug.length === 0) {
+        dateDebug = picked.debug;
+      }
+      if (picked.targetFound) {
+        sendEmbeddedMouseClick(wc, picked.x, picked.y);
+        await sleep(400);
+        logger.info(
+          `视频号账号浏览器已选择目标日期 ${formatted.dateText}: `
+          + `frame=${pickedFrame?.url || '(main)'} text=${picked.targetText} `
+          + `class=${picked.targetClass} method=physical`
+        );
+        datePicked = true;
+        break;
+      }
+      if (!picked.clickedNext) break;
+      await sleep(400);
+    }
+
+    if (!datePicked) {
+      logger.warn(
+        `视频号账号浏览器未找到目标日期 ${formatted.dateText}: `
+        + JSON.stringify(dateDebug.slice(0, 30))
+      );
+      return false;
+    }
+    await sleep(300);
+
+    const submittedFrames = await executeInEmbeddedFrames<{
+      timeFilled: boolean;
+      timeValue: string;
+      confirmText: string;
+      confirmFound: boolean;
+      confirmX: number;
+      confirmY: number;
+      error?: string;
+    }>(wc, `
       ((payload) => {
         ${EMBEDDED_DOM_HELPERS}
         const setNativeValue = (el, value) => {
           if (!el) return false;
           const view = el.ownerDocument?.defaultView || window;
+          const previousValue = el.value;
           const proto = Object.getPrototypeOf(el);
           const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
           el.focus();
@@ -1343,56 +1708,106 @@ async function applyEmbeddedSchedule(wc: WebContents, scheduledAt?: string | Dat
           } else {
             el.value = value;
           }
-          el.dispatchEvent(new view.Event('input', { bubbles: true }));
+          if (el._valueTracker) el._valueTracker.setValue(previousValue);
+          el.dispatchEvent(new view.InputEvent('input', {
+            bubbles: true,
+            inputType: 'insertText',
+            data: value,
+          }));
           el.dispatchEvent(new view.Event('change', { bubbles: true }));
-          el.dispatchEvent(new view.KeyboardEvent('keyup', { bubbles: true }));
           return true;
         };
-        const inputs = queryAll('input').filter((input) => {
+        const timeInput = queryAll('input').find((input) => {
+          if (!isVisible(input)) return false;
           const placeholder = input.getAttribute('placeholder') || '';
-          return /发表时间|发布时间|请选择时间|请选择日期|日期|时间/.test(placeholder);
+          return /请选择时间|^时间$/.test(placeholder);
         });
-        let dateFilled = false;
-        let timeFilled = false;
-        for (const input of inputs) {
-          const placeholder = input.getAttribute('placeholder') || '';
-          if (/时间/.test(placeholder) && !/发表时间|发布时间|日期/.test(placeholder)) {
-            timeFilled = setNativeValue(input, payload.timeText) || timeFilled;
-          } else {
-            dateFilled = setNativeValue(input, payload.dateTimeText) || dateFilled;
+        const timeFilled = setNativeValue(timeInput, payload.timeText);
+        const pickerRoot = timeInput?.closest?.(
+          '[class*="picker"], [class*="popover"], [class*="dropdown"], [role="dialog"]'
+        );
+        const confirmButtons = queryAll('button, [role="button"], a').filter((el) => {
+          if (!isVisible(el)) return false;
+          if (!/^确定$|^完成$/.test(textOf(el))) return false;
+          return pickerRoot ? pickerRoot.contains(el) : true;
+        });
+        let confirmButton = confirmButtons[confirmButtons.length - 1];
+        if (!confirmButton) {
+          const globalConfirmButtons = queryAll('button, [role="button"], a')
+            .filter((el) => isVisible(el) && (/^确定$|^完成$/).test(textOf(el)));
+          confirmButton = globalConfirmButtons[globalConfirmButtons.length - 1];
+        }
+        let confirmX = 0;
+        let confirmY = 0;
+        if (confirmButton) {
+          confirmButton.scrollIntoView?.({ block: 'center', inline: 'center' });
+          const rect = confirmButton.getBoundingClientRect();
+          confirmX = rect.left + rect.width / 2;
+          confirmY = rect.top + rect.height / 2;
+          let ownerWindow = confirmButton.ownerDocument?.defaultView;
+          while (ownerWindow && ownerWindow !== window) {
+            const frameElement = ownerWindow.frameElement;
+            if (!frameElement) break;
+            const frameRect = frameElement.getBoundingClientRect();
+            confirmX += frameRect.left;
+            confirmY += frameRect.top;
+            ownerWindow = frameElement.ownerDocument?.defaultView;
           }
         }
-        return { inputCount: inputs.length, dateFilled, timeFilled };
+        return {
+          timeFilled,
+          timeValue: timeInput?.value || '',
+          confirmText: textOf(confirmButton),
+          confirmFound: !!confirmButton,
+          confirmX,
+          confirmY,
+        };
       })(${JSON.stringify(formatted)})
-    `, true).catch((error) => ({
-      inputCount: 0,
-      dateFilled: false,
+    `, result => result.timeFilled);
+    const submittedFrame = submittedFrames.find(({ result }) => result.timeFilled);
+    const submitted = submittedFrame?.result || {
       timeFilled: false,
-      error: String(error),
-    })) as {
-      inputCount: number;
-      dateFilled: boolean;
-      timeFilled: boolean;
-      error?: string;
+      timeValue: '',
+      confirmText: '',
+      confirmFound: false,
+      confirmX: 0,
+      confirmY: 0,
+      error: 'no accessible time picker frame',
     };
 
-    result = {
-      ...result,
-      inputCount: Math.max(result.inputCount, retry.inputCount),
-      dateFilled: result.dateFilled || retry.dateFilled,
-      timeFilled: result.timeFilled || retry.timeFilled,
-      error: result.error || retry.error,
-    };
+    if (!submitted.timeFilled) {
+      logger.warn(`视频号账号浏览器未能填写定时时间 ${formatted.timeText}: ${submitted.error || ''}`);
+      return false;
+    }
+    let commitMethod = 'enter-tab';
+    if (submitted.confirmFound) {
+      sendEmbeddedMouseClick(wc, submitted.confirmX, submitted.confirmY);
+      commitMethod = 'confirm-button';
+    } else {
+      sendEmbeddedKeyPress(wc, 'Enter');
+      await sleep(150);
+      sendEmbeddedKeyPress(wc, 'Tab');
+    }
+    await sleep(500);
+
+    const verification = await verifyScheduleValues();
+    if (verification.verified) {
+      logger.info(
+        `视频号账号浏览器已通过日期选择器设置定时发表: ${formatted.dateTimeText} `
+        + `previous=${opened.mainValue} actual=${verification.mainValue} `
+        + `commit=${commitMethod} frame=${submittedFrame?.url || '(main)'}`
+      );
+      return true;
+    }
+    logger.warn(
+      `视频号账号浏览器定时发表第${attempt}次校验失败: expected=${formatted.dateTimeText} `
+      + `previous=${opened.mainValue} actual=${verification.mainValue} `
+      + `timeValue=${submitted.timeValue} commit=${commitMethod}`
+    );
+    if (attempt < 2) await sleep(700);
   }
 
-  if (!result.toggled && result.inputCount === 0) {
-    logger.warn(`视频号账号浏览器设置定时失败: 未找到定时入口 ${result.error || ''}`);
-    return false;
-  }
-
-  logger.info(`视频号账号浏览器已设置定时发表: ${formatted.dateTimeText} toggled=${result.toggled} inputs=${result.inputCount} dateFilled=${result.dateFilled} timeFilled=${result.timeFilled}`);
-  await sleep(500);
-  return result.dateFilled;
+  return false;
 }
 
 async function waitForEmbeddedUploadComplete(wc: WebContents, maxWaitMs: number): Promise<boolean> {

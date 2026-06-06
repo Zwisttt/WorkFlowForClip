@@ -13,11 +13,13 @@ export interface TaskFilter {
   search?: string;
   limit?: number;
   offset?: number;
+  groupByContent?: boolean;
 }
 
 export interface TaskListResult {
   items: Task[];
   total: number;
+  taskTotal?: number;
   statusBreakdown?: Record<string, number>;
 }
 
@@ -78,9 +80,16 @@ const STATUS_PRIORITY: Record<TaskStatus, number> = {
   skipped: 5,
 };
 
+function timestampOf(value: string | Date | undefined): number {
+  if (!value) return 0;
+  const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 export const useTaskStore = defineStore('task', () => {
   const tasks = ref<Task[]>([]);
   const total = ref(0);
+  const taskTotal = ref(0);
   const loading = ref(false);
   const statusBreakdown = ref<Record<string, number>>({});
   const selectedIds = ref<Set<string>>(new Set());
@@ -92,6 +101,7 @@ export const useTaskStore = defineStore('task', () => {
     dateTo: undefined,
     limit: 20,
     offset: 0,
+    groupByContent: true,
   });
 
   const runningTasks = computed(() => tasks.value.filter((t) => t.status === 'running'));
@@ -103,9 +113,14 @@ export const useTaskStore = defineStore('task', () => {
   );
 
   const stats = computed(() => {
-    const sb = statusBreakdown.value;
+    const sb = Object.keys(statusBreakdown.value).length > 0
+      ? statusBreakdown.value
+      : tasks.value.reduce<Record<string, number>>((counts, task) => {
+          counts[task.status] = (counts[task.status] || 0) + 1;
+          return counts;
+        }, {});
     return {
-      total: total.value,
+      total: taskTotal.value > 0 ? taskTotal.value : total.value,
       pending: (sb['pending'] ?? 0) + (sb['scheduled'] ?? 0),
       running: sb['running'] ?? 0,
       completed: sb['completed'] ?? 0,
@@ -125,6 +140,9 @@ export const useTaskStore = defineStore('task', () => {
     const result: GroupedTask[] = [];
     for (const [, group] of map) {
       const first = group[0];
+      const newestCreatedTask = group.reduce((latest, task) =>
+        timestampOf(task.createdAt) > timestampOf(latest.createdAt) ? task : latest,
+      first);
       const accounts: AccountInfo[] = [];
       const seen = new Set<string>();
       let worstStatus: TaskStatus = 'completed';
@@ -144,10 +162,9 @@ export const useTaskStore = defineStore('task', () => {
         }
       }
 
-      const latest = group.reduce((max, t) =>
-        String(t.updatedAt) > String(max) ? t.updatedAt : max,
-        first.updatedAt,
-      );
+      const latestUpdatedTask = group.reduce((latest, task) =>
+        timestampOf(task.updatedAt) > timestampOf(latest.updatedAt) ? task : latest,
+      first);
 
       result.push({
         contentId: first.contentId || first.id,
@@ -158,21 +175,20 @@ export const useTaskStore = defineStore('task', () => {
         accounts,
         status: worstStatus,
         scheduledAt: first.scheduledAt,
-        createdAt: first.createdAt,
-        updatedAt: latest,
+        createdAt: newestCreatedTask.createdAt,
+        updatedAt: latestUpdatedTask.updatedAt,
         subTasks: group,
       });
     }
 
-    result.sort((a, b) => {
-      const as = String(a.createdAt || '');
-      const bs = String(b.createdAt || '');
-      return bs.localeCompare(as);
-    });
+    result.sort((a, b) => timestampOf(b.createdAt) - timestampOf(a.createdAt));
     return result;
   });
 
+  let fetchRequestId = 0;
+
   async function fetchTasks(f?: TaskFilter) {
+    const requestId = ++fetchRequestId;
     loading.value = true;
     try {
       if (!window.matrixflow?.publish?.listTasks) {
@@ -181,18 +197,24 @@ export const useTaskStore = defineStore('task', () => {
       }
       const f2 = f || JSON.parse(JSON.stringify(filter.value));
       const raw = await window.matrixflow.publish.listTasks(f2);
+      if (requestId !== fetchRequestId) return;
       if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
         const result = raw as unknown as TaskListResult;
         tasks.value = result.items || [];
         total.value = result.total || 0;
+        taskTotal.value = result.taskTotal ?? result.total ?? 0;
         statusBreakdown.value = result.statusBreakdown || {};
       }
     } catch (e) {
+      if (requestId !== fetchRequestId) return;
       console.error('[taskStore] fetchTasks 失败:', e);
       tasks.value = [];
       total.value = 0;
+      taskTotal.value = 0;
     } finally {
-      loading.value = false;
+      if (requestId === fetchRequestId) {
+        loading.value = false;
+      }
     }
   }
 
@@ -365,7 +387,7 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   return {
-    tasks, total, loading, statusBreakdown, selectedIds, filter, selectedCount, allSelectedOnPage,
+    tasks, total, taskTotal, loading, statusBreakdown, selectedIds, filter, selectedCount, allSelectedOnPage,
     groupedTasks, runningTasks, failedTasks, hasFailedTasks, stats,
     fetchTasks, createTask, cancelTask, retryTask, retryAllFailed,
     batchRetry, batchCancel, batchDelete, deleteTask,

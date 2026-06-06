@@ -1,7 +1,9 @@
 <template>
   <div class="task-table">
     <div class="task-table__header">
-      <span class="task-table__count">共 {{ taskStore.groupedTasks.length }} 个内容 / {{ total }} 条任务</span>
+      <span class="task-table__count">
+        本页 {{ taskStore.groupedTasks.length }} 个发布内容 / 共 {{ groupTotal }} 个发布内容
+      </span>
     </div>
     <el-table :data="taskStore.groupedTasks" v-loading="taskStore.loading" stripe border
       @row-click="onRowClick"
@@ -87,7 +89,7 @@ import { VideoCameraFilled, WarningFilled } from '@element-plus/icons-vue';
 
 const taskStore = useTaskStore();
 
-defineProps<{ total: number }>();
+defineProps<{ groupTotal: number }>();
 
 const emit = defineEmits<{
   (e: 'detail', task: GroupedTask): void;

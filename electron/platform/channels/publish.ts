@@ -13,6 +13,23 @@ const SHORT_TITLE_MAX_LEN = 16;
 const SCHEDULE_POLL_INTERVAL_MS = 1000;
 const SCHEDULE_POLL_MAX = 30;
 
+export interface ChannelsScheduleDateTime {
+  dateTimeText: string;
+  dateText: string;
+  timeText: string;
+}
+
+export function formatChannelsScheduleDateTime(value: Date): ChannelsScheduleDateTime {
+  const pad = (num: number) => String(num).padStart(2, '0');
+  const dateText = `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  const timeText = `${pad(value.getHours())}:${pad(value.getMinutes())}`;
+  return {
+    dateTimeText: `${dateText} ${timeText}`,
+    dateText,
+    timeText,
+  };
+}
+
 export function formatChannelsShortTitle(originTitle: string): string {
   const allowedSpecialChars = '\u300a\u300b\u201c\u201d\u2018\u2019:+?%°';
   const filtered: string[] = [];
@@ -295,12 +312,22 @@ export async function applySchedule(
   });
 
   try {
+    const formatted = formatChannelsScheduleDateTime(scheduledTime);
     const labels = page.locator(UPLOAD_SELECTORS.scheduleLabel);
     if (!(await labels.count())) {
       logger.warn('未找到定时 label');
       return false;
     }
-    await labels.nth(1).click();
+    const labelCount = await labels.count();
+    let scheduleLabel = labels.first();
+    for (let i = 0; i < labelCount; i++) {
+      const candidate = labels.nth(i);
+      if (await candidate.isVisible().catch(() => false)) {
+        scheduleLabel = candidate;
+        break;
+      }
+    }
+    await scheduleLabel.click();
     await page.waitForTimeout(300);
 
     const dateInput = page.locator(UPLOAD_SELECTORS.scheduleDateInput).first();
@@ -312,10 +339,16 @@ export async function applySchedule(
     await page.waitForTimeout(300);
 
     const targetMonth = scheduledTime.getMonth() + 1;
+    const targetYear = scheduledTime.getFullYear();
+    let targetMonthReached = false;
     for (let i = 0; i < SCHEDULE_POLL_MAX; i++) {
       const monthLabel = page.locator(UPLOAD_SELECTORS.scheduleMonthLabel).first();
       const currentMonthText = await monthLabel.innerText().catch(() => '');
-      if (currentMonthText === `${targetMonth}月`) {
+      const currentPanelText = await monthLabel.locator('xpath=..').innerText().catch(() => currentMonthText);
+      const monthMatches = currentMonthText.includes(`${targetMonth}月`);
+      const yearMatches = !/\d{4}/.test(currentPanelText) || currentPanelText.includes(String(targetYear));
+      if (monthMatches && yearMatches) {
+        targetMonthReached = true;
         break;
       }
       const nextBtn = page.locator(UPLOAD_SELECTORS.scheduleMonthNext).first();
@@ -326,9 +359,14 @@ export async function applySchedule(
       await rc.humanClick(UPLOAD_SELECTORS.scheduleMonthNext);
       await page.waitForTimeout(SCHEDULE_POLL_INTERVAL_MS);
     }
+    if (!targetMonthReached) {
+      logger.warn(`未能切换到目标月份: ${targetYear}-${targetMonth}`);
+      return false;
+    }
 
     const dayTable = page.locator(UPLOAD_SELECTORS.scheduleDayTable);
     const dayCount = await dayTable.count();
+    let daySelected = false;
     for (let i = 0; i < dayCount; i++) {
       const el = dayTable.nth(i);
       const cls = (await el.getAttribute('class')) ?? '';
@@ -336,8 +374,13 @@ export async function applySchedule(
       const text = (await el.innerText()).trim();
       if (text === String(scheduledTime.getDate())) {
         await el.click();
+        daySelected = true;
         break;
       }
+    }
+    if (!daySelected) {
+      logger.warn(`未找到目标日期: ${formatted.dateText}`);
+      return false;
     }
 
     const timeInput = page.locator(UPLOAD_SELECTORS.scheduleTimeInput).first();
@@ -346,11 +389,29 @@ export async function applySchedule(
       return false;
     }
     await timeInput.click();
-    await page.keyboard.press('Control+A');
-    const hourStr = scheduledTime.getHours().toString().padStart(2, '0');
-    await page.keyboard.type(hourStr);
-    await page.locator('div.input-editor').first().click();
-    logger.info(`定时发表已设置: ${scheduledTime.toISOString()}`);
+    try {
+      await timeInput.fill(formatted.timeText);
+    } catch {
+      await page.keyboard.press('Control+A');
+      await page.keyboard.type(formatted.timeText);
+    }
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(300);
+
+    const dateValue = await dateInput.inputValue().catch(() => '');
+    const timeValue = await timeInput.inputValue().catch(() => '');
+    const normalize = (value: string) => value.replace(/[^\d]/g, '');
+    const dateVerified = normalize(dateValue).includes(normalize(formatted.dateText));
+    const timeVerified = normalize(timeValue).includes(normalize(formatted.timeText));
+    if (!dateVerified || !timeVerified) {
+      logger.warn(
+        `视频号定时发表回读不一致: expected=${formatted.dateTimeText} actualDate=${dateValue} actualTime=${timeValue}`
+      );
+      return false;
+    }
+
+    logger.info(`定时发表已设置并校验: ${formatted.dateTimeText}`);
     return true;
   } catch (error) {
     logger.warn('应用定时发表失败，继续发布:', error);

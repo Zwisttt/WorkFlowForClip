@@ -1037,12 +1037,13 @@ export class PublishService implements IPublishService {
   async listTasks(filter: TaskFilter): Promise<TaskListResult> {
     if (!isDatabaseAvailable()) {
       logger.warn('[listTasks] 数据库不可用');
-      return { items: [], total: 0 };
+      return { items: [], total: 0, taskTotal: 0 };
     }
 
     const db = getDatabase();
     const conditions: string[] = [];
     const params: any[] = [];
+    const fromClause = 'FROM publish_tasks pt LEFT JOIN accounts a ON pt.account_id = a.id';
 
     if (filter.status && filter.status.length > 0) {
       conditions.push(`pt.status IN (${filter.status.map(() => '?').join(',')})`);
@@ -1057,44 +1058,105 @@ export class PublishService implements IPublishService {
       params.push(filter.planId);
     }
     if (filter.dateFrom) {
-      conditions.push("pt.created_at >= ? || 'T00:00:00'");
+      conditions.push('date(pt.created_at) >= date(?)');
       params.push(filter.dateFrom);
     }
     if (filter.dateTo) {
-      conditions.push("pt.created_at <= ? || 'T23:59:59'");
+      conditions.push('date(pt.created_at) <= date(?)');
       params.push(filter.dateTo);
     }
     if (filter.search) {
-      conditions.push('(pt.content_id LIKE ? OR pt.error_message LIKE ?)');
+      conditions.push(
+        '(pt.content_id LIKE ? OR pt.title LIKE ? OR pt.description LIKE ? ' +
+        'OR pt.error_message LIKE ? OR a.nickname LIKE ?)'
+      );
       const like = `%${filter.search}%`;
-      params.push(like, like);
+      params.push(like, like, like, like, like);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = filter.limit ?? 50;
     const offset = filter.offset ?? 0;
+    const groupExpression = `
+      CASE
+        WHEN pt.content_id IS NULL OR pt.content_id = '' THEN 'task:' || pt.id
+        ELSE 'content:' || pt.content_id
+      END
+    `.trim();
 
-    const countRow = db.prepare(`SELECT COUNT(*) as total FROM publish_tasks pt ${whereClause}`).get(...params) as { total: number };
+    const taskCountRow = db.prepare(
+      `SELECT COUNT(*) as total ${fromClause} ${whereClause}`
+    ).get(...params) as { total: number };
 
     const statusRows = db.prepare(
-      `SELECT pt.status, COUNT(*) as count FROM publish_tasks pt ${whereClause} GROUP BY pt.status`
+      `SELECT pt.status, COUNT(*) as count ${fromClause} ${whereClause} GROUP BY pt.status`
     ).all(...params) as { status: string; count: number }[];
     const statusBreakdown: Record<string, number> = {};
     for (const r of statusRows) {
       statusBreakdown[r.status] = r.count;
     }
 
-    const rows = db.prepare(`
-      SELECT pt.*, a.nickname as account_name
-      FROM publish_tasks pt
-      LEFT JOIN accounts a ON pt.account_id = a.id
-      ${whereClause}
-      ORDER BY pt.created_at DESC
-      LIMIT ? OFFSET ?
-    `).all(...params, limit, offset) as (DbPublishTask & { account_name?: string })[];
+    let rows: (DbPublishTask & { account_name?: string })[] = [];
+    let total = taskCountRow.total;
+
+    if (filter.groupByContent) {
+      const groupCountRow = db.prepare(`
+        SELECT COUNT(*) as total
+        FROM (
+          SELECT ${groupExpression} as content_key
+          ${fromClause}
+          ${whereClause}
+          GROUP BY content_key
+        )
+      `).get(...params) as { total: number };
+      total = groupCountRow.total;
+
+      const groupRows = db.prepare(`
+        SELECT
+          ${groupExpression} as content_key,
+          MAX(COALESCE(julianday(pt.created_at), 0)) as latest_created_sort,
+          MAX(pt.rowid) as latest_rowid
+        ${fromClause}
+        ${whereClause}
+        GROUP BY content_key
+        ORDER BY latest_created_sort DESC, latest_rowid DESC
+        LIMIT ? OFFSET ?
+      `).all(...params, limit, offset) as { content_key: string }[];
+      const contentKeys = groupRows.map((row) => row.content_key);
+
+      if (contentKeys.length > 0) {
+        const keyPlaceholders = contentKeys.map(() => '?').join(',');
+        rows = db.prepare(`
+          SELECT pt.*, a.nickname as account_name
+          ${fromClause}
+          ${whereClause}
+          ${whereClause ? 'AND' : 'WHERE'} ${groupExpression} IN (${keyPlaceholders})
+          ORDER BY
+            CASE ${groupExpression}
+              ${contentKeys.map((_, index) => `WHEN ? THEN ${index}`).join(' ')}
+              ELSE ${contentKeys.length}
+            END,
+            COALESCE(julianday(pt.created_at), 0) DESC,
+            pt.rowid DESC
+        `).all(...params, ...contentKeys, ...contentKeys) as (DbPublishTask & { account_name?: string })[];
+      }
+    } else {
+      rows = db.prepare(`
+        SELECT pt.*, a.nickname as account_name
+        ${fromClause}
+        ${whereClause}
+        ORDER BY COALESCE(julianday(pt.created_at), 0) DESC, pt.rowid DESC
+        LIMIT ? OFFSET ?
+      `).all(...params, limit, offset) as (DbPublishTask & { account_name?: string })[];
+    }
 
     const items = rows.map((row) => this.dbRowToTask(row as DbPublishTask));
-    return { items, total: countRow.total, statusBreakdown };
+    return {
+      items,
+      total,
+      taskTotal: taskCountRow.total,
+      statusBreakdown,
+    };
   }
 
   async retryTask(taskId: string): Promise<PublishResult> {

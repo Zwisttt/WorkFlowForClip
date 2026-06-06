@@ -3,7 +3,7 @@ import { setActivePinia, createPinia } from 'pinia';
 import { installMatrixflowMock, removeMatrixflowMock } from '../../../mocks/window-matrixflow';
 import { useTaskStore } from '@/renderer/stores/task';
 import type { MatrixflowMock } from '../../../mocks/window-matrixflow';
-import type { Task, TaskStatus } from '@/renderer/stores/task';
+import type { Task, TaskListResult, TaskStatus } from '@/renderer/stores/task';
 
 let mock: MatrixflowMock;
 
@@ -105,19 +105,45 @@ describe('useTaskStore', () => {
       expect(s.pending).toBe(0);
       expect(s.running).toBe(0);
     });
+
+    it('sorts newly created content first when IPC returns Date objects', () => {
+      const store = useTaskStore();
+      store.tasks = [
+        makeTask({
+          id: 'older',
+          contentId: 'older-content',
+          createdAt: new Date('2026-06-07T10:00:00Z') as unknown as string,
+        }),
+        makeTask({
+          id: 'newer',
+          contentId: 'newer-content',
+          createdAt: new Date('2026-06-08T10:00:00Z') as unknown as string,
+        }),
+      ];
+
+      expect(store.groupedTasks.map((task) => task.contentId)).toEqual([
+        'newer-content',
+        'older-content',
+      ]);
+    });
   });
 
   describe('fetchTasks', () => {
     it('fetches tasks from IPC and populates state', async () => {
       const tasks = [makeTask({ id: '1' }), makeTask({ id: '2' })];
-      mock.publish.listTasks.mockResolvedValue({ items: tasks, total: 2 });
+      mock.publish.listTasks.mockResolvedValue({ items: tasks, total: 2, taskTotal: 4 });
 
       const store = useTaskStore();
       await store.fetchTasks();
 
       expect(store.tasks).toEqual(tasks);
       expect(store.total).toBe(2);
-      expect(mock.publish.listTasks).toHaveBeenCalled();
+      expect(store.taskTotal).toBe(4);
+      expect(mock.publish.listTasks).toHaveBeenCalledWith(expect.objectContaining({
+        groupByContent: true,
+        limit: 20,
+        offset: 0,
+      }));
     });
 
     it('passes filter to IPC', async () => {
@@ -161,6 +187,33 @@ describe('useTaskStore', () => {
 
       expect(store.tasks).toEqual([]);
       expect(store.total).toBe(0);
+    });
+
+    it('keeps the newest page when an older request resolves later', async () => {
+      let resolveFirst: ((value: TaskListResult) => void) | undefined;
+      mock.publish.listTasks
+        .mockImplementationOnce(() => new Promise((resolve) => {
+          resolveFirst = resolve;
+        }))
+        .mockResolvedValueOnce({
+          items: [makeTask({ id: 'page-2' })],
+          total: 40,
+          taskTotal: 40,
+        });
+
+      const store = useTaskStore();
+      const first = store.fetchTasks({ limit: 20, offset: 0, groupByContent: true });
+      const second = store.fetchTasks({ limit: 20, offset: 20, groupByContent: true });
+      await second;
+      resolveFirst?.({
+        items: [makeTask({ id: 'page-1' })],
+        total: 40,
+        taskTotal: 40,
+      });
+      await first;
+
+      expect(store.tasks.map((task) => task.id)).toEqual(['page-2']);
+      expect(store.loading).toBe(false);
     });
   });
 

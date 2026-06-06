@@ -16,23 +16,17 @@
 
     <!-- 工具栏：筛选 + 操作 -->
     <div class="page-tasks__toolbar">
-      <TaskFilterBar :plans="plans" />
-      <div class="page-tasks__toolbar-actions">
-        <el-button size="small" @click="handleExport">
-          <el-icon><Download /></el-icon>
-          导出
-        </el-button>
-      </div>
+      <TaskFilterBar :plans="plans" @change="onFilterChange" />
     </div>
 
     <!-- 批量操作栏 -->
     <TaskBatchBar v-if="taskStore.selectedCount > 0" />
 
     <!-- 统计概览 -->
-    <div v-if="taskStore.total > 0" class="page-tasks__stats">
+    <div v-if="taskStore.taskTotal > 0" class="page-tasks__stats">
       <div class="page-tasks__stat-chip">
-        <span class="page-tasks__stat-label">全部</span>
-        <span class="page-tasks__stat-value">{{ taskStore.total }}</span>
+        <span class="page-tasks__stat-label">任务总数</span>
+        <span class="page-tasks__stat-value">{{ taskStore.taskTotal }}</span>
       </div>
       <div class="page-tasks__stat-chip page-tasks__stat-chip--pending">
         <span class="page-tasks__stat-dot"></span>
@@ -59,7 +53,7 @@
     <!-- 列表区域 -->
     <div class="page-tasks__list">
       <TaskTable
-        :total="taskStore.total"
+        :group-total="taskStore.total"
         @detail="onShowDetail"
         @execute="onExecuteGroup"
         @delete="onDeleteGroup"
@@ -76,15 +70,19 @@
 
       <!-- 分页 -->
       <div v-if="taskStore.total > 0" class="page-tasks__pagination">
-        <span class="page-tasks__pagination-info">共 {{ taskStore.total }} 条</span>
+        <span class="page-tasks__pagination-info">
+          共 {{ taskStore.total }} 个发布内容
+        </span>
         <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
+          :current-page="currentPage"
+          :page-size="pageSize"
           :total="taskStore.total"
           :page-sizes="[10, 20, 50, 100]"
-          layout="sizes, prev, pager, next"
+          layout="sizes, prev, pager, next, jumper"
           background
           small
+          @current-change="onPageChange"
+          @size-change="onPageSizeChange"
         />
       </div>
     </div>
@@ -94,11 +92,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
-  List, Calendar, Document, VideoCamera, Download,
+  List, Calendar, Document, VideoCamera,
 } from '@element-plus/icons-vue';
 import { useTaskStore } from '@/renderer/stores/task';
 import type { GroupedTask } from '@/renderer/stores/task';
@@ -122,14 +120,32 @@ function isActive(path: string) {
 
 const drawerVisible = ref(false);
 const selectedGroup = ref<GroupedTask | null>(null);
-const currentPage = ref(1);
-const pageSize = ref(20);
+const PAGE_SIZE_KEY = 'matrixflow.publishTasks.pageSize';
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
+function getInitialPageSize(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(PAGE_SIZE_KEY));
+    if (PAGE_SIZE_OPTIONS.includes(stored)) return stored;
+  } catch {
+    // localStorage may be unavailable in restricted renderer contexts.
+  }
+  return taskStore.filter.limit && PAGE_SIZE_OPTIONS.includes(taskStore.filter.limit)
+    ? taskStore.filter.limit
+    : 20;
+}
+
+const pageSize = ref(getInitialPageSize());
+const currentPage = ref(
+  Math.floor((taskStore.filter.offset || 0) / pageSize.value) + 1,
+);
 const plans = ref<{ id: string; name: string }[]>([]);
 
 let unlisten: (() => void) | null = null;
 
 onMounted(async () => {
-  await taskStore.fetchTasks();
+  taskStore.filter.groupByContent = true;
+  await fetchCurrentPage();
   unlisten = taskStore.listenIpcEvents();
   await loadPlans();
 });
@@ -151,17 +167,43 @@ async function loadPlans() {
   }
 }
 
-watch(currentPage, () => {
-  taskStore.filter.offset = (currentPage.value - 1) * pageSize.value;
-  taskStore.fetchTasks();
-});
-
-watch(pageSize, () => {
+async function fetchCurrentPage() {
   taskStore.filter.limit = pageSize.value;
-  taskStore.filter.offset = 0;
+  taskStore.filter.offset = (currentPage.value - 1) * pageSize.value;
+  taskStore.filter.groupByContent = true;
+  await taskStore.fetchTasks();
+
+  const lastPage = Math.max(1, Math.ceil(taskStore.total / pageSize.value));
+  if (currentPage.value > lastPage) {
+    currentPage.value = lastPage;
+    taskStore.filter.offset = (lastPage - 1) * pageSize.value;
+    await taskStore.fetchTasks();
+  }
+}
+
+async function onPageChange(page: number) {
+  currentPage.value = page;
+  taskStore.clearSelection();
+  await fetchCurrentPage();
+}
+
+async function onPageSizeChange(size: number) {
+  pageSize.value = size;
   currentPage.value = 1;
-  taskStore.fetchTasks();
-});
+  taskStore.clearSelection();
+  try {
+    window.localStorage.setItem(PAGE_SIZE_KEY, String(size));
+  } catch {
+    // Ignore persistence failures; pagination still works for this session.
+  }
+  await fetchCurrentPage();
+}
+
+async function onFilterChange() {
+  currentPage.value = 1;
+  taskStore.clearSelection();
+  await fetchCurrentPage();
+}
 
 function onShowDetail(group: GroupedTask) {
   selectedGroup.value = group;
@@ -179,7 +221,11 @@ async function onExecuteGroup(group: GroupedTask) {
     taskStore.updateTaskStatus(next.id, 'running');
     await taskStore.retryTask(next.id);
     ElMessage.success(`发布任务执行完成: ${next.accountName || next.platform}`);
-    setTimeout(() => taskStore.fetchTasks(), 1000);
+    setTimeout(() => {
+      fetchCurrentPage().catch((error) => {
+        console.error('刷新任务列表失败:', error);
+      });
+    }, 1000);
   } catch (error) {
     console.error('执行发布任务失败:', error);
     const message = error instanceof Error ? error.message : '执行发布任务失败';
@@ -234,7 +280,7 @@ async function onDeleteGroup(group: GroupedTask) {
     } else {
       ElMessage.error('删除失败');
     }
-    await taskStore.fetchTasks();
+    await fetchCurrentPage();
   } catch {
     ElMessage.error('删除失败');
   }
@@ -246,9 +292,6 @@ function onPlanClick(planId: string | null) {
   }
 }
 
-async function handleExport() {
-  ElMessage.info('导出功能开发中');
-}
 </script>
 
 <style scoped>
@@ -294,16 +337,9 @@ async function handleExport() {
 /* ── 工具栏 ── */
 .page-tasks__toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-6);
-}
-
-.page-tasks__toolbar-actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-shrink: 0;
 }
 
 /* ── 统计概览 ── */
@@ -398,5 +434,13 @@ async function handleExport() {
 
 .page-tasks__pagination :deep(.el-pagination.is-background .el-pager li:not(.is-disabled).is-active) {
   background: var(--color-primary);
+}
+
+@media (max-width: 960px) {
+  .page-tasks__pagination {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
 }
 </style>

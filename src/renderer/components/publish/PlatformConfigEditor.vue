@@ -204,6 +204,7 @@
             v-if="localConfig.scheduleMode === 'scheduled'"
             v-model="localConfig.scheduledAt"
             type="datetime-local"
+            step="60"
             class="schedule-inline"
             @input="emitUpdate"
           />

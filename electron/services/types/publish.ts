@@ -206,11 +206,16 @@ export interface TaskFilter {
   search?: string;
   limit?: number;
   offset?: number;
+  /** 任务列表按内容聚合展示时，分页单位使用内容而不是任务明细。 */
+  groupByContent?: boolean;
 }
 
 export interface TaskListResult {
   items: PublishTask[];
+  /** 当前分页口径下的总数：按内容分页时为内容数，否则为任务数。 */
   total: number;
+  /** 筛选条件下的任务明细总数。 */
+  taskTotal?: number;
   statusBreakdown?: Record<string, number>;
 }
 

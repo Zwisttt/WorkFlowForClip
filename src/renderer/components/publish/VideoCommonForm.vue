@@ -70,6 +70,7 @@
                 v-if="localConfig.scheduleMode === 'scheduled'"
                 v-model="localConfig.scheduledAt"
                 type="datetime-local"
+                step="60"
                 class="datetime-input"
                 @input="emit('update:modelValue', localConfig)"
               />
