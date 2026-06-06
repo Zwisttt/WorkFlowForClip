@@ -513,11 +513,6 @@ export async function publish(ctx: PublishContext): Promise<PublishResult> {
     return { success: false, message: '发布需要 page 参数' };
   }
 
-  const trimmedTitle = (title || '').trim();
-  if (trimmedTitle.length > 0 && trimmedTitle.length < 6) {
-    return { success: false, message: `视频号标题长度不足6个字符（当前${trimmedTitle.length}个），视频号要求至少6个字符` };
-  }
-
   const debugRecorder = getDebugRecorder();
   debugRecorder.setSessionId(`channels_${accountId ?? 'unknown'}_${Date.now()}`);
   const pageCtx = { page: existingPage, accountId };

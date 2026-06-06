@@ -60,6 +60,22 @@ function normalizeLocalFilePath(value?: unknown): string | undefined {
   return value.replace(/^local-file:\/\//, '');
 }
 
+const PLATFORM_PRE_PUBLISH_RULES: Record<string, { titleMinLen?: number; titleMinLenMsg?: string }> = {
+  channels: { titleMinLen: 6, titleMinLenMsg: '视频号标题至少需要6个字符' },
+};
+
+function prePublishValidate(dbTask: DbPublishTask): string | null {
+  const platform = dbTask.platform;
+  const rules = PLATFORM_PRE_PUBLISH_RULES[platform];
+  if (!rules) return null;
+
+  const title = ((dbTask as any).title || '').trim();
+  if (rules.titleMinLen && title.length > 0 && title.length < rules.titleMinLen) {
+    return `${rules.titleMinLenMsg}（当前${title.length}个字符）`;
+  }
+  return null;
+}
+
 function buildUploadContextFromTask(
   dbTask: DbPublishTask,
   accountId: string,
@@ -566,6 +582,19 @@ export class PublishService implements IPublishService {
     const contentId = dbTask.content_id;
 
     logger.info(`客户端发布开始: taskId=${taskId} platform=${dbTask.platform} accountId=${accountId}`);
+
+    const preCheckError = prePublishValidate(dbTask);
+    if (preCheckError) {
+      logger.error(`[publishFromClient] 前置校验失败: ${preCheckError}`);
+      try {
+        const items = await taskItemRepo.findByTaskId(taskId);
+        if (items.length > 0) {
+          await taskItemRepo.markFailed(items[0].id, preCheckError);
+          this.emitItemFailed(taskId, items[0].id, preCheckError);
+        }
+      } catch {}
+      return { success: false, error: preCheckError };
+    }
 
     await this.validateCookieForAccount(accountId);
 

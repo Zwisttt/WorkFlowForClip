@@ -1530,13 +1530,6 @@ async function applyEmbeddedLocation(wc: WebContents, locationName?: string | nu
 async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<UploadResult> {
   const { videoPath, title, accountId } = ctx;
   logger.info('使用账号浏览器执行视频号发布任务');
-
-  const trimmedTitle = (title || '').trim();
-  if (trimmedTitle.length > 0 && trimmedTitle.length < 6) {
-    const msg = `视频号短标题长度不足6个字符（当前${trimmedTitle.length}个），视频号要求至少6个字符`;
-    logger.error(msg);
-    return { success: false, message: msg };
-  }
   let publishSucceeded = false;
   let failureMessage = '';
   let wc: WebContents | undefined;
@@ -1856,13 +1849,6 @@ async function clickPublish(page: Page): Promise<boolean> {
 
 export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
   const { videoPath, title, description, tags, coverPath, accountId } = ctx;
-
-  const trimmedTitle = (title || '').trim();
-  if (trimmedTitle.length > 0 && trimmedTitle.length < 6) {
-    const msg = `视频号短标题长度不足6个字符（当前${trimmedTitle.length}个），视频号要求至少6个字符`;
-    logger.error(msg);
-    return { success: false, message: msg };
-  }
 
   if (!fs.existsSync(videoPath)) {
     return {
