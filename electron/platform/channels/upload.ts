@@ -1340,20 +1340,107 @@ async function applyEmbeddedLocation(wc: WebContents, locationName?: string | nu
   };
 
   if (!target) {
-    logger.info('视频号未设置地点，跳过位置设置');
+    logger.info('视频号未设置地点，选择"不显示位置"');
+
+    const expandResult = await wc.executeJavaScript(`
+      (() => {
+        ${EMBEDDED_DOM_HELPERS}
+        const editorRoots = collectRoots().filter((root) => {
+          try { return !!root.querySelector('div.input-editor'); } catch { return false; }
+        });
+        for (const root of editorRoots) {
+          try {
+            const display = root.querySelector('.position-display, [class*="position-display"]');
+            if (display && isVisible(display)) {
+              clickElement(display);
+              return { clicked: true, text: textOf(display).trim().slice(0, 40) };
+            }
+          } catch {}
+        }
+        return { clicked: false };
+      })()
+    `, true).catch(() => ({ clicked: false })) as { clicked: boolean; text?: string };
+
+    if (!expandResult.clicked) {
+      logger.info('视频号未找到位置触发器，跳过位置设置');
+      return true;
+    }
+
+    logger.info(`视频号已点击位置触发器: ${expandResult.text}`);
+    await jitter(800, 1200);
+
+    const pickResult = await wc.executeJavaScript(`
+      (() => {
+        ${EMBEDDED_DOM_HELPERS}
+        const editorRoots = collectRoots().filter((root) => {
+          try { return !!root.querySelector('div.input-editor'); } catch { return false; }
+        });
+
+        for (const root of editorRoots) {
+          try {
+            const candidates = Array.from(root.querySelectorAll(
+              'li, [role="option"], [class*="option-item"], [class*="select-item"], ' +
+              '[class*="dropdown"] [class*="item"], [class*="menu-item"]'
+            )).filter((el) => isVisible(el));
+
+            for (const opt of candidates) {
+              const text = textOf(opt).trim();
+              if (text === '不显示位置' || text === '不显示') {
+                clickElement(opt);
+                return { picked: true, text };
+              }
+            }
+          } catch {}
+        }
+
+        const allCandidates = queryAll(
+          'li, [role="option"], [class*="option-item"], [class*="select-item"]'
+        ).filter((el) => isVisible(el) && /不显示/.test(textOf(el)));
+
+        for (const opt of allCandidates) {
+          clickElement(opt);
+          return { picked: true, text: textOf(opt).trim(), fallback: true };
+        }
+
+        const debugTexts: string[] = [];
+        for (const root of editorRoots) {
+          try {
+            const items = Array.from(root.querySelectorAll('li, [role="option"], [class*="option"], [class*="item"]'))
+              .filter((el) => isVisible(el))
+              .map((el) => textOf(el).trim().slice(0, 30));
+            debugTexts.push(...items);
+          } catch {}
+        }
+        return { picked: false, debug: debugTexts };
+      })()
+    `, true).catch(() => ({ picked: false, debug: [] })) as { picked: boolean; text?: string; debug?: string[]; fallback?: boolean };
+
+    if (pickResult.picked) {
+      logger.info(`视频号已选择"${pickResult.text}"${pickResult.fallback ? ' (fallback)' : ''}`);
+    } else {
+      logger.warn(`视频号未找到"不显示位置"选项，编辑器内可见选项: ${JSON.stringify(pickResult.debug)}`);
+    }
     return true;
   }
 
   const entryResult = await wc.executeJavaScript(`
-    ((target) => {
+    (() => {
       ${EMBEDDED_DOM_HELPERS}
-      const display = queryAll('.position-display, [class*="position-display"]')
-        .find((el) => isVisible(el));
-      if (!display) return { found: false };
-      const nameEl = display.querySelector('.location-name');
-      if (nameEl && textOf(nameEl).trim() === target) return { found: true, alreadySet: true };
-      clickElement(display);
-      return { found: true, expanded: true };
+      const editorRoots = collectRoots().filter((root) => {
+        try { return !!root.querySelector('div.input-editor'); } catch { return false; }
+      });
+      for (const root of editorRoots) {
+        try {
+          const display = root.querySelector('.position-display, [class*="position-display"]');
+          if (display && isVisible(display)) {
+            const nameEl = display.querySelector('.location-name');
+            if (nameEl && textOf(nameEl).trim() === target) return { found: true, alreadySet: true };
+            clickElement(display);
+            return { found: true, expanded: true };
+          }
+        } catch {}
+      }
+      return { found: false };
     })(${JSON.stringify(target)})
   `, true).catch(() => ({ found: false })) as { found: boolean; alreadySet?: boolean; expanded?: boolean };
 
@@ -1371,11 +1458,21 @@ async function applyEmbeddedLocation(wc: WebContents, locationName?: string | nu
   const searchResult = await wc.executeJavaScript(`
     (() => {
       ${EMBEDDED_DOM_HELPERS}
-      const input = queryAll('input[placeholder*="搜索附近位置"], input.weui-desktop-form__input')
-        .find((el) => isVisible(el));
-      if (input) {
-        input.focus();
-        return true;
+      const editorRoots = collectRoots().filter((root) => {
+        try { return !!root.querySelector('div.input-editor'); } catch { return false; }
+      });
+      for (const root of editorRoots) {
+        try {
+          const input = Array.from(root.querySelectorAll('input'))
+            .find((el) => {
+              const ph = el.getAttribute('placeholder') || '';
+              return isVisible(el) && /搜索.*位置|附近位置|地点|位置/.test(ph);
+            });
+          if (input) {
+            input.focus();
+            return true;
+          }
+        } catch {}
       }
       return false;
     })()
@@ -1395,20 +1492,28 @@ async function applyEmbeddedLocation(wc: WebContents, locationName?: string | nu
   const picked = await wc.executeJavaScript(`
     ((target) => {
       ${EMBEDDED_DOM_HELPERS}
-      const options = queryAll('.option-item, [class*="option-item"]')
-        .filter((el) => isVisible(el));
-      for (const opt of options) {
-        const nameEl = opt.querySelector('.name, [class*="location-item-info"] .name');
-        if (nameEl && textOf(nameEl).trim() === target) {
-          return { picked: true, name: target };
-        }
-      }
-      for (const opt of options) {
-        const nameEl = opt.querySelector('.name, [class*="location-item-info"] .name');
-        if (nameEl && textOf(nameEl).includes(target.slice(0, 6))) {
-          clickElement(opt);
-          return { picked: true, name: textOf(nameEl).trim() };
-        }
+      const editorRoots = collectRoots().filter((root) => {
+        try { return !!root.querySelector('div.input-editor'); } catch { return false; }
+      });
+      for (const root of editorRoots) {
+        try {
+          const options = Array.from(root.querySelectorAll('.option-item, [class*="option-item"]'))
+            .filter((el) => isVisible(el));
+          for (const opt of options) {
+            const nameEl = opt.querySelector('.name, [class*="location-item-info"] .name');
+            if (nameEl && textOf(nameEl).trim() === target) {
+              clickElement(opt);
+              return { picked: true, name: target };
+            }
+          }
+          for (const opt of options) {
+            const nameEl = opt.querySelector('.name, [class*="location-item-info"] .name');
+            if (nameEl && textOf(nameEl).includes(target.slice(0, 6))) {
+              clickElement(opt);
+              return { picked: true, name: textOf(nameEl).trim() };
+            }
+          }
+        } catch {}
       }
       return { picked: false };
     })(${JSON.stringify(target)})
