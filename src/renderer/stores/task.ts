@@ -235,8 +235,11 @@ export const useTaskStore = defineStore('task', () => {
     const result = await window.matrixflow.publish.retryTask(id);
     const payload = result?.data ?? result;
     if (result?.success === false || payload?.success === false) {
+      updateTaskStatus(id, 'failed');
       throw new Error(result?.message || payload?.error || '发布任务执行失败');
     }
+    updateTaskStatus(id, 'completed');
+    scheduleRefresh();
     return result;
   }
 

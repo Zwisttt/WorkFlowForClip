@@ -218,14 +218,8 @@ async function onExecuteGroup(group: GroupedTask) {
   }
 
   try {
-    taskStore.updateTaskStatus(next.id, 'running');
     await taskStore.retryTask(next.id);
-    ElMessage.success(`发布任务执行完成: ${next.accountName || next.platform}`);
-    setTimeout(() => {
-      fetchCurrentPage().catch((error) => {
-        console.error('刷新任务列表失败:', error);
-      });
-    }, 1000);
+    ElMessage.success(`发布成功: ${next.accountName || next.platform}`);
   } catch (error) {
     console.error('执行发布任务失败:', error);
     const message = error instanceof Error ? error.message : '执行发布任务失败';
