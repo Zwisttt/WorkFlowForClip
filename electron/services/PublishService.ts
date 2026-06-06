@@ -1076,6 +1076,14 @@ export class PublishService implements IPublishService {
 
     const countRow = db.prepare(`SELECT COUNT(*) as total FROM publish_tasks pt ${whereClause}`).get(...params) as { total: number };
 
+    const statusRows = db.prepare(
+      `SELECT pt.status, COUNT(*) as count FROM publish_tasks pt ${whereClause} GROUP BY pt.status`
+    ).all(...params) as { status: string; count: number }[];
+    const statusBreakdown: Record<string, number> = {};
+    for (const r of statusRows) {
+      statusBreakdown[r.status] = r.count;
+    }
+
     const rows = db.prepare(`
       SELECT pt.*, a.nickname as account_name
       FROM publish_tasks pt
@@ -1086,7 +1094,7 @@ export class PublishService implements IPublishService {
     `).all(...params, limit, offset) as (DbPublishTask & { account_name?: string })[];
 
     const items = rows.map((row) => this.dbRowToTask(row as DbPublishTask));
-    return { items, total: countRow.total };
+    return { items, total: countRow.total, statusBreakdown };
   }
 
   async retryTask(taskId: string): Promise<PublishResult> {

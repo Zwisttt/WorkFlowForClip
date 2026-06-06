@@ -6,8 +6,7 @@
     <el-table :data="taskStore.groupedTasks" v-loading="taskStore.loading" stripe border
       @row-click="onRowClick"
       @selection-change="onSelectionChange"
-      ref="tableRef"
-      height="100%">
+      ref="tableRef">
       <el-table-column type="selection" width="45" :selectable="() => true" />
       <el-table-column label="内容预览" min-width="240">
         <template #default="{ row }">

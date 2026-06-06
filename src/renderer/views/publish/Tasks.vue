@@ -85,8 +85,6 @@
           layout="sizes, prev, pager, next"
           background
           small
-          @current-change="onPageChange"
-          @size-change="onSizeChange"
         />
       </div>
     </div>
@@ -153,28 +151,17 @@ async function loadPlans() {
   }
 }
 
-watch(currentPage, (page) => {
-  taskStore.filter.offset = (page - 1) * pageSize.value;
-  taskStore.fetchTasks();
-});
-
-watch(pageSize, (size) => {
-  taskStore.filter.limit = size;
-  taskStore.filter.offset = 0;
-  currentPage.value = 1;
-  taskStore.fetchTasks();
-});
-
-function onPageChange() {
+watch(currentPage, () => {
   taskStore.filter.offset = (currentPage.value - 1) * pageSize.value;
   taskStore.fetchTasks();
-}
+});
 
-function onSizeChange() {
+watch(pageSize, () => {
+  taskStore.filter.limit = pageSize.value;
   taskStore.filter.offset = 0;
   currentPage.value = 1;
   taskStore.fetchTasks();
-}
+});
 
 function onShowDetail(group: GroupedTask) {
   selectedGroup.value = group;

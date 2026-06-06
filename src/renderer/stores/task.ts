@@ -18,6 +18,7 @@ export interface TaskFilter {
 export interface TaskListResult {
   items: Task[];
   total: number;
+  statusBreakdown?: Record<string, number>;
 }
 
 export interface Task {
@@ -81,6 +82,7 @@ export const useTaskStore = defineStore('task', () => {
   const tasks = ref<Task[]>([]);
   const total = ref(0);
   const loading = ref(false);
+  const statusBreakdown = ref<Record<string, number>>({});
   const selectedIds = ref<Set<string>>(new Set());
   const filter = ref<TaskFilter>({
     status: [],
@@ -100,14 +102,17 @@ export const useTaskStore = defineStore('task', () => {
     tasks.value.length > 0 && tasks.value.every((t) => selectedIds.value.has(t.id))
   );
 
-  const stats = computed(() => ({
-    total: total.value,
-    pending: tasks.value.filter((t) => t.status === 'pending').length,
-    running: runningTasks.value.length,
-    completed: tasks.value.filter((t) => t.status === 'completed').length,
-    failed: failedTasks.value.length,
-    skipped: tasks.value.filter((t) => t.status === 'skipped').length,
-  }));
+  const stats = computed(() => {
+    const sb = statusBreakdown.value;
+    return {
+      total: total.value,
+      pending: (sb['pending'] ?? 0) + (sb['scheduled'] ?? 0),
+      running: sb['running'] ?? 0,
+      completed: sb['completed'] ?? 0,
+      failed: sb['failed'] ?? 0,
+      skipped: sb['skipped'] ?? 0,
+    };
+  });
 
   const groupedTasks = computed<GroupedTask[]>(() => {
     const map = new Map<string, Task[]>();
@@ -180,6 +185,7 @@ export const useTaskStore = defineStore('task', () => {
         const result = raw as unknown as TaskListResult;
         tasks.value = result.items || [];
         total.value = result.total || 0;
+        statusBreakdown.value = result.statusBreakdown || {};
       }
     } catch (e) {
       console.error('[taskStore] fetchTasks 失败:', e);
@@ -235,6 +241,8 @@ export const useTaskStore = defineStore('task', () => {
       if (data) {
         Object.assign(task, data);
       }
+    } else {
+      scheduleRefresh();
     }
   }
 
@@ -290,6 +298,15 @@ export const useTaskStore = defineStore('task', () => {
     }
     tasks.value = tasks.value.filter((t) => !selectedIds.value.has(t.id));
     clearSelection();
+  }
+
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleRefresh() {
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      fetchTasks();
+    }, 2000);
   }
 
   /** 监听主进程推送的任务事件 */
@@ -348,7 +365,7 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   return {
-    tasks, total, loading, selectedIds, filter, selectedCount, allSelectedOnPage,
+    tasks, total, loading, statusBreakdown, selectedIds, filter, selectedCount, allSelectedOnPage,
     groupedTasks, runningTasks, failedTasks, hasFailedTasks, stats,
     fetchTasks, createTask, cancelTask, retryTask, retryAllFailed,
     batchRetry, batchCancel, batchDelete, deleteTask,
