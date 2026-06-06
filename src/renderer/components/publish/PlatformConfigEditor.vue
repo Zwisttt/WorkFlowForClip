@@ -57,6 +57,7 @@
           class="form-input"
           :placeholder="`输入${platformLabel}标题`"
           :maxlength="titleLimit"
+          autocomplete="off"
           @input="handleTitleInput"
         />
         <div v-if="titleValidationError" class="form-error">{{ titleValidationError }}</div>
@@ -107,6 +108,7 @@
           type="text"
           class="form-input"
           placeholder="添加地点"
+          autocomplete="off"
           @input="emitUpdate"
         />
       </div>
