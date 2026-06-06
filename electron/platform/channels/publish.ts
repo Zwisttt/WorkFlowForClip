@@ -13,23 +13,17 @@ const SHORT_TITLE_MAX_LEN = 16;
 const SCHEDULE_POLL_INTERVAL_MS = 1000;
 const SCHEDULE_POLL_MAX = 30;
 
-function formatShortTitle(originTitle: string): string {
+export function formatChannelsShortTitle(originTitle: string): string {
   const allowedSpecialChars = '\u300a\u300b\u201c\u201d\u2018\u2019:+?%°';
   const filtered: string[] = [];
-  for (const ch of originTitle) {
-    if (ch.match(/[a-zA-Z0-9\u4e00-\u9fa5]/) || allowedSpecialChars.includes(ch)) {
+  for (const ch of originTitle.trim()) {
+    if (/[a-zA-Z0-9\u4e00-\u9fa5]/.test(ch) || allowedSpecialChars.includes(ch)) {
       filtered.push(ch);
     } else if (ch === ',' || ch === '，') {
       filtered.push(' ');
     }
   }
-  let result = filtered.join('');
-  if (result.length > SHORT_TITLE_MAX_LEN) {
-    result = result.slice(0, SHORT_TITLE_MAX_LEN);
-  } else if (result.length < 6) {
-    result = result.padEnd(6, ' ');
-  }
-  return result;
+  return filtered.join('').slice(0, SHORT_TITLE_MAX_LEN);
 }
 
 export async function fillVideoMetadata(
@@ -37,7 +31,7 @@ export async function fillVideoMetadata(
   title: string,
   description?: string,
   tags?: string[]
-): Promise<void> {
+): Promise<boolean> {
   const rc = new PageRiskControl(page, {
     typingDelayMs: { min: 50, max: 200 },
     clickDelayMs: { min: 100, max: 300 },
@@ -48,18 +42,14 @@ export async function fillVideoMetadata(
     const editor = page.locator('div.input-editor').first();
     if (!(await editor.count())) {
       logger.warn('未找到视频号描述输入框 (div.input-editor)');
-      return;
+      return false;
     }
     await editor.waitFor({ state: 'visible', timeout: 10000 });
     await rc.humanClick('div.input-editor');
 
-    await page.keyboard.type(title);
-    logger.info(`视频号内容已填写: ${title}`);
-
     if (description && description.trim().length > 0) {
-      await page.keyboard.press('Enter');
       await page.keyboard.type(description);
-      logger.info(`视频号描述已换行填写: ${description.slice(0, 30)}${description.length > 30 ? '...' : ''}`);
+      logger.info(`视频号描述已填写: ${description.slice(0, 30)}${description.length > 30 ? '...' : ''}`);
     }
 
     if (tags && tags.length > 0) {
@@ -85,6 +75,7 @@ export async function fillVideoMetadata(
         await page.waitForTimeout(300);
       }
     }
+    return true;
   } catch (error) {
     throw toPlatformError(error, 'channels', { step: 'fillVideoMetadata', title });
   }
@@ -94,7 +85,13 @@ export async function setShortTitle(
   page: Page,
   title: string,
   overrideShortTitle?: string
-): Promise<void> {
+): Promise<boolean> {
+  const value = formatChannelsShortTitle(overrideShortTitle || title);
+  if (!value) {
+    logger.warn('视频号短标题为空');
+    return false;
+  }
+
   const rc = new PageRiskControl(page, {
     typingDelayMs: { min: 50, max: 200 },
     clickDelayMs: { min: 100, max: 300 },
@@ -103,33 +100,25 @@ export async function setShortTitle(
   try {
     const shortTitleInput = page.locator(UPLOAD_SELECTORS.shortTitleInput).first();
     if (!(await shortTitleInput.count()) || !(await shortTitleInput.isVisible().catch(() => false))) {
-      logger.info('当前页面无短标题输入框，跳过');
-      return;
+      logger.warn('当前页面无短标题输入框');
+      return false;
     }
 
-    const value = (overrideShortTitle && overrideShortTitle.length > 0)
-      ? overrideShortTitle.slice(0, SHORT_TITLE_MAX_LEN)
-      : formatShortTitle(title);
     await rc.humanClick(UPLOAD_SELECTORS.shortTitleInput);
     await rc.humanType(UPLOAD_SELECTORS.shortTitleInput, value);
-    logger.info(`短标题已设置: ${value}`);
+    logger.info(`视频号短标题已填写: ${value}`);
+    return true;
   } catch (error) {
-    logger.warn('设置短标题失败，继续发布:', error);
+    logger.warn('填写视频号短标题失败:', error);
+    return false;
   }
 }
 
 export async function applyLocation(
   page: Page,
   location?: string
-): Promise<void> {
-  if (location === undefined) {
-    logger.info('位置字段未提供，跳过');
-    return;
-  }
-  if (location === '') {
-    logger.info('位置显式为空，跳过位置设置');
-    return;
-  }
+): Promise<boolean> {
+  const target = (location || '').trim();
 
   const rc = new PageRiskControl(page, {
     typingDelayMs: { min: 50, max: 200 },
@@ -137,26 +126,70 @@ export async function applyLocation(
   });
 
   try {
+    if (!target) {
+      let trigger = page.locator(
+        '.position-display, [class*="position-display"], [class*="position-select"], ' +
+        '[class*="location-select"], [class*="location-picker"]'
+      ).first();
+
+      if (!(await trigger.count()) || !(await trigger.isVisible().catch(() => false))) {
+        trigger = page.locator(
+          'div, section, li, label, button, [role="button"]'
+        ).filter({ hasText: /^(选择位置|添加位置|位置)$/ }).first();
+        if (!(await trigger.count()) || !(await trigger.isVisible().catch(() => false))) {
+          logger.warn('未找到视频号位置下拉框');
+          return false;
+        }
+      }
+
+      const box = await trigger.boundingBox().catch(() => null);
+      if (box && box.width > 16 && box.height > 0) {
+        await trigger.click({
+          position: {
+            x: Math.max(1, Math.round(box.width - 8)),
+            y: Math.max(1, Math.round(box.height / 2)),
+          },
+        });
+      } else {
+        await trigger.click();
+      }
+      await page.waitForTimeout(500);
+
+      const hideOption = page.getByText('不显示位置', { exact: true }).first();
+      if (!(await hideOption.isVisible().catch(() => false))) {
+        logger.warn('视频号位置下拉框中未找到“不显示位置”');
+        return false;
+      }
+
+      await hideOption.click();
+      await page.waitForTimeout(300);
+      logger.info('视频号位置已设置为“不显示位置”');
+      return true;
+    }
+
     const input = page.locator(UPLOAD_SELECTORS.locationInput).first();
     if (!(await input.count()) || !(await input.isVisible().catch(() => false))) {
       logger.warn('未找到位置输入框');
-      return;
+      return false;
     }
 
     await rc.humanClick(UPLOAD_SELECTORS.locationInput);
-    await rc.humanType(UPLOAD_SELECTORS.locationInput, location);
+    await rc.humanType(UPLOAD_SELECTORS.locationInput, target);
     await page.waitForTimeout(800);
 
-    const optionPattern = UPLOAD_SELECTORS.locationOption.replace('{location}', location);
+    const optionPattern = UPLOAD_SELECTORS.locationOption.replace('{location}', target);
     const option = page.locator(optionPattern).first();
     if (await option.isVisible().catch(() => false)) {
       await rc.humanClick(optionPattern);
-      logger.info(`已选择位置: ${location}`);
+      logger.info(`已选择位置: ${target}`);
+      return true;
     } else {
-      logger.warn(`位置选项未找到: ${location}，已输入但未确认`);
+      logger.warn(`位置选项未找到: ${target}，已输入但未确认`);
+      return false;
     }
   } catch (error) {
-    logger.warn('应用位置失败，继续发布:', error);
+    logger.warn('应用位置失败:', error);
+    return false;
   }
 }
 
@@ -329,89 +362,112 @@ export async function applyOriginalStatement(
   page: Page,
   isOriginal: boolean = true,
   originalCategory?: string
-): Promise<void> {
+): Promise<boolean> {
   if (!isOriginal) {
     logger.info('未声明原创，跳过');
-    return;
+    return true;
   }
 
-  const rc = new PageRiskControl(page, {
-    clickDelayMs: { min: 100, max: 300 },
-  });
-
   try {
-    const labelLocator = page.getByLabel('视频为原创');
-    let originalChecked = false;
-    if (await labelLocator.count()) {
-      const beforeChecked = await labelLocator.isChecked().catch(() => false);
-      if (!beforeChecked) {
-        await labelLocator.check();
-      }
-      originalChecked = await labelLocator.isChecked().catch(() => false);
-    } else {
-      const checkbox = page.locator(UPLOAD_SELECTORS.originalStatement).first();
-      if ((await checkbox.count()) && (await checkbox.isVisible().catch(() => false))) {
-        const isChecked = await checkbox.isChecked().catch(() => false);
-        if (!isChecked) {
-          await rc.humanClick(UPLOAD_SELECTORS.originalStatement);
-        }
-        originalChecked = !isChecked;
-      }
+    let originalCheckbox = page.getByLabel('声明原创', { exact: true }).first();
+    if (!(await originalCheckbox.count())) {
+      originalCheckbox = page.getByLabel('视频为原创', { exact: true }).first();
+    }
+    if (!(await originalCheckbox.count())) {
+      originalCheckbox = page.locator(
+        'div.declare-original-checkbox input[type="checkbox"], ' +
+        '[class*="declare-original"] input[type="checkbox"], ' +
+        '[class*="original-checkbox"] input[type="checkbox"]'
+      ).first();
+    }
+    if (!(await originalCheckbox.count()) || !(await originalCheckbox.isVisible().catch(() => false))) {
+      logger.warn('视频号原创步骤1失败：未找到"声明原创"复选框');
+      return false;
     }
 
-    if (!originalChecked) {
-      logger.warn('原创复选框未勾选成功，跳过原创声明');
-      return;
+    if (!(await originalCheckbox.isChecked().catch(() => false))) {
+      await originalCheckbox.check({ force: true });
+      if (!(await originalCheckbox.isChecked().catch(() => false))) {
+        logger.warn('视频号原创步骤1失败："声明原创"复选框未勾选');
+        return false;
+      }
+    }
+    logger.info('视频号已完成原创步骤1：勾选"声明原创"');
+
+    const dialog = page.locator(
+      'div.declare-original-dialog, div[role="dialog"], ' +
+      'div[class*="dialog"], div[class*="modal"], div[class*="popup"]'
+    )
+      .filter({ hasText: '原创声明须知' })
+      .filter({ hasText: '使用条款' })
+      .first();
+    await dialog.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+    if (!(await dialog.isVisible().catch(() => false))) {
+      logger.warn('视频号原创步骤2失败：原创声明弹窗未出现');
+      return false;
     }
 
-    await page.waitForTimeout(800);
+    const agreementContainer = dialog.locator('label, div, span')
+      .filter({ hasText: '我已阅读并同意' })
+      .filter({ hasText: '原创声明须知' })
+      .filter({ hasText: '使用条款' })
+      .first();
+    if (!(await agreementContainer.count()) || !(await agreementContainer.isVisible().catch(() => false))) {
+      logger.warn('视频号原创步骤2失败：未找到原创声明须知和使用条款');
+      return false;
+    }
 
-    const agreementCheckbox = page.locator('label:has-text("我已阅读并同意"):visible input[type="checkbox"]').first();
+    const agreementCheckbox = agreementContainer.locator('input[type="checkbox"]').first();
     if (await agreementCheckbox.count()) {
-      const isAgreementChecked = await agreementCheckbox.isChecked().catch(() => false);
-      if (!isAgreementChecked) {
-        await agreementCheckbox.check();
-        logger.info('已勾选原创声明条款');
+      if (!(await agreementCheckbox.isChecked().catch(() => false))) {
+        await agreementCheckbox.check({ force: true });
+      }
+      if (!(await agreementCheckbox.isChecked().catch(() => false))) {
+        logger.warn('视频号原创步骤2失败：条款复选框未勾选');
+        return false;
       }
     } else {
-      const agreementLabel = page.locator(UPLOAD_SELECTORS.originalAgreement).first();
-      if (await agreementLabel.isVisible().catch(() => false)) {
-        await rc.humanClick(UPLOAD_SELECTORS.originalAgreement);
+      const customCheckbox = agreementContainer.locator(
+        '[role="checkbox"], [class*="checkbox"], [class*="check"]'
+      ).first();
+      if (!(await customCheckbox.count()) || !(await customCheckbox.isVisible().catch(() => false))) {
+        logger.warn('视频号原创步骤2失败：未找到条款复选框控件');
+        return false;
+      }
+      await customCheckbox.click();
+    }
+    logger.info('视频号已完成原创步骤2：勾选原创声明须知和使用条款');
+
+    if (originalCategory) {
+      const categoryForm = dialog.locator(UPLOAD_SELECTORS.originalCategoryForm).first();
+      if (await categoryForm.count()) {
+        await categoryForm.click();
+        await page.waitForTimeout(300);
+        const optionPattern = UPLOAD_SELECTORS.originalCategoryOption.replace('{category}', originalCategory);
+        const option = page.locator(optionPattern).first();
+        if (await option.isVisible().catch(() => false)) {
+          await option.click();
+          logger.info(`原创类型已选择: ${originalCategory}`);
+        }
       }
     }
 
-    const confirmBtn = page.locator('div.declare-original-dialog button:has-text("确定"), div.declare-original-dialog button:has-text("确认"), button.primary:has-text("确定")').first();
-    if (await confirmBtn.count()) {
-      await confirmBtn.click();
-      await page.waitForTimeout(500);
-      logger.info('原创声明弹窗已点击确认');
-    } else {
-      const anyConfirm = page.locator('button:has-text("确定"), button:has-text("确认"), button:has-text("完成")').first();
-      if (await anyConfirm.isVisible().catch(() => false)) {
-        await anyConfirm.click();
-        await page.waitForTimeout(500);
-        logger.info('原创声明弹窗通用确认按钮已点击');
-      }
+    const declareButton = dialog.getByRole('button', { name: '声明原创', exact: true }).first();
+    if (!(await declareButton.count()) || !(await declareButton.isVisible().catch(() => false))) {
+      logger.warn('视频号原创步骤3失败：未找到"声明原创"按钮');
+      return false;
     }
-
-    if (!originalCategory) {
-      return;
+    await declareButton.click();
+    await dialog.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    if (await dialog.isVisible().catch(() => false)) {
+      logger.warn('视频号原创步骤3失败：点击后弹窗未关闭');
+      return false;
     }
-
-    const categoryForm = page.locator(UPLOAD_SELECTORS.originalCategoryForm).first();
-    if (!(await categoryForm.count())) {
-      return;
-    }
-    await page.locator('div.form-content:visible').first().click();
-    await page.waitForTimeout(300);
-    const optionPattern = UPLOAD_SELECTORS.originalCategoryOption.replace('{category}', originalCategory);
-    const option = page.locator(optionPattern).first();
-    if (await option.isVisible().catch(() => false)) {
-      await option.click();
-      logger.info(`原创类型已选择: ${originalCategory}`);
-    }
+    logger.info('视频号已完成原创步骤3：点击"声明原创"');
+    return true;
   } catch (error) {
-    logger.warn('应用原创声明失败，继续发布:', error);
+    logger.warn('应用原创声明失败:', error);
+    return false;
   }
 }
 
@@ -524,17 +580,26 @@ export async function publish(ctx: PublishContext): Promise<PublishResult> {
       0,
     );
 
-    await debugRecorder.recordStep('fill_video_metadata', async () => {
-      await fillVideoMetadata(page, title, description, sanitizedTags);
+    const descriptionApplied = await debugRecorder.recordStep('fill_video_metadata', async () => {
+      return await fillVideoMetadata(page, title, description, sanitizedTags);
     }, pageCtx);
+    if (!descriptionApplied) {
+      throw new ValidationError('视频号描述填写失败', undefined, 'channels');
+    }
 
-    await debugRecorder.recordStep('set_short_title', async () => {
-      await setShortTitle(page, title, shortTitle);
+    const shortTitleApplied = await debugRecorder.recordStep('set_short_title', async () => {
+      return await setShortTitle(page, title, shortTitle);
     }, pageCtx);
+    if (!shortTitleApplied) {
+      throw new ValidationError('视频号短标题填写失败', undefined, 'channels');
+    }
 
-    await debugRecorder.recordStep('apply_location', async () => {
-      await applyLocation(page, location);
+    const locationApplied = await debugRecorder.recordStep('apply_location', async () => {
+      return await applyLocation(page, location);
     }, pageCtx);
+    if (!locationApplied) {
+      throw new ValidationError('视频号位置设置失败', { location: location ?? '' }, 'channels');
+    }
 
     await debugRecorder.recordStep('apply_collection', async () => {
       await applyCollection(page, collection);
@@ -544,13 +609,21 @@ export async function publish(ctx: PublishContext): Promise<PublishResult> {
       await applyProductLink(page, productLink, ctx.productTitle);
     }, pageCtx);
 
-    await debugRecorder.recordStep('apply_schedule', async () => {
-      await applySchedule(page, scheduledTime);
-    }, pageCtx);
+    if (scheduledTime) {
+      const scheduleApplied = await debugRecorder.recordStep('apply_schedule', async () => {
+        return await applySchedule(page, scheduledTime);
+      }, pageCtx);
+      if (!scheduleApplied) {
+        throw new ValidationError('视频号定时发表设置失败', undefined, 'channels');
+      }
+    }
 
-    await debugRecorder.recordStep('apply_original_statement', async () => {
-      await applyOriginalStatement(page, isOriginal ?? true, (ctx as { category?: string }).category);
+    const originalApplied = await debugRecorder.recordStep('apply_original_statement', async () => {
+      return await applyOriginalStatement(page, isOriginal === true, (ctx as { category?: string }).category);
     }, pageCtx);
+    if (!originalApplied) {
+      throw new ValidationError('视频号原创声明未完成', undefined, 'channels');
+    }
 
     if (ctx.dryRun) {
       logger.info(`[DRY RUN] Skipping final publish for ${ctx.accountId}`);

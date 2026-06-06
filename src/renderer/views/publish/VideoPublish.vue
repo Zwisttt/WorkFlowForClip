@@ -668,7 +668,11 @@ async function handlePublish() {
     ElMessage.success(parts.join('，'));
   }
   if (failCount > 0) {
-    ElMessage.warning(`${failCount} 个账号发布失败，可能平台暂不支持`);
+    const failedItems = publishQueue.value.filter(q => q.status === 'failed');
+    const details = failedItems
+      .map(q => `${q.accountName}：${q.message || '未知错误'}`)
+      .join('；');
+    ElMessage.warning({ message: `${failCount} 个账号发布失败 — ${details}`, duration: 6000, showClose: true });
   }
 }
 
@@ -739,6 +743,11 @@ function getDefaultPlatformConfig(platform?: string): PlatformConfig {
       declaration: '',
       visibility: 'public',
       scheduleMode: 'immediate',
+    };
+  }
+  if (platform === 'channels') {
+    return {
+      location: '',
     };
   }
   return {};

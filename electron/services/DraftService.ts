@@ -192,6 +192,7 @@ class DraftService {
           description: config.description ?? snapshot.description,
           tags: config.tags,
           visibility: config.visibility,
+          declaration: config.declaration,
         },
       });
       publishService.executeNow(task.id).catch(err => {

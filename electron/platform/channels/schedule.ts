@@ -1,7 +1,7 @@
 import type { Page } from 'patchright';
 import { Logger } from '../../core/Logger';
 import { UPLOAD_SELECTORS } from './selectors';
-import { fillVideoMetadata } from './publish';
+import { fillVideoMetadata, setShortTitle } from './publish';
 import type { ScheduleContext, ScheduleResult } from '../base/types';
 import { toPlatformError, ValidationError } from '../base/PlatformError';
 import { getDebugRecorder } from '../base/DebugRecorder';
@@ -73,9 +73,19 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
 
   try {
     // 填写元数据
-    await debugRecorder.recordStep('fill_video_metadata', async () => {
-      await fillVideoMetadata(page, title, description, tags);
+    const descriptionApplied = await debugRecorder.recordStep('fill_video_metadata', async () => {
+      return await fillVideoMetadata(page, title, description, tags);
     }, pageCtx);
+    if (!descriptionApplied) {
+      return { success: false, message: '视频号描述填写失败' };
+    }
+
+    const shortTitleApplied = await debugRecorder.recordStep('set_short_title', async () => {
+      return await setShortTitle(page, title);
+    }, pageCtx);
+    if (!shortTitleApplied) {
+      return { success: false, message: '视频号短标题填写失败' };
+    }
 
     const rc = new PageRiskControl(page, {
       clickDelayMs: { min: 100, max: 300 },

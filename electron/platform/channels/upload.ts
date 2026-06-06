@@ -13,7 +13,15 @@ import { accountService } from '../../services/AccountService';
 import { getDebugRecorder } from '../base/DebugRecorder';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
+import { shouldPreserveStandaloneBrowserAfterFailure } from '../../services/publish-browser-policy';
 import type { BrowserConfig, IBrowserLauncher } from '../../services/types';
+import {
+  applyLocation,
+  applyOriginalStatement,
+  applySchedule,
+  formatChannelsShortTitle,
+  setShortTitle,
+} from './publish';
 
 const logger = new Logger('ChannelsUpload');
 
@@ -42,14 +50,12 @@ const EMBEDDED_DOM_HELPERS = `
     };
     const scan = (root) => {
       if (!root || typeof root.querySelectorAll !== 'function') return;
-      for (const host of Array.from(root.querySelectorAll('wujie-app'))) {
-        if (host && host.shadowRoot) {
-          push(host.shadowRoot);
-        }
-      }
-      for (const iframe of Array.from(root.querySelectorAll('iframe'))) {
+      for (const element of Array.from(root.querySelectorAll('*'))) {
         try {
-          if (iframe.contentDocument) push(iframe.contentDocument);
+          if (element.shadowRoot) push(element.shadowRoot);
+          if (element.tagName === 'IFRAME' && element.contentDocument) {
+            push(element.contentDocument);
+          }
         } catch {}
       }
     };
@@ -175,8 +181,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function shouldKeepBrowserOnPublishFailure(): boolean {
-  return false;
+export function shouldKeepBrowserOnPublishFailure(failureMessage: string): boolean {
+  return shouldPreserveStandaloneBrowserAfterFailure('channels', failureMessage);
 }
 
 async function waitForEmbeddedReady(wc: WebContents, timeoutMs: number): Promise<void> {
@@ -598,26 +604,18 @@ function normalizeChannelsTags(tags?: string[]): string[] {
     .slice(0, 10);
 }
 
-function buildEmbeddedDescriptionText(ctx: UploadContext): { text: string; tagCount: number } {
-  const title = (ctx.title || '').trim();
+export function buildEmbeddedDescriptionText(ctx: UploadContext): { text: string; tagCount: number } {
   const description = (ctx.description || '').trim();
   const tags = normalizeChannelsTags(ctx.tags);
-  const lines: string[] = [];
-
-  if (title) {
-    lines.push(title);
-  }
-  if (tags.length > 0) {
-    lines.push(tags.map(tag => `#${tag}`).join(' '));
-  }
-  if (description && description !== title) {
-    lines.push(description);
-  }
 
   return {
-    text: lines.join('\n').trim(),
+    text: description,
     tagCount: tags.length,
   };
+}
+
+export function buildEmbeddedShortTitle(ctx: UploadContext): string {
+  return formatChannelsShortTitle(ctx.title || '');
 }
 
 async function dumpEmbeddedState(wc: WebContents, label: string): Promise<void> {
@@ -669,67 +667,13 @@ async function showEmbeddedStatus(wc: WebContents, status: string): Promise<void
   `, true).catch(() => {});
 }
 
-async function fillEmbeddedFields(wc: WebContents, ctx: UploadContext): Promise<void> {
-  const title = (ctx.title || '').trim();
-  const description = (ctx.description || '').trim();
+async function fillEmbeddedFields(wc: WebContents, ctx: UploadContext): Promise<boolean> {
   const tags = normalizeChannelsTags(ctx.tags);
-  const shortTitle = title.slice(0, 20);
+  const { text: baseText } = buildEmbeddedDescriptionText(ctx);
+  const shortTitle = buildEmbeddedShortTitle(ctx);
 
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   const jitter = (min: number, max: number) => sleep(min + Math.random() * (max - min));
-
-  if (shortTitle) {
-    const shortResult = await wc.executeJavaScript(`
-      (() => {
-        ${EMBEDDED_DOM_HELPERS}
-        const sels = [
-          'input[placeholder*="短标题"]',
-          'input[placeholder*="标题"]',
-          'input[maxlength="20"]',
-          '[class*="short-title"] input',
-        ];
-        for (const sel of sels) {
-          const el = queryAll(sel).find((e) => isVisible(e));
-          if (el) {
-            el.scrollIntoView({ block: 'center' });
-            el.focus();
-            const proto = Object.getPrototypeOf(el);
-            const setter = proto ? Object.getOwnPropertyDescriptor(proto, 'value')?.set : null;
-            if (setter) setter.call(el, '');
-            else el.value = '';
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            return true;
-          }
-        }
-        return false;
-      })()
-    `, true).catch(() => false) as boolean;
-
-    if (shortResult) {
-      await jitter(100, 200);
-      await wc.executeJavaScript(`
-        (() => {
-          ${EMBEDDED_DOM_HELPERS}
-          const el = queryAll('input[placeholder*="短标题"], input[placeholder*="标题"], input[maxlength="20"], [class*="short-title"] input')
-            .find((e) => isVisible(e));
-          if (!el) return;
-          el.focus();
-          const proto = Object.getPrototypeOf(el);
-          const setter = proto ? Object.getOwnPropertyDescriptor(proto, 'value')?.set : null;
-          if (setter) setter.call(el, ${JSON.stringify(shortTitle)});
-          else el.value = ${JSON.stringify(shortTitle)};
-          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(shortTitle)} }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        })()
-      `, true).catch(() => {});
-      logger.info('视频号账号浏览器已填写短标题');
-    } else {
-      logger.warn('视频号账号浏览器未找到短标题输入框');
-    }
-  }
-
-  const descText = [title, description && description !== title ? description : ''];
-  const baseText = descText.filter(Boolean).join('\n');
 
   const descResult = await wc.executeJavaScript(`
     (() => {
@@ -759,7 +703,7 @@ async function fillEmbeddedFields(wc: WebContents, ctx: UploadContext): Promise<
 
   if (!descResult.ok) {
     logger.warn(`视频号账号浏览器未找到描述编辑器: ${descResult.error || ''}`);
-    return;
+    return false;
   }
 
   logger.info(`视频号账号浏览器已填写描述: length=${descResult.length || baseText.length}`);
@@ -839,26 +783,46 @@ async function fillEmbeddedFields(wc: WebContents, ctx: UploadContext): Promise<
       await jitter(200, 300);
     }
   }
-}
 
-function buildFullText(title: string, description: string, tags: string[]): string {
-  const parts: string[] = [];
-  if (title) parts.push(title);
-  if (description && description !== title) parts.push(description);
-  for (const tag of tags) {
-    const tagText = String(tag || '').trim().replace(/^#+/, '');
-    if (tagText) parts.push(`#${tagText}`);
+  if (!shortTitle) {
+    logger.warn('视频号短标题为空，停止后续字段设置');
+    return false;
   }
-  return parts.join('\n');
+
+  const shortResult = await wc.executeJavaScript(`
+    (() => {
+      ${EMBEDDED_DOM_HELPERS}
+      const el = queryAll('input[placeholder*="短标题"], input[placeholder*="标题"][maxlength], input[maxlength="20"], [class*="short-title"] input')
+        .find((e) => isVisible(e));
+      if (!el) return false;
+      el.scrollIntoView({ block: 'center' });
+      el.focus();
+      const proto = Object.getPrototypeOf(el);
+      const setter = proto ? Object.getOwnPropertyDescriptor(proto, 'value')?.set : null;
+      if (setter) setter.call(el, ${JSON.stringify(shortTitle)});
+      else el.value = ${JSON.stringify(shortTitle)};
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(shortTitle)} }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return el.value === ${JSON.stringify(shortTitle)};
+    })()
+  `, true).catch(() => false) as boolean;
+
+  if (!shortResult) {
+    logger.warn('视频号账号浏览器短标题填写后校验失败');
+    return false;
+  }
+
+  logger.info(`视频号账号浏览器已填写短标题: ${shortTitle}`);
+  return true;
 }
 
-function shouldApplyOriginalStatement(ctx: UploadContext): boolean {
+export function shouldApplyOriginalStatement(ctx: UploadContext): boolean {
   const declaration = (ctx.declaration || '').trim();
   if (!declaration) return false;
   return ['original', 'self', 'self_shot', '自主拍摄', '原创'].includes(declaration);
 }
 
-async function applyEmbeddedOriginalStatement(wc: WebContents, ctx: UploadContext): Promise<boolean> {
+export async function applyEmbeddedOriginalStatement(wc: WebContents, ctx: UploadContext): Promise<boolean> {
   if (!shouldApplyOriginalStatement(ctx)) {
     logger.info(`视频号账号浏览器跳过原创声明: declaration=${ctx.declaration || ''}`);
     return true;
@@ -870,194 +834,403 @@ async function applyEmbeddedOriginalStatement(wc: WebContents, ctx: UploadContex
   const step1 = await wc.executeJavaScript(`
     (() => {
       ${EMBEDDED_DOM_HELPERS}
-      const antCb = queryAll('div.declare-original-checkbox input.ant-checkbox-input, input.ant-checkbox-input').find((e) => isVisible(e));
-      if (antCb && !antCb.checked) {
-        antCb.focus();
-        antCb.click();
-        antCb.dispatchEvent(new Event('change', { bubbles: true }));
-        return { found: true, method: 'ant-checkbox' };
-      }
-      const candidates = queryAll('label, [role="checkbox"], span, div');
-      const target = candidates.find((el) => {
-        if (!isVisible(el)) return false;
-        const text = textOf(el);
-        return text === '视频为原创' || text === '声明原创' || text === '原创';
-      });
-      if (!target) return { found: false };
-      target.scrollIntoView({ block: 'center' });
-      const checkbox = target.querySelector('input[type="checkbox"]') || target.closest('label')?.querySelector('input[type="checkbox"]');
+      const normalizeText = (value) => String(value || '').replace(/\\s+/g, '');
+      const candidates = queryAll(
+        'label, [role="checkbox"], [class*="checkbox"], [class*="original"], div, span'
+      )
+        .filter((el) => {
+          if (!isVisible(el) || el.closest?.('div[role="dialog"], [class*="dialog"], [class*="modal"]')) {
+            return false;
+          }
+          const text = normalizeText(textOf(el));
+          return text === '声明原创' ||
+            text === '视频为原创' ||
+            text.startsWith('声明视频为原创');
+        })
+        .sort((a, b) => normalizeText(textOf(a)).length - normalizeText(textOf(b)).length);
+      const label = candidates[0];
+      if (!label) return { found: false };
+
+      const scopes = [
+        label.closest('label'),
+        label.closest('[class*="declare-original"], [class*="original"], [class*="checkbox"]'),
+        label.parentElement,
+        label.parentElement?.parentElement,
+        label,
+      ].filter(Boolean);
+      const checkbox = scopes
+        .map((scope) => scope.matches?.('input[type="checkbox"]')
+          ? scope
+          : scope.querySelector?.('input[type="checkbox"]'))
+        .find(Boolean);
+      const customCheckbox = scopes
+        .map((scope) => scope.matches?.('[role="checkbox"], [class*="checkbox"]')
+          ? scope
+          : scope.querySelector?.('[role="checkbox"], [class*="checkbox"]'))
+        .find(Boolean);
+      const isCustomChecked = (el) => !!el && (
+        el.getAttribute?.('aria-checked') === 'true' ||
+        el.getAttribute?.('data-state') === 'checked' ||
+        /(^|[\\s_-])(is[\\s_-])?checked([\\s_-]|$)/i.test(String(el.className || ''))
+      );
+
       if (checkbox) {
-        checkbox.focus();
+        if (checkbox.checked) {
+          return { found: true, clicked: false, alreadyChecked: true, method: 'native-already-checked' };
+        }
+        window.__matrixFlowOriginalAgreementClicked = false;
+        checkbox.scrollIntoView?.({ block: 'center' });
+        checkbox.focus?.();
         checkbox.click();
-        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-        return { found: true, method: 'label-checkbox' };
+        return {
+          found: true,
+          clicked: true,
+          alreadyChecked: checkbox.checked,
+          method: 'native-checkbox',
+        };
       }
-      clickElement(target);
-      return { found: true, method: 'label-click' };
+      if (isCustomChecked(customCheckbox)) {
+        return { found: true, clicked: false, alreadyChecked: true, method: 'custom-already-checked' };
+      }
+
+      window.__matrixFlowOriginalAgreementClicked = false;
+      const clickTarget = customCheckbox || label.closest('label') || label;
+      const clicked = clickElement(clickTarget);
+      return {
+        found: true,
+        clicked,
+        alreadyChecked: isCustomChecked(customCheckbox),
+        method: customCheckbox ? 'custom-checkbox' : 'label-click',
+      };
     })()
   `, true).catch((e) => {
     logger.warn(`视频号原创声明Step1异常: ${String(e)}`);
-    return { found: false, method: 'error' };
-  }) as { found: boolean; method?: string; selector?: string };
+    return { found: false, clicked: false, alreadyChecked: false, method: 'error' };
+  }) as {
+    found: boolean;
+    clicked: boolean;
+    alreadyChecked: boolean;
+    method?: string;
+  };
 
-  if (!step1.found) {
-    logger.warn('视频号账号浏览器未找到"视频为原创"复选框');
+  if (!step1.found || (!step1.clicked && !step1.alreadyChecked)) {
+    logger.warn('视频号账号浏览器未能点击"声明原创"复选框');
     return false;
   }
 
-  logger.info(`视频号已点击"视频为原创" (method=${step1.method})，等待弹窗渲染...`);
-  await jitter(1000, 1500);
+  if (step1.alreadyChecked && !step1.clicked) {
+    const dialogOpen = await wc.executeJavaScript(`
+      (() => {
+        ${EMBEDDED_DOM_HELPERS}
+        const normalizeText = (value) => String(value || '').replace(/\\s+/g, '');
+        return queryAll(
+          'div.declare-original-dialog, div[role="dialog"], [aria-modal="true"], ' +
+          'div[class*="dialog"], div[class*="modal"], div[class*="popup"], div, section, article, form'
+        ).some((el) => {
+          if (!isVisible(el)) return false;
+          const text = normalizeText(textOf(el));
+          if (!text.includes('原创声明须知') || !text.includes('使用条款')) return false;
+          return Array.from(
+            el.querySelectorAll('button, [role="button"], [class*="button"]')
+          ).some((button) => isVisible(button) && normalizeText(textOf(button)) === '声明原创');
+        });
+      })()
+    `, true).catch(() => false) as boolean;
 
-  const step2 = await wc.executeJavaScript(`
-    (() => {
-      ${EMBEDDED_DOM_HELPERS}
-      const dialogSels = [
-        'div.declare-original-dialog',
-        'div[role="dialog"]',
-        'div[class*="dialog"]',
-        'div[class*="modal"]',
-        'div[class*="popup"]',
-      ];
-      let dialog = null;
-      for (const sel of dialogSels) {
-        const el = queryAll(sel).find((e) => isVisible(e));
-        if (el) { dialog = el; break; }
-      }
+    if (!dialogOpen) {
+      logger.info(`视频号原创声明已完成，无需重复操作 (method=${step1.method})`);
+      return true;
+    }
+    logger.info(`视频号原创复选框已勾选，继续处理未完成弹窗 (method=${step1.method})`);
+  }
 
-      const searchIn = dialog || { querySelectorAll: (s) => queryAll(s), ownerDocument: document };
+  logger.info(`视频号已完成原创步骤1：点击"声明原创" (method=${step1.method})`);
+  await jitter(500, 800);
 
-      const agreementSels = [
-        'div.declare-original-dialog input.ant-checkbox-input',
-        'input.ant-checkbox-input',
-      ];
-      for (const sel of agreementSels) {
-        const els = dialog ? Array.from(dialog.querySelectorAll(sel)) : queryAll(sel);
-        for (const el of els) {
-          if (!isVisible(el)) continue;
-          if (!el.checked) {
-            el.focus();
-            el.click();
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            return { found: true, method: 'dialog-agreement', selector: sel };
-          }
-          return { found: true, method: 'dialog-already-checked', selector: sel };
+  let step2: {
+    found: boolean;
+    acted: boolean;
+    accepted: boolean;
+    method?: string;
+    reason?: string;
+    debug: Record<string, unknown> | null;
+    error?: string;
+  } = { found: false, acted: false, accepted: false, debug: null };
+
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    step2 = await wc.executeJavaScript(`
+      (() => {
+        ${EMBEDDED_DOM_HELPERS}
+        const normalizeText = (value) => String(value || '').replace(/\\s+/g, '');
+        const agreementTextMatches = (text) => {
+          const normalized = normalizeText(text);
+          return normalized.includes('我已阅读并同意') &&
+            normalized.includes('原创声明须知') &&
+            normalized.includes('使用条款');
+        };
+        const findDialog = () => {
+          const preferred = queryAll(
+            'div.declare-original-dialog, div[role="dialog"], [aria-modal="true"], ' +
+            'div[class*="dialog"], div[class*="modal"], div[class*="popup"]'
+          );
+          const fallback = queryAll('div, section, article, form');
+          return [...preferred, ...fallback]
+            .filter((el) => {
+              if (!isVisible(el)) return false;
+              const text = normalizeText(textOf(el));
+              if (!text.includes('原创声明须知') || !text.includes('使用条款')) return false;
+              return Array.from(
+                el.querySelectorAll('button, [role="button"], [class*="button"]')
+              ).some((button) => isVisible(button) && normalizeText(textOf(button)) === '声明原创');
+            })
+            .sort((a, b) => normalizeText(textOf(a)).length - normalizeText(textOf(b)).length)[0] || null;
+        };
+        const isCustomChecked = (el) => !!el && (
+          el.getAttribute?.('aria-checked') === 'true' ||
+          el.getAttribute?.('data-state') === 'checked' ||
+          /(^|[\\s_-])(is[\\s_-])?checked([\\s_-]|$)/i.test(String(el.className || ''))
+        );
+        const isEnabled = (el) => !!el &&
+          !el.disabled &&
+          el.getAttribute?.('aria-disabled') !== 'true' &&
+          !/(^|[\\s_-])(is[\\s_-])?disabled([\\s_-]|$)/i.test(String(el.className || ''));
+
+        const dialog = findDialog();
+        if (!dialog) {
+          return { found: false, acted: false, accepted: false, reason: 'dialog-not-found', debug: null };
         }
-      }
 
-      const allCbs = dialog ? Array.from(dialog.querySelectorAll('input[type="checkbox"]')) : queryAll('input[type="checkbox"]');
-      const debugInfo = {
-        dialogFound: !!dialog,
-        dialogClass: dialog ? dialog.className : null,
-        totalCbs: allCbs.length,
-        visibleCbs: allCbs.filter((cb) => isVisible(cb)).length,
-        cbTexts: allCbs.filter((cb) => isVisible(cb)).map((cb) => {
-          const p = cb.closest('label, div, span') || cb.parentElement;
-          return (p ? textOf(p) : '').slice(0, 80);
-        }),
-        allCbsInPage: queryAll('input[type="checkbox"]').length,
-        visibleCbsInPage: queryAll('input[type="checkbox"]').filter((cb) => isVisible(cb)).length,
-        labelTexts: queryAll('label').filter((l) => isVisible(l)).map((l) => textOf(l).slice(0, 60)),
-        visibleButtons: queryAll('button, [role="button"]').filter((b) => isVisible(b)).map((b) => textOf(b).slice(0, 30)),
-      };
+        const agreementContainers = Array.from(dialog.querySelectorAll('label, div, span, p'))
+          .filter((el) => isVisible(el) && agreementTextMatches(textOf(el)))
+          .sort((a, b) => normalizeText(textOf(a)).length - normalizeText(textOf(b)).length);
+        const agreement = agreementContainers[0];
+        const buttons = Array.from(dialog.querySelectorAll('button, [role="button"], [class*="button"]'))
+          .filter((el) => isVisible(el));
+        const declareButton = buttons.find((el) => normalizeText(textOf(el)) === '声明原创');
+        const debugInfo = {
+          dialogClass: String(dialog.className || '').slice(0, 120),
+          agreementCount: agreementContainers.length,
+          checkboxCount: dialog.querySelectorAll('input[type="checkbox"]').length,
+          buttons: buttons.map((el) => textOf(el).trim().slice(0, 30)),
+        };
 
-      const keywords = ['使用条款', '原创声明须知', '我已阅读', '同意'];
-      for (const cb of allCbs) {
-        if (!isVisible(cb) || cb.checked) continue;
-        const parent = cb.closest('label, div, span') || cb.parentElement;
-        if (parent) {
-          const text = textOf(parent);
-          if (keywords.some((kw) => text.includes(kw))) {
-            cb.focus();
-            cb.click();
-            cb.dispatchEvent(new Event('change', { bubbles: true }));
-            return { found: true, method: 'context-checkbox', debug: debugInfo };
-          }
+        if (!agreement) {
+          return {
+            found: false,
+            acted: false,
+            accepted: false,
+            reason: 'agreement-text-not-found',
+            debug: debugInfo,
+          };
         }
-      }
 
-      const keywordContainers = queryAll('div, span, p, label, a');
-      for (const container of keywordContainers) {
-        if (!isVisible(container)) continue;
-        const text = textOf(container);
-        if (text.length > 200) continue;
-        if (!text.includes('我已阅读') && !text.includes('同意') && !text.includes('使用条款')) continue;
-        if (text.includes('视频为原创') && !text.includes('使用条款')) continue;
-        const innerCb = container.querySelector('input[type="checkbox"]');
-        if (innerCb && !innerCb.checked) {
-          innerCb.focus();
-          innerCb.click();
-          innerCb.dispatchEvent(new Event('change', { bubbles: true }));
-          return { found: true, method: 'container-inner-cb', debug: debugInfo };
+        const scopes = [
+          agreement.closest('label'),
+          agreement.closest('[class*="agreement"], [class*="protocol"], [class*="checkbox"]'),
+          agreement,
+          agreement.parentElement,
+          agreement.parentElement?.parentElement,
+        ].filter(Boolean);
+        const checkbox = scopes
+          .map((scope) => scope.matches?.('input[type="checkbox"]')
+            ? scope
+            : scope.querySelector?.('input[type="checkbox"]'))
+          .find(Boolean);
+        const customCheckbox = scopes
+          .map((scope) => scope.matches?.('[role="checkbox"], [class*="checkbox"], [class*="check"]')
+            ? scope
+            : scope.querySelector?.('[role="checkbox"], [class*="checkbox"], [class*="check"]'))
+          .find(Boolean);
+
+        const agreementClicked = window.__matrixFlowOriginalAgreementClicked === true;
+        if (
+          checkbox?.checked ||
+          isCustomChecked(customCheckbox) ||
+          (agreementClicked && isEnabled(declareButton))
+        ) {
+          return {
+            found: true,
+            acted: false,
+            accepted: true,
+            method: checkbox?.checked
+              ? 'native-checked'
+              : isCustomChecked(customCheckbox)
+                ? 'custom-checked'
+                : 'declare-button-enabled',
+            debug: debugInfo,
+          };
         }
-        const possibleCb = container.querySelector('[class*="checkbox"], [class*="check"], [role="checkbox"]');
-        if (possibleCb && !possibleCb.classList?.contains?.('checked')) {
-          clickElement(possibleCb);
-          return { found: true, method: 'container-custom-cb', debug: debugInfo };
+
+        if (window.__matrixFlowOriginalAgreementClicked) {
+          return {
+            found: true,
+            acted: false,
+            accepted: false,
+            reason: 'waiting-for-checked-state',
+            debug: debugInfo,
+          };
         }
-        clickElement(container);
-        return { found: true, method: 'container-click', debug: debugInfo };
-      }
-      return { found: false, debug: debugInfo };
-    })()
-  `, true).catch((e) => ({ found: false, debug: null, error: String(e) })) as { found: boolean; method?: string; debug: Record<string, unknown> | null; error?: string };
+
+        const clickTarget = checkbox ||
+          customCheckbox ||
+          agreement.closest('label') ||
+          agreement;
+        let acted = false;
+        if (checkbox) {
+          checkbox.focus?.();
+          checkbox.click();
+          acted = true;
+        } else {
+          acted = clickElement(clickTarget);
+        }
+        window.__matrixFlowOriginalAgreementClicked = acted;
+
+        return {
+          found: true,
+          acted,
+          accepted: !!checkbox?.checked || isCustomChecked(customCheckbox) || isEnabled(declareButton),
+          method: checkbox ? 'native-checkbox' : customCheckbox ? 'custom-checkbox' : 'agreement-container',
+          debug: debugInfo,
+        };
+      })()
+    `, true).catch((e) => ({
+      found: false,
+      acted: false,
+      accepted: false,
+      debug: null,
+      error: String(e),
+    })) as typeof step2;
+
+    if (step2.found && step2.accepted) break;
+    if (attempt < 20) await sleep(300);
+  }
 
   if (step2.debug) {
     const d = step2.debug as Record<string, unknown>;
-    logger.info(`视频号原创弹窗诊断: dialogFound=${d.dialogFound} dialogClass=${d.dialogClass}`);
-    logger.info(`  弹窗内checkbox: total=${d.totalCbs} visible=${d.visibleCbs} texts=${JSON.stringify(d.cbTexts)}`);
-    logger.info(`  全页面checkbox: total=${d.allCbsInPage} visible=${d.visibleCbsInPage}`);
-    logger.info(`  labelTexts: ${JSON.stringify(d.labelTexts)}`);
-    logger.info(`  visibleButtons: ${JSON.stringify(d.visibleButtons)}`);
+    logger.info(
+      `视频号原创弹窗诊断: dialogClass=${d.dialogClass} agreementCount=${d.agreementCount} ` +
+      `checkboxCount=${d.checkboxCount} buttons=${JSON.stringify(d.buttons)}`
+    );
   }
 
-  const agreement = step2.found;
-  if (step2.found) {
-    logger.info(`视频号已勾选同意条款 (method=${step2.method})`);
-  } else {
-    logger.warn(`视频号未找到同意条款复选框 (error=${step2.error || 'none'})`);
+  if (!step2.found || !step2.accepted) {
+    logger.warn(
+      `视频号原创步骤2失败：未能确认原创声明须知和使用条款 ` +
+      `(reason=${step2.reason || 'unknown'} error=${step2.error || 'none'})`
+    );
+    return false;
   }
 
-  await jitter(500, 800);
+  logger.info(`视频号已完成原创步骤2：勾选原创声明须知和使用条款 (method=${step2.method})`);
+  await jitter(300, 500);
 
-  const step3 = await wc.executeJavaScript(`
-    (() => {
-      ${EMBEDDED_DOM_HELPERS}
-      const dialogSels = ['div.declare-original-dialog', 'div[role="dialog"]', 'div[class*="dialog"]', 'div[class*="modal"]'];
-      let dialog = null;
-      for (const sel of dialogSels) {
-        const el = queryAll(sel).find((e) => isVisible(e));
-        if (el) { dialog = el; break; }
-      }
-      const searchScope = dialog || { querySelectorAll: (s) => [] };
-      const dialogBtns = dialog ? Array.from(dialog.querySelectorAll('button, [role="button"]')) : [];
-      for (const btn of dialogBtns) {
-        if (!isVisible(btn)) continue;
-        const txt = textOf(btn).trim();
-        if (txt === '声明原创') return clickElement(btn) ? { found: true, method: 'dialog-btn' } : { found: false };
-      }
-      const allBtns = queryAll('button, [role="button"]');
-      for (const btn of allBtns) {
-        if (!isVisible(btn)) continue;
-        const txt = textOf(btn).trim();
-        if (txt === '声明原创' || txt === '确定' || txt === '确认') {
-          return clickElement(btn) ? { found: true, method: 'page-btn', text: txt } : { found: false };
+  let step3: {
+    found: boolean;
+    clicked: boolean;
+    disabled?: boolean;
+    text?: string;
+    buttons?: string[];
+    error?: string;
+  } = { found: false, clicked: false };
+
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    step3 = await wc.executeJavaScript(`
+      (() => {
+        ${EMBEDDED_DOM_HELPERS}
+        const normalizeText = (value) => String(value || '').replace(/\\s+/g, '');
+        const candidates = queryAll(
+          'div.declare-original-dialog, div[role="dialog"], [aria-modal="true"], ' +
+          'div[class*="dialog"], div[class*="modal"], div[class*="popup"], div, section, article, form'
+        )
+          .filter((el) => {
+            if (!isVisible(el)) return false;
+            const text = normalizeText(textOf(el));
+            if (!text.includes('原创声明须知') || !text.includes('使用条款')) return false;
+            return Array.from(
+              el.querySelectorAll('button, [role="button"], [class*="button"]')
+            ).some((button) => isVisible(button) && normalizeText(textOf(button)) === '声明原创');
+          })
+          .sort((a, b) => normalizeText(textOf(a)).length - normalizeText(textOf(b)).length);
+        const dialog = candidates[0];
+        if (!dialog) return { found: false, clicked: false };
+
+        const buttons = Array.from(
+          dialog.querySelectorAll('button, [role="button"], [class*="button"]')
+        ).filter((btn) => isVisible(btn));
+        const button = buttons.find((btn) => normalizeText(textOf(btn)) === '声明原创');
+        if (!button) {
+          return {
+            found: false,
+            clicked: false,
+            buttons: buttons.map((btn) => textOf(btn).trim().slice(0, 30)),
+          };
         }
-      }
-      const debugBtns = allBtns.filter((b) => isVisible(b)).map((b) => textOf(b).slice(0, 30));
-      const dialogDebugBtns = dialogBtns.filter((b) => isVisible(b)).map((b) => textOf(b).slice(0, 30));
-      return { found: false, dialogBtns: dialogDebugBtns, pageBtns: debugBtns };
-    })()
-  `, true).catch(() => ({ found: false })) as { found: boolean; method?: string; text?: string; dialogBtns?: string[]; pageBtns?: string[] };
+        const disabled = !!button.disabled ||
+          button.getAttribute?.('aria-disabled') === 'true' ||
+          /(^|[\\s_-])(is[\\s_-])?disabled([\\s_-]|$)/i.test(String(button.className || ''));
+        if (disabled) {
+          return {
+            found: true,
+            clicked: false,
+            disabled: true,
+            buttons: buttons.map((btn) => textOf(btn).trim().slice(0, 30)),
+          };
+        }
+        return {
+          found: true,
+          clicked: clickElement(button),
+          disabled: false,
+          text: textOf(button).trim(),
+        };
+      })()
+    `, true).catch((e) => ({
+      found: false,
+      clicked: false,
+      error: String(e),
+    })) as typeof step3;
 
-  if (step3.found) {
-    logger.info(`视频号已点击弹窗按钮 (method=${step3.method}, text=${step3.text || ''})`);
-  } else {
-    logger.warn(`视频号未找到声明原创按钮 (dialogBtns=${JSON.stringify(step3.dialogBtns)} pageBtns=${JSON.stringify(step3.pageBtns)})`);
+    if (step3.found && step3.clicked) break;
+    if (attempt < 20) await sleep(300);
   }
 
-  const declared = step3.found;
-  logger.info(`视频号账号浏览器原创声明处理完成: clicked=true agreement=${agreement} declared=${declared}`);
-  return agreement && declared;
+  if (!step3.found || !step3.clicked) {
+    logger.warn(
+      `视频号原创步骤3失败：未能点击"声明原创" ` +
+      `(disabled=${step3.disabled === true} buttons=${JSON.stringify(step3.buttons)} error=${step3.error || 'none'})`
+    );
+    return false;
+  }
+
+  logger.info('视频号已完成原创步骤3：点击"声明原创"');
+  await jitter(300, 500);
+
+  let dialogClosed = false;
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    dialogClosed = await wc.executeJavaScript(`
+      (() => {
+        ${EMBEDDED_DOM_HELPERS}
+        const normalizeText = (value) => String(value || '').replace(/\\s+/g, '');
+        return !queryAll(
+          'div.declare-original-dialog, div[role="dialog"], [aria-modal="true"], ' +
+          'div[class*="dialog"], div[class*="modal"], div[class*="popup"], div, section, article, form'
+        ).some((el) => {
+          if (!isVisible(el)) return false;
+          const text = normalizeText(textOf(el));
+          return text.includes('原创声明须知') && text.includes('使用条款');
+        });
+      })()
+    `, true).catch(() => false) as boolean;
+    if (dialogClosed) break;
+    if (attempt < 20) await sleep(300);
+  }
+
+  if (!dialogClosed) {
+    logger.warn('视频号原创声明提交后弹窗仍未关闭');
+    return false;
+  }
+
+  logger.info('视频号账号浏览器原创声明三步操作完成');
+  return true;
 }
 
 function formatScheduleDateTime(value?: string | Date | null): {
@@ -1078,10 +1251,10 @@ function formatScheduleDateTime(value?: string | Date | null): {
   };
 }
 
-async function applyEmbeddedSchedule(wc: WebContents, scheduledAt?: string | Date | null): Promise<void> {
+async function applyEmbeddedSchedule(wc: WebContents, scheduledAt?: string | Date | null): Promise<boolean> {
   const formatted = formatScheduleDateTime(scheduledAt);
   if (!formatted) {
-    return;
+    return true;
   }
 
   let result = await wc.executeJavaScript(`
@@ -1214,11 +1387,12 @@ async function applyEmbeddedSchedule(wc: WebContents, scheduledAt?: string | Dat
 
   if (!result.toggled && result.inputCount === 0) {
     logger.warn(`视频号账号浏览器设置定时失败: 未找到定时入口 ${result.error || ''}`);
-    return;
+    return false;
   }
 
   logger.info(`视频号账号浏览器已设置定时发表: ${formatted.dateTimeText} toggled=${result.toggled} inputs=${result.inputCount} dateFilled=${result.dateFilled} timeFilled=${result.timeFilled}`);
   await sleep(500);
+  return result.dateFilled;
 }
 
 async function waitForEmbeddedUploadComplete(wc: WebContents, maxWaitMs: number): Promise<boolean> {
@@ -1324,7 +1498,7 @@ async function clickEmbeddedPublish(wc: WebContents, timeoutMs: number): Promise
   return false;
 }
 
-async function applyEmbeddedLocation(wc: WebContents, locationName?: string | null): Promise<boolean> {
+export async function applyEmbeddedLocation(wc: WebContents, locationName?: string | null): Promise<boolean> {
   const target = (locationName || '').trim();
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
   const jitter = (min: number, max: number) => sleep(min + Math.random() * (max - min));
@@ -1350,81 +1524,148 @@ async function applyEmbeddedLocation(wc: WebContents, locationName?: string | nu
         });
         for (const root of editorRoots) {
           try {
-            const display = root.querySelector('.position-display, [class*="position-display"]');
+            let display = Array.from(root.querySelectorAll(
+              '.position-display, [class*="position-display"], [class*="position-select"], ' +
+              '[class*="location-select"], [class*="location-picker"]'
+            )).find((el) => isVisible(el));
+
+            if (!display) {
+              const label = Array.from(root.querySelectorAll('div, span, label, button, [role="button"]'))
+                .find((el) => {
+                  const text = textOf(el).trim();
+                  return isVisible(el) && /^(选择位置|添加位置|位置)$/.test(text);
+                });
+              display = label?.closest(
+                '[class*="position"], [class*="location"], [class*="form-item"], [class*="setting-item"], li'
+              ) || label;
+            }
+
             if (display && isVisible(display)) {
-              clickElement(display);
-              return { clicked: true, text: textOf(display).trim().slice(0, 40) };
+              const rect = display.getBoundingClientRect();
+              const doc = display.ownerDocument;
+              const rightTarget = doc.elementFromPoint?.(
+                Math.max(rect.left + 1, rect.right - 8),
+                rect.top + Math.max(1, rect.height / 2)
+              );
+              clickElement(rightTarget || display);
+              return {
+                clicked: true,
+                text: textOf(display).trim().slice(0, 40),
+                method: rightTarget ? 'right-edge' : 'container',
+              };
             }
           } catch {}
         }
         return { clicked: false };
       })()
-    `, true).catch(() => ({ clicked: false })) as { clicked: boolean; text?: string };
+    `, true).catch(() => ({ clicked: false })) as { clicked: boolean; text?: string; method?: string };
 
     if (!expandResult.clicked) {
-      logger.info('视频号未找到位置触发器，跳过位置设置');
-      return true;
+      logger.warn('视频号未找到位置行右侧下拉框');
+      return false;
     }
 
-    logger.info(`视频号已点击位置触发器: ${expandResult.text}`);
-    await jitter(800, 1200);
+    logger.info(`视频号已点击位置行右侧下拉框: ${expandResult.text} method=${expandResult.method || 'unknown'}`);
+    await jitter(500, 800);
 
-    const pickResult = await wc.executeJavaScript(`
-      (() => {
-        ${EMBEDDED_DOM_HELPERS}
-        const editorRoots = collectRoots().filter((root) => {
-          try { return !!root.querySelector('div.input-editor'); } catch { return false; }
-        });
+    const maxPickAttempts = 12;
+    let lastPickResult: {
+      picked: boolean;
+      text?: string;
+      tag?: string;
+      debug?: string[];
+      rootsContainingTarget?: number;
+      error?: string;
+    } = { picked: false, debug: [] };
 
-        for (const root of editorRoots) {
-          try {
-            const candidates = Array.from(root.querySelectorAll(
-              'li, [role="option"], [class*="option-item"], [class*="select-item"], ' +
-              '[class*="dropdown"] [class*="item"], [class*="menu-item"]'
-            )).filter((el) => isVisible(el));
+    for (let attempt = 1; attempt <= maxPickAttempts; attempt += 1) {
+      lastPickResult = await wc.executeJavaScript(`
+        (() => {
+          ${EMBEDDED_DOM_HELPERS}
+          const normalizeText = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+          const roots = collectRoots();
+          for (const root of roots) {
+            try {
+              const candidates = Array.from(root.querySelectorAll('*'))
+                .filter((el) => isVisible(el))
+                .filter((el) => {
+                  const text = normalizeText(textOf(el));
+                  if (text !== '不显示位置' && text !== '不显示') return false;
+                  return !Array.from(el.children || []).some((child) => {
+                    const childText = normalizeText(textOf(child));
+                    return isVisible(child) && (childText === '不显示位置' || childText === '不显示');
+                  });
+                });
 
-            for (const opt of candidates) {
-              const text = textOf(opt).trim();
-              if (text === '不显示位置' || text === '不显示') {
-                clickElement(opt);
-                return { picked: true, text };
+              for (const opt of candidates) {
+                const text = normalizeText(textOf(opt));
+                const clickable = opt.closest(
+                  'li, [role="option"], button, [role="button"], label, ' +
+                  '[class*="option"], [class*="select-item"], [class*="menu-item"], ' +
+                  '[class*="location-item"], [class*="position-item"]'
+                ) || opt;
+                if (clickElement(clickable)) {
+                  return {
+                    picked: true,
+                    text,
+                    tag: opt.tagName,
+                    className: String(opt.className || '').slice(0, 80),
+                  };
+                }
               }
-            }
-          } catch {}
-        }
+            } catch {}
+          }
 
-        const allCandidates = queryAll(
-          'li, [role="option"], [class*="option-item"], [class*="select-item"]'
-        ).filter((el) => isVisible(el) && /不显示/.test(textOf(el)));
+          const debugTexts = [];
+          let rootsContainingTarget = 0;
+          for (const root of roots) {
+            try {
+              const rootContent = normalizeText(
+                root.body?.innerText || root.host?.innerText || root.textContent || ''
+              );
+              if (rootContent.includes('不显示位置')) rootsContainingTarget += 1;
+              const items = Array.from(root.querySelectorAll('*'))
+                .filter((el) => isVisible(el))
+                .map((el) => normalizeText(textOf(el)))
+                .filter((text) => text && text.length <= 40 && /位置|不显示/.test(text));
+              debugTexts.push(...items.slice(0, 20));
+            } catch {}
+          }
+          return {
+            picked: false,
+            debug: Array.from(new Set(debugTexts)).slice(0, 30),
+            rootsContainingTarget,
+          };
+        })()
+      `, true).catch((error) => ({
+        picked: false,
+        debug: [],
+        rootsContainingTarget: 0,
+        error: String(error),
+      })) as typeof lastPickResult;
 
-        for (const opt of allCandidates) {
-          clickElement(opt);
-          return { picked: true, text: textOf(opt).trim(), fallback: true };
-        }
+      if (lastPickResult.picked) {
+        logger.info(
+          `视频号已选择"${lastPickResult.text}" tag=${lastPickResult.tag || 'unknown'} attempt=${attempt}`
+        );
+        return true;
+      }
 
-        const debugTexts: string[] = [];
-        for (const root of editorRoots) {
-          try {
-            const items = Array.from(root.querySelectorAll('li, [role="option"], [class*="option"], [class*="item"]'))
-              .filter((el) => isVisible(el))
-              .map((el) => textOf(el).trim().slice(0, 30));
-            debugTexts.push(...items);
-          } catch {}
-        }
-        return { picked: false, debug: debugTexts };
-      })()
-    `, true).catch(() => ({ picked: false, debug: [] })) as { picked: boolean; text?: string; debug?: string[]; fallback?: boolean };
-
-    if (pickResult.picked) {
-      logger.info(`视频号已选择"${pickResult.text}"${pickResult.fallback ? ' (fallback)' : ''}`);
-    } else {
-      logger.warn(`视频号未找到"不显示位置"选项，编辑器内可见选项: ${JSON.stringify(pickResult.debug)}`);
+      if (attempt < maxPickAttempts) {
+        await sleep(500);
+      }
     }
-    return true;
+
+    logger.warn(
+      `视频号未找到"不显示位置"选项: error=${lastPickResult.error || 'none'} ` +
+      `rootsContainingTarget=${lastPickResult.rootsContainingTarget ?? 0} ` +
+      `可见文本=${JSON.stringify(lastPickResult.debug || [])}`
+    );
+    return false;
   }
 
   const entryResult = await wc.executeJavaScript(`
-    (() => {
+    ((target) => {
       ${EMBEDDED_DOM_HELPERS}
       const editorRoots = collectRoots().filter((root) => {
         try { return !!root.querySelector('div.input-editor'); } catch { return false; }
@@ -1562,7 +1803,11 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
 
     await sleep(1000);
     await dumpEmbeddedState(wc, 'fillFields前');
-    await fillEmbeddedFields(wc, ctx);
+    const fieldsApplied = await fillEmbeddedFields(wc, ctx);
+    if (!fieldsApplied) {
+      failureMessage = '视频号描述或短标题填写失败';
+      return { success: false, message: failureMessage };
+    }
 
     const uploadComplete = await waitForEmbeddedUploadComplete(wc, 180000);
     if (!uploadComplete) {
@@ -1578,6 +1823,19 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
       });
     }
 
+    await dumpEmbeddedState(wc, '位置选择前');
+    const locationApplied = await applyEmbeddedLocation(wc, ctx.location);
+    if (!locationApplied) {
+      failureMessage = '视频号位置设置失败，未能选择“不显示位置”';
+      return { success: false, message: failureMessage };
+    }
+
+    const scheduleApplied = await applyEmbeddedSchedule(wc, ctx.scheduledAt);
+    if (!scheduleApplied) {
+      failureMessage = '视频号定时发表设置失败';
+      return { success: false, message: failureMessage };
+    }
+
     await dumpEmbeddedState(wc, '原创声明前');
     const originalOk = await applyEmbeddedOriginalStatement(wc, ctx);
     if (!originalOk) {
@@ -1585,9 +1843,6 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
       failureMessage = '视频号原创声明未完成';
       return { success: false, message: failureMessage };
     }
-    await dumpEmbeddedState(wc, '位置选择前');
-    await applyEmbeddedLocation(wc, (ctx as { location?: string }).location);
-    await applyEmbeddedSchedule(wc, ctx.scheduledAt);
 
     await dumpEmbeddedState(wc, '发表前');
     logger.info('视频号发表前暂停30秒，等待人工确认...');
@@ -1623,7 +1878,7 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
 
     return { success: false, message: failureMessage };
   } finally {
-    if (!publishSucceeded && shouldKeepBrowserOnPublishFailure()) {
+    if (!publishSucceeded && shouldKeepBrowserOnPublishFailure(failureMessage)) {
       logger.warn(`已保留视频号发布失败浏览器现场: accountId=${accountId} reason=${failureMessage || '未知失败原因'}`);
     } else if (((!publishSucceeded && browserManager.hasStandaloneTab(accountId)) || createdPublishWindow) && browserManager.hasTab(accountId)) {
       await browserManager.closeTab(accountId).catch((closeError) => {
@@ -1676,17 +1931,13 @@ async function launchPatchrightContext(
 
 /**
  * 填写视频号描述与 # 话题。视频号真实 DOM 用 div.input-editor（contenteditable div），
- * 不是 selectors.ts 里的 textarea，仿 tencent_uploader.fill_title_and_tags + fill_description。
- */
-/**
- * 填写视频号描述与 # 话题。视频号真实 DOM 用 div.input-editor（contenteditable div），
- * 不是 selectors.ts 里的 textarea，仿 tencent_uploader.fill_title_and_tags + fill_description。
+ * 不是 selectors.ts 里的 textarea。
  */
 async function fillVideoMetadata(
   page: Page,
   description?: string,
   tags?: string[]
-): Promise<void> {
+): Promise<boolean> {
   const debugRecorder = getDebugRecorder();
   const rc = (page as unknown as { rc?: { humanClick: (sel: string) => Promise<void> } }).rc;
 
@@ -1703,7 +1954,7 @@ async function fillVideoMetadata(
     const hasDesc = await descTarget.count();
     if (!hasDesc) {
       logger.warn('视频号未找到描述编辑器（div.input-editor）');
-      return;
+      return false;
     }
 
     await debugRecorder.recordStep('fill_description', async () => {
@@ -1737,29 +1988,9 @@ async function fillVideoMetadata(
         await page.waitForTimeout(200 + Math.random() * 300);
       }
     }, { page });
+    return true;
   } catch (error) {
     throw toPlatformError(error, 'channels', { step: 'fillVideoMetadata', description });
-  }
-}
-
-/**
- * 设置短标题（视频号特有）
- * 从完整 title 截取前 20 个字符
- */
-async function setShortTitle(page: Page, title: string): Promise<void> {
-  if (!title) return;
-
-  try {
-    const shortTitleInput = page.locator(UPLOAD_SELECTORS.shortTitleInput).first();
-    if (await shortTitleInput.isVisible().catch(() => false)) {
-      const shortTitle = title.slice(0, 20);
-      await shortTitleInput.click();
-      await shortTitleInput.fill(shortTitle);
-      logger.info(`短标题已设置: ${shortTitle}`);
-    }
-  } catch (error) {
-    logger.warn('设置短标题失败，继续上传:', error);
-    // 非阻塞错误
   }
 }
 
@@ -1783,27 +2014,6 @@ async function applyCollection(page: Page, collectionName?: string): Promise<voi
     }
   } catch (error) {
     logger.warn('应用合集失败，继续上传:', error);
-    // 非阻塞错误
-  }
-}
-
-/**
- * 应用原创声明（视频号特有）
- */
-async function applyOriginalStatement(page: Page, isOriginal: boolean = true): Promise<void> {
-  if (!isOriginal) return;
-
-  try {
-    const originalCheckbox = page.locator(UPLOAD_SELECTORS.originalStatement).first();
-    if (await originalCheckbox.isVisible().catch(() => false)) {
-      const isChecked = await originalCheckbox.isChecked().catch(() => false);
-      if (!isChecked) {
-        await originalCheckbox.click();
-        logger.info('已勾选原创声明');
-      }
-    }
-  } catch (error) {
-    logger.warn('应用原创声明失败，继续上传:', error);
     // 非阻塞错误
   }
 }
@@ -1944,16 +2154,27 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
       }
     }, pageCtx);
 
-    // 填写描述（视频号用 title 作为描述的一部分）
-    const fullDescription = description || title;
-    await debugRecorder.recordStep('fill_metadata', async () => {
-      await fillVideoMetadata(page, fullDescription, tags);
+    // 视频号页面只填写视频描述，任务标题仅供 MatrixFlow 内部管理。
+    const descriptionApplied = await debugRecorder.recordStep('fill_metadata', async () => {
+      return await fillVideoMetadata(page, description, tags);
     }, pageCtx);
+    if (!descriptionApplied) {
+      throw new SelectorError('视频号描述填写失败', undefined, 'channels');
+    }
 
-    // 设置短标题
-    await debugRecorder.recordStep('set_short_title', async () => {
-      await setShortTitle(page, title);
+    const shortTitleApplied = await debugRecorder.recordStep('set_short_title', async () => {
+      return await setShortTitle(page, title);
     }, pageCtx);
+    if (!shortTitleApplied) {
+      throw new SelectorError('视频号短标题填写失败', undefined, 'channels');
+    }
+
+    const locationApplied = await debugRecorder.recordStep('apply_location', async () => {
+      return await applyLocation(page, ctx.location);
+    }, pageCtx);
+    if (!locationApplied) {
+      throw new SelectorError('视频号位置设置失败，未能选择“不显示位置”', undefined, 'channels');
+    }
 
     // 应用合集
     const collection = (ctx as { collection?: string }).collection;
@@ -1961,11 +2182,27 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
       await applyCollection(page, collection);
     }, pageCtx);
 
-    // 应用原创声明
-    const isOriginal = (ctx as { isOriginal?: boolean }).isOriginal ?? true;
-    await debugRecorder.recordStep('apply_original_statement', async () => {
-      await applyOriginalStatement(page, isOriginal);
+    if (ctx.scheduledAt) {
+      const scheduledTime = ctx.scheduledAt instanceof Date
+        ? ctx.scheduledAt
+        : new Date(ctx.scheduledAt);
+      if (Number.isNaN(scheduledTime.getTime())) {
+        throw new SelectorError('视频号定时发表时间无效', undefined, 'channels');
+      }
+      const scheduleApplied = await debugRecorder.recordStep('apply_schedule', async () => {
+        return await applySchedule(page, scheduledTime);
+      }, pageCtx);
+      if (!scheduleApplied) {
+        throw new SelectorError('视频号定时发表设置失败', undefined, 'channels');
+      }
+    }
+
+    const originalApplied = await debugRecorder.recordStep('apply_original_statement', async () => {
+      return await applyOriginalStatement(page, shouldApplyOriginalStatement(ctx));
     }, pageCtx);
+    if (!originalApplied) {
+      throw new SelectorError('视频号原创声明未完成', undefined, 'channels');
+    }
 
     // 点击发表
     const publishSuccess = await clickPublish(page);

@@ -102,12 +102,15 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">添加地点</label>
+        <label class="form-label">
+          {{ platform === 'channels' ? '选择位置' : '添加地点' }}
+          <span v-if="platform === 'channels'" class="form-hint">留空时自动选择“不显示位置”</span>
+        </label>
         <input
           v-model="localConfig.location"
           type="text"
           class="form-input"
-          placeholder="添加地点"
+          :placeholder="platform === 'channels' ? '输入地点名称，留空则不显示位置' : '添加地点'"
           autocomplete="off"
           @input="emitUpdate"
         />
@@ -344,6 +347,7 @@ const localConfig = reactive<PlatformConfig>({
   allowDownload: false,
   showInCity: true,
   isOriginal: false,
+  location: '',
   ...props.platformConfig,
 });
 const tagInput = ref('');
@@ -407,10 +411,14 @@ const titleHint = computed(() => {
   return `最多 ${titleLimit.value} 字，覆盖公共标题`;
 });
 
-const isOriginal = computed(() => localConfig.isOriginal === true);
+const isOriginal = computed(
+  () => localConfig.isOriginal === true || localConfig.declaration === 'original',
+);
 
 function handleTitleInput(event: Event) {
-  const inputEl = event.target as HTMLInputElement;
+  const inputEl = event.target as HTMLInputElement & { composing?: boolean };
+  if ((event as InputEvent).isComposing || inputEl.composing) return;
+
   let value = inputEl.value;
 
   if (platform.value === 'channels') {
@@ -427,13 +435,21 @@ function handleTitleInput(event: Event) {
 function handleIsOriginalChange(event: Event) {
   const checked = (event.target as HTMLInputElement).checked;
   localConfig.isOriginal = checked;
+  localConfig.declaration = checked ? 'original' : '';
   emitUpdate();
 }
 
 watch(
   () => props.platformConfig,
-  (newVal) => {
-    Object.assign(localConfig, newVal);
+  (newVal, oldVal) => {
+    if (newVal === oldVal) return;
+    if (!newVal || Object.keys(newVal).length === 0) return;
+    for (const key of Object.keys(newVal)) {
+      const configKey = key as keyof PlatformConfig;
+      if (newVal[configKey] !== localConfig[configKey]) {
+        (localConfig as any)[configKey] = newVal[configKey];
+      }
+    }
     // 快手默认值
     if (props.account.platform === 'kuaishou') {
       if (localConfig.visibility === undefined) localConfig.visibility = 'public';

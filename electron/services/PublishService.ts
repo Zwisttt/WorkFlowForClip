@@ -45,6 +45,7 @@ import type { PublishEvent as BusPublishEvent } from '../core/types/eventbus';
 import type { TaskStatus } from '../core/types/task';
 import { toPlatformError, type PlatformId } from '../platform/base/PlatformError';
 import { watchdog } from './Watchdog';
+import { shouldPreserveStandaloneBrowserAfterFailure } from './publish-browser-policy';
 
 const logger = new Logger('PublishService');
 
@@ -392,7 +393,11 @@ export class PublishService implements IPublishService {
             logger.warn(`[executeNow] 更新账号状态失败: ${statusErr}`);
           }
         }
-        await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'failed');
+        if (shouldPreserveStandaloneBrowserAfterFailure(dbTask.platform, failMsg)) {
+          logger.warn(`发布失败后保留独立浏览器现场: accountId=${dbTask.account_id ?? ''} error=${failMsg}`);
+        } else {
+          await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'failed');
+        }
         await this.handleTaskFailure(taskId, failMsg, dbTask.retry_count, dbTask.max_retries, options);
       }
 
@@ -415,7 +420,11 @@ export class PublishService implements IPublishService {
         }
       }
 
-      await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'failed');
+      if (shouldPreserveStandaloneBrowserAfterFailure(dbTask.platform, errMsg)) {
+        logger.warn(`发布异常后保留独立浏览器现场: accountId=${dbTask.account_id ?? ''} error=${errMsg}`);
+      } else {
+        await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'failed');
+      }
       await this.handleTaskFailure(taskId, errMsg, dbTask.retry_count, dbTask.max_retries, options);
       return { success: false, error: errMsg };
     } finally {
