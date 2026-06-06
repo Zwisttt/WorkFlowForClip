@@ -330,6 +330,20 @@ export const useTaskStore = defineStore('task', () => {
       cleanups.push(off);
     }
 
+    if (window.matrixflow?.onWatchdogEvent) {
+      const off = window.matrixflow.onWatchdogEvent((event: string, taskId: string, message: string) => {
+        const labels: Record<string, string> = {
+          'watchdog:warn': '⚠️ 任务长时间无响应',
+          'watchdog:escalate': '⚠️ 任务已升级到人工审核',
+          'watchdog:abandon': '🔴 任务已超时终止',
+          'watchdog:retry': '🔄 任务超时重试中',
+        };
+        ElMessage.warning(`${labels[event] || event}: ${message}`);
+        fetchTasks();
+      });
+      cleanups.push(off);
+    }
+
     return () => cleanups.forEach((fn) => fn());
   }
 

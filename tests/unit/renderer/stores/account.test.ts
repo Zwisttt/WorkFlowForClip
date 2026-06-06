@@ -200,6 +200,14 @@ describe('useAccountStore', () => {
         expect(result).toEqual(loginResult);
       });
 
+      it('throws when relogin fails', async () => {
+        mock.accounts.login.mockResolvedValue({ success: false, message: '重新登录失败' });
+
+        const store = useAccountStore();
+
+        await expect(store.loginAccount('acc_1')).rejects.toThrow('重新登录失败');
+      });
+
       it('returns undefined when window.matrixflow is undefined', async () => {
         removeMatrixflowMock();
         (globalThis as Record<string, unknown>).window = {};

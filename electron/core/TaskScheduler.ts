@@ -14,6 +14,35 @@ import type {
 
 const logger = new Logger('TaskScheduler');
 
+/**
+ * Task State Machine (8 态) - v0.3.1
+ *
+ *   ┌─────────┐   schedule    ┌──────────┐  start upload  ┌───────────┐
+ *   │ queued  │ ─────────────→│ pending  │ ─────────────→│ uploading │
+ *   └─────────┘                └──────────┘                └─────┬─────┘
+ *        │                          │                            │
+ *        │ cancel                   │ cancel                     │ upload done
+ *        ↓                          ↓                            ↓
+ *   ┌───────────┐                                            ┌────────────┐
+ *   │ cancelled │                                            │ publishing │
+ *   └───────────┘                                            └─────┬──────┘
+ *                                                                   │
+ *                                                          platform done
+ *                                                                   ↓
+ *                                                              ┌────────┐
+ *                                                              │ audit  │
+ *                                                              └───┬────┘
+ *                                                       approved  │   │ 30min timeout
+ *                                                                  ↓   ↓
+ *                                                          ┌────────┐  abandon
+ *                                                          │success │  (终态)
+ *                                                          └────────┘
+ *
+ * failure paths: any state → failed (with retry policy)
+ * cancel paths: queued/pending/uploading/publishing → cancelled
+ * v0.3.1 migration: running → publishing, completed → success
+ */
+
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_BACKOFF_MS = 300_000;
@@ -134,7 +163,7 @@ export class TaskScheduler implements ITaskScheduler {
       return false;
     }
 
-    if (task.status === 'running' || this.inFlight.has(taskId)) {
+    if (task.status === 'uploading' || task.status === 'publishing' || this.inFlight.has(taskId)) {
       logger.warn(`取消失败，任务正在执行: ${taskId}`);
       return false;
     }
@@ -232,7 +261,7 @@ export class TaskScheduler implements ITaskScheduler {
     return {
       pending: this.queue.getByStatus('queued').length + this.queue.getByStatus('pending').length,
       running: this.inFlight.size,
-      completed: this.queue.getByStatus('completed').length,
+      completed: this.queue.getByStatus('success').length,
       failed: this.queue.getByStatus('failed').length,
       periodicCount: this.periodicTasks.size,
     };
@@ -284,7 +313,7 @@ export class TaskScheduler implements ITaskScheduler {
       const result = await this.onTaskExecute(dequeuedTask);
 
       if (result.success) {
-        this.queue.updateStatus(dequeuedTask.id, 'completed');
+        this.queue.updateStatus(dequeuedTask.id, 'success');
         logger.info(`任务完成: ${dequeuedTask.id}`);
       } else {
         await this.handleFailure(dequeuedTask, result.error || '未知错误');
@@ -343,12 +372,14 @@ export class TaskScheduler implements ITaskScheduler {
   private getTaskFromMap(taskId: string): ITask | undefined {
     const allQueued = this.queue.getByStatus('queued');
     const allPending = this.queue.getByStatus('pending');
-    const allRunning = this.queue.getByStatus('running');
+    const allUploading = this.queue.getByStatus('uploading');
+    const allPublishing = this.queue.getByStatus('publishing');
+    const allAudit = this.queue.getByStatus('audit');
     const allRetry = this.queue.getByStatus('retry');
-    const allCompleted = this.queue.getByStatus('completed');
+    const allSuccess = this.queue.getByStatus('success');
     const allFailed = this.queue.getByStatus('failed');
 
-    return [...allQueued, ...allPending, ...allRunning, ...allRetry, ...allCompleted, ...allFailed]
+    return [...allQueued, ...allPending, ...allUploading, ...allPublishing, ...allAudit, ...allRetry, ...allSuccess, ...allFailed]
       .find((t) => t.id === taskId);
   }
 

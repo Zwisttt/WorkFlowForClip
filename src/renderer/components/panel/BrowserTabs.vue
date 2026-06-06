@@ -33,7 +33,7 @@ const dragOverId = ref<string | null>(null);
 const platformConfig: Record<string, { label: string; color: string }> = {
   douyin: { label: '抖音', color: '#161823' },
   xiaohongshu: { label: '小红书', color: '#FE2C55' },
-  weixin_video: { label: '视频号', color: '#07C160' },
+  channels: { label: '视频号', color: '#07C160' },
   kuaishou: { label: '快手', color: '#FF4906' },
   bilibili: { label: 'B站', color: '#00A1D6' },
 };

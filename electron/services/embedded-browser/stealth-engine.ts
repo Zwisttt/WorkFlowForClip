@@ -11,7 +11,7 @@ export class StealthEngine {
     douyin: 'full',
     xiaohongshu: 'full',
     kuaishou: 'medium',
-    weixin_video: 'medium',
+    channels: 'medium',
     bilibili: 'basic',
   };
 

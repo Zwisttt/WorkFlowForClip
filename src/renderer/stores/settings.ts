@@ -22,6 +22,8 @@ export interface AppSettings {
   notificationAnomalyAlerts: boolean;
   notificationCriticalOnly: boolean;
   materialLibraryPath: string;
+  debugMode: boolean;
+  debugRetentionDays: number;
 }
 
 const defaultSettings: AppSettings = {
@@ -45,6 +47,8 @@ const defaultSettings: AppSettings = {
   notificationAnomalyAlerts: true,
   notificationCriticalOnly: false,
   materialLibraryPath: '',
+  debugMode: false,
+  debugRetentionDays: 7,
 };
 
 export const useSettingsStore = defineStore('settings', () => {

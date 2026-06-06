@@ -45,7 +45,7 @@ export const usePanelStore = defineStore('panel', () => {
       xiaohongshu: [],
       kuaishou: [],
       bilibili: [],
-      weixin_video: [],
+      channels: [],
     };
 
     availableAccounts.value.forEach((account) => {

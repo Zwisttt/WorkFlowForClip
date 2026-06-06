@@ -4,6 +4,49 @@ import { getDatabase, isDatabaseAvailable, initDatabase } from '../data/Database
 import { TaskEvents } from './types/task';
 import type { IQueueManager, ITask, TaskStatus } from './types/task';
 
+// ============================================================
+// Task Status UI Mappings - v0.3.1 8态状态机
+// ============================================================
+
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  queued: '排队中',
+  pending: '等待中',
+  uploading: '上传中',
+  publishing: '发布中',
+  audit: '审核中',
+  success: '已发布',
+  failed: '失败',
+  cancelled: '已取消',
+  retry: '重试中',
+  skipped: '已跳过',
+};
+
+export const TASK_STATUS_COLORS: Record<TaskStatus, { bg: string; fg: string }> = {
+  queued: { bg: '#FEF3C7', fg: '#D97706' },
+  pending: { bg: '#F3F4F6', fg: '#6B7280' },
+  uploading: { bg: '#DBEAFE', fg: '#2563EB' },
+  publishing: { bg: '#F3E8FF', fg: '#7C3AED' },
+  audit: { bg: '#FEF3C7', fg: '#D97706' },
+  success: { bg: '#D1FAE5', fg: '#059669' },
+  failed: { bg: '#FEE2E2', fg: '#DC2626' },
+  cancelled: { bg: '#F3F4F6', fg: '#6B7280' },
+  retry: { bg: '#FFEDD5', fg: '#EA580C' },
+  skipped: { bg: '#F3F4F6', fg: '#9CA3AF' },
+};
+
+export const VALID_STATE_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
+  queued: ['pending', 'cancelled'],
+  pending: ['uploading', 'cancelled'],
+  uploading: ['publishing', 'failed', 'cancelled'],
+  publishing: ['audit', 'failed', 'cancelled'],
+  audit: ['success', 'failed'],
+  success: [],
+  failed: ['retry', 'queued'],
+  cancelled: [],
+  retry: ['queued'],
+  skipped: [],
+};
+
 const logger = new Logger('QueueManager');
 
 function generateId(): string {
@@ -132,13 +175,13 @@ export class QueueManager implements IQueueManager {
       return this.dequeue();
     }
 
-    task.status = 'running';
+    task.status = 'uploading';
     task.startedAt = new Date().toISOString();
     this.taskMap.set(task.id, task);
     this.dirty = true;
 
     logger.info(`任务出队: ${task.id} type=${task.type}`);
-    this.eventBus.emit(TaskEvents.TASK_STARTED, task);
+    this.eventBus.emit(TaskEvents.TASK_UPLOADING, task);
     return task;
   }
 
@@ -160,7 +203,7 @@ export class QueueManager implements IQueueManager {
     task.status = status;
     task.error = error;
 
-    if (status === 'completed' || status === 'failed') {
+    if (status === 'success' || status === 'failed' || status === 'cancelled') {
       task.completedAt = new Date().toISOString();
     }
 
@@ -170,10 +213,13 @@ export class QueueManager implements IQueueManager {
     logger.info(`任务状态变更: ${taskId} ${prevStatus} -> ${status}${error ? ` error=${error}` : ''}`);
 
     const eventMap: Record<string, string> = {
-      completed: TaskEvents.TASK_COMPLETED,
+      success: TaskEvents.TASK_SUCCESS,
       failed: TaskEvents.TASK_FAILED,
       cancelled: TaskEvents.TASK_CANCELLED,
       retry: TaskEvents.TASK_RETRY,
+      uploading: TaskEvents.TASK_UPLOADING,
+      publishing: TaskEvents.TASK_PUBLISHING,
+      audit: TaskEvents.TASK_AUDIT,
     };
     const event = eventMap[status];
     if (event) {
@@ -235,7 +281,7 @@ export class QueueManager implements IQueueManager {
             max_retries: task.maxRetries,
           };
 
-          if (task.status === 'running') {
+          if (task.status === 'uploading' || task.status === 'publishing' || task.status === 'audit') {
             updateStmt.run({
               id: task.id,
               status: task.status,
@@ -295,12 +341,6 @@ export class QueueManager implements IQueueManager {
           retryCount: (row.retry_count as number) || 0,
           maxRetries: (row.max_retries as number) || 3,
         };
-
-        if (task.status === 'running') {
-          task.status = 'pending';
-          task.startedAt = undefined;
-          task.error = '恢复：上次运行中断';
-        }
 
         if (task.status === 'pending' || task.status === 'queued') {
           this.taskMap.set(task.id, task);

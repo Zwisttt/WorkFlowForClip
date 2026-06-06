@@ -7,7 +7,10 @@ import { Logger } from '../../core/Logger';
 import { KUAISHOU_URLS } from './selectors';
 import { getCookiePath, saveCookie } from './cookie';
 import type { UploadContext, UploadResult } from '../base/types';
-import { EmbeddedRiskControl, PageRiskControl, normalizeRiskTags } from '../base/RiskControl';
+import { TopicSanitizer } from '../base/TopicSanitizer';
+import { EmbeddedRiskControl, PageRiskControl } from '../base/RiskControl';
+import { toPlatformError, NetworkError, AuthError, SelectorError, ValidationError, ContentRejectedError } from '../base/PlatformError';
+import { getDebugRecorder } from '../base/DebugRecorder';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
 import type { IBrowserLauncher, BrowserConfig } from '../../services/types';
@@ -318,7 +321,7 @@ async function launchPatchrightContext(
 
   if (browserMode === 'fingerprint') {
     if (!ctx.fingerprintId) {
-      throw new Error('账号未绑定指纹浏览器配置');
+      throw new ValidationError('账号未绑定指纹浏览器配置', undefined, 'kuaishou');
     }
     const config: BrowserConfig = { type: 'fingerprint', fingerprintId: ctx.fingerprintId, headless };
     launcher = createBrowserLauncher(config);
@@ -370,12 +373,18 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
 
     const wc = view.webContents;
     debugWebContents = wc;
+    const recorder = getDebugRecorder();
+
     await runEmbeddedDebugStep(wc, ctx, '加载快手发布页', async () => {
       if (!wc.getURL().includes('/article/publish/video')) {
         await wc.loadURL(KUAISHOU_URLS.upload);
       }
       await waitForEmbeddedReady(wc, 30000);
       await waitForEmbeddedUploadSurface(wc, 60000);
+    });
+
+    await recorder.recordStep('发布页加载完成', async () => {
+      return { url: wc.getURL() };
     });
 
     const isOnUploadPage = wc.getURL().includes('/article/publish/video');
@@ -390,9 +399,17 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
       await sleep(2000);
     });
 
+    await recorder.recordStep('账号浏览器文件选择完成', async () => {
+      return { videoPath };
+    });
+
     await runEmbeddedDebugStep(wc, ctx, '填写标题、作品描述和话题', async () => {
       await closeEmbeddedGuide(wc);
       await fillEmbeddedDescriptionAndTags(wc, title, description, tags);
+    });
+
+    await recorder.recordStep('账号浏览器填写描述话题完成', async () => {
+      return true;
     });
 
     const uploadComplete = await runEmbeddedDebugStep(wc, ctx, '等待视频上传完成', async () => (
@@ -406,8 +423,17 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     await runEmbeddedDebugStep(wc, ctx, '设置封面', async () => {
       await setEmbeddedCover(wc, ctx.coverPath);
     });
+
+    await recorder.recordStep('账号浏览器封面设置完成', async () => {
+      return true;
+    });
+
     await runEmbeddedDebugStep(wc, ctx, '映射快手发布选项', async () => {
       await applyEmbeddedPublishOptions(wc, ctx);
+    });
+
+    await recorder.recordStep('账号浏览器发布选项设置完成', async () => {
+      return true;
     });
 
     const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
@@ -452,7 +478,7 @@ async function waitForEmbeddedReady(wc: WebContents, timeoutMs: number): Promise
 
   while (Date.now() - start < timeoutMs) {
     if (wc.isDestroyed()) {
-      throw new Error('内嵌浏览器页面已关闭');
+      throw new SelectorError('内嵌浏览器页面已关闭', undefined, 'kuaishou');
     }
 
     const ready = await wc.executeJavaScript('document.readyState !== "loading"').catch(() => false);
@@ -463,7 +489,7 @@ async function waitForEmbeddedReady(wc: WebContents, timeoutMs: number): Promise
     await sleep(500);
   }
 
-  throw new Error('等待内嵌浏览器页面加载超时');
+  throw new SelectorError('等待内嵌浏览器页面加载超时', undefined, 'kuaishou');
 }
 
 async function waitForEmbeddedUploadSurface(wc: WebContents, timeoutMs: number): Promise<void> {
@@ -472,7 +498,7 @@ async function waitForEmbeddedUploadSurface(wc: WebContents, timeoutMs: number):
 
   while (Date.now() - start < timeoutMs) {
     if (wc.isDestroyed()) {
-      throw new Error('账号浏览器弹窗页面已关闭');
+      throw new SelectorError('账号浏览器弹窗页面已关闭', undefined, 'kuaishou');
     }
 
     const state = await wc.executeJavaScript(`
@@ -514,7 +540,7 @@ async function waitForEmbeddedUploadSurface(wc: WebContents, timeoutMs: number):
     }
 
     if (state.loginVisible) {
-      throw new Error('账号浏览器弹窗显示登录页，请先完成快手账号登录');
+      throw new AuthError('账号浏览器弹窗显示登录页，请先完成快手账号登录', undefined, 'kuaishou');
     }
 
     if (state.fileInputCount > 0 || state.uploadButtonCount > 0 || state.publishPageVisible) {
@@ -525,14 +551,14 @@ async function waitForEmbeddedUploadSurface(wc: WebContents, timeoutMs: number):
     await sleep(1000);
   }
 
-  throw new Error(`等待快手发布页上传控件超时: url=${wc.getURL()}`);
+  throw new SelectorError(`等待快手发布页上传控件超时: url=${wc.getURL()}`, undefined, 'kuaishou');
 }
 
 async function setEmbeddedFileInput(wc: WebContents, videoPath: string): Promise<void> {
   const resolvedPath = path.resolve(videoPath);
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error(`视频文件不存在: ${resolvedPath}`);
-  }
+    if (!fs.existsSync(resolvedPath)) {
+      throw new ValidationError(`视频文件不存在: ${resolvedPath}`, undefined, 'kuaishou');
+    }
 
   const shouldDetach = await attachDebuggerIfNeeded(wc);
   try {
@@ -558,7 +584,7 @@ async function setEmbeddedFileInput(wc: WebContents, videoPath: string): Promise
     if (intercepted) return;
 
     const diagnostics = await getEmbeddedUploadDiagnostics(wc);
-    throw new Error(`未找到快手视频上传控件: ${diagnostics}`);
+    throw new SelectorError(`未找到快手视频上传控件: ${diagnostics}`, undefined, 'kuaishou');
   } finally {
     if (shouldDetach && wc.debugger.isAttached()) {
       wc.debugger.detach();
@@ -960,7 +986,7 @@ async function fillEmbeddedDescriptionAndTags(
   logger.info('在内嵌浏览器中填写快手视频标题、描述和话题...');
 
   const titleText = (title || '未命名视频').trim();
-  const normalizedTags = normalizeRiskTags(tags, 4);
+  const normalizedTags = TopicSanitizer.cleanTopics(tags ?? [], { maxTopics: 4, platform: 'kuaishou' });
   const descriptionText = description?.trim() ?? '';
   const riskControl = new EmbeddedRiskControl(wc);
 
@@ -985,7 +1011,7 @@ async function fillEmbeddedDescriptionAndTags(
   }, descContent);
 
   if (!descSet) {
-    throw new Error('未找到快手作品描述框');
+    throw new SelectorError('未找到快手作品描述框', undefined, 'kuaishou');
   }
 
   await riskControl.humanizedAppendTags(normalizedTags, {
@@ -1117,7 +1143,7 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
 
   if (ctx.location) {
     const mapped = await setEmbeddedLocation(wc, ctx.location);
-    if (!mapped) throw new Error('未映射快手添加地点');
+    if (!mapped) throw new ValidationError('未映射快手添加地点', undefined, 'kuaishou');
     await riskControl.randomActionDelay();
   }
 
@@ -1132,7 +1158,7 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
       [/作者声明/, /自主声明/, /作品声明/, /声明/],
       declarationPatterns(ctx.declaration),
     );
-    if (ctx.declaration && !mapped) throw new Error('未映射快手作者声明');
+    if (ctx.declaration && !mapped) throw new ValidationError('未映射快手作者声明', undefined, 'kuaishou');
     await riskControl.randomActionDelay();
   }
 
@@ -1142,14 +1168,14 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
       [/查看权限/, /谁可以看/, /可见范围/, /可见/],
       visibilityPatterns(ctx.visibility),
     );
-    if (!mapped) throw new Error('未映射快手查看权限');
+    if (!mapped) throw new ValidationError('未映射快手查看权限', undefined, 'kuaishou');
     await riskControl.randomActionDelay();
   }
 
   const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
   if (scheduleTime) {
     const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
-    if (!mapped) throw new Error('未映射快手发布时间: 定时发布');
+    if (!mapped) throw new ValidationError('未映射快手发布时间: 定时发布', undefined, 'kuaishou');
   } else {
     const mapped = await selectEmbeddedOptionNearLabel(wc, [/发布时间/, /发布设置/], [/立即发布/])
       || await clickEmbeddedText(wc, [/立即发布/]);
@@ -1158,15 +1184,15 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
   await riskControl.randomActionDelay();
 
   if (!(await setEmbeddedSwitchByText(wc, [/允许别人跟我同拍/, /允许别人跟我同框/, /允许同拍/, /允许同框/, /同拍/, /同框/], ctx.allowSameFrame))) {
-    throw new Error('未映射快手互动设置: 允许别人跟我同拍');
+    throw new ValidationError('未映射快手互动设置: 允许别人跟我同拍', undefined, 'kuaishou');
   }
   await riskControl.randomActionDelay();
   if (!(await setEmbeddedSwitchByText(wc, [/允许下载此作品/, /允许下载/, /下载此作品/], ctx.allowDownload))) {
-    throw new Error('未映射快手互动设置: 允许下载此作品');
+    throw new ValidationError('未映射快手互动设置: 允许下载此作品', undefined, 'kuaishou');
   }
   await riskControl.randomActionDelay();
   if (!(await setEmbeddedSwitchByText(wc, [/作品展示在同城页/, /同城页/, /同城/], ctx.showInCity))) {
-    throw new Error('未映射快手互动设置: 作品展示在同城页');
+    throw new ValidationError('未映射快手互动设置: 作品展示在同城页', undefined, 'kuaishou');
   }
   await riskControl.randomActionDelay();
 }
@@ -1872,6 +1898,8 @@ async function doUpload(
   ctx: UploadContext,
 ): Promise<UploadResult> {
   const { videoPath, title, description, tags } = ctx;
+  const recorder = getDebugRecorder();
+
   await runPageDebugStep(page, ctx, '选择视频文件', async () => {
     // 等待上传按钮出现
     const uploadButton = page.locator("button[class^='_upload-btn']").first();
@@ -1885,6 +1913,10 @@ async function doUpload(
     await fileChooser.setFiles(videoPath);
     logger.info(`视频文件已选择: ${videoPath}`);
   });
+
+  await recorder.recordStep('文件选择完成', async () => {
+    return true;
+  }, { page });
 
   // 关闭"我知道了"弹窗
   const knowBtn = page.locator('button[type="button"] span:text("我知道了")').first();
@@ -1900,6 +1932,10 @@ async function doUpload(
   await runPageDebugStep(page, ctx, '填写标题、作品描述和话题', async () => {
     await fillDescriptionAndTags(page, title, description, tags);
   });
+
+  await recorder.recordStep('填写描述话题完成', async () => {
+    return true;
+  }, { page });
 
   // 等待视频上传完成
   const uploadComplete = await runPageDebugStep(page, ctx, '等待视频上传完成', async () => {
@@ -1928,6 +1964,10 @@ async function doUpload(
 
   logger.info('视频上传完成');
 
+  await recorder.recordStep('视频上传完成', async () => {
+    return true;
+  }, { page });
+
   await runPageDebugStep(page, ctx, '设置封面', async () => {
     await setThumbnail(page, ctx.coverPath);
   });
@@ -1935,10 +1975,18 @@ async function doUpload(
     await applyKuaishouPublishOptions(page, ctx);
   });
 
+  await recorder.recordStep('发布选项设置完成', async () => {
+    return true;
+  }, { page });
+
   // 点击发布
   return await runPageDebugStep(page, ctx, '提交发布', async () => {
     logger.info('所有元素设置完成，等待10秒后发布...');
     await page.waitForTimeout(10000);
+
+    await recorder.recordStep('发布前确认', async () => {
+      return true;
+    }, { page });
 
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -2195,7 +2243,7 @@ async function applyKuaishouPublishOptions(page: Page, ctx: UploadContext): Prom
 
   if (ctx.location) {
     const mapped = await setKuaishouLocation(page, ctx.location);
-    if (!mapped) throw new Error('未映射快手添加地点');
+    if (!mapped) throw new ValidationError('未映射快手添加地点', undefined, 'kuaishou');
     await riskControl.randomActionDelay();
   }
 
@@ -2210,7 +2258,7 @@ async function applyKuaishouPublishOptions(page: Page, ctx: UploadContext): Prom
       [/作者声明/, /自主声明/, /作品声明/, /声明/],
       declarationPatterns(ctx.declaration),
     );
-    if (ctx.declaration && !mapped) throw new Error('未映射快手作者声明');
+    if (ctx.declaration && !mapped) throw new ValidationError('未映射快手作者声明', undefined, 'kuaishou');
     await riskControl.randomActionDelay();
   }
 
@@ -2220,14 +2268,14 @@ async function applyKuaishouPublishOptions(page: Page, ctx: UploadContext): Prom
       [/查看权限/, /谁可以看/, /可见范围/, /可见/],
       visibilityPatterns(ctx.visibility),
     );
-    if (!mapped) throw new Error('未映射快手查看权限');
+    if (!mapped) throw new ValidationError('未映射快手查看权限', undefined, 'kuaishou');
     await riskControl.randomActionDelay();
   }
 
   const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
   if (scheduleTime) {
     const mapped = await setScheduleTime(page, scheduleTime);
-    if (!mapped) throw new Error('未映射快手发布时间: 定时发布');
+    if (!mapped) throw new ValidationError('未映射快手发布时间: 定时发布', undefined, 'kuaishou');
   } else {
     const mapped = await selectOptionNearLabel(page, [/发布时间/, /发布设置/], [/立即发布/])
       || await clickPageText(page, [/立即发布/]);
@@ -2236,15 +2284,15 @@ async function applyKuaishouPublishOptions(page: Page, ctx: UploadContext): Prom
   await riskControl.randomActionDelay();
 
   if (!(await setSwitchByText(page, [/允许别人跟我同拍/, /允许别人跟我同框/, /允许同拍/, /允许同框/, /同拍/, /同框/], ctx.allowSameFrame))) {
-    throw new Error('未映射快手互动设置: 允许别人跟我同拍');
+throw new ValidationError('未映射快手互动设置: 允许别人跟我同拍', undefined, 'kuaishou');
   }
   await riskControl.randomActionDelay();
   if (!(await setSwitchByText(page, [/允许下载此作品/, /允许下载/, /下载此作品/], ctx.allowDownload))) {
-    throw new Error('未映射快手互动设置: 允许下载此作品');
+    throw new ValidationError('未映射快手互动设置: 允许下载此作品', undefined, 'kuaishou');
   }
   await riskControl.randomActionDelay();
   if (!(await setSwitchByText(page, [/作品展示在同城页/, /同城页/, /同城/], ctx.showInCity))) {
-    throw new Error('未映射快手互动设置: 作品展示在同城页');
+    throw new ValidationError('未映射快手互动设置: 作品展示在同城页', undefined, 'kuaishou');
   }
   await riskControl.randomActionDelay();
 }
@@ -2615,7 +2663,7 @@ async function fillDescriptionAndTags(
 ): Promise<void> {
   logger.info('填写视频标题、描述和话题...');
   const titleText = (title || '未命名视频').trim();
-  const normalizedTags = normalizeRiskTags(tags, 4);
+  const normalizedTags = TopicSanitizer.cleanTopics(tags ?? [], { maxTopics: 4, platform: 'kuaishou' });
   const descriptionText = description?.trim() ?? '';
   const riskControl = new PageRiskControl(page);
 
@@ -2640,7 +2688,7 @@ async function fillDescriptionAndTags(
   }, descContent);
 
   if (!descSet) {
-    throw new Error('未找到快手作品描述框');
+    throw new SelectorError('未找到快手作品描述框', undefined, 'kuaishou');
   }
 
   await riskControl.humanizedAppendTags(normalizedTags, {

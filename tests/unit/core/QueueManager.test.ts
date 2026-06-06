@@ -153,7 +153,7 @@ describe('QueueManager', () => {
       queue.enqueue(makeTask({ id: 't1' }));
       const task = queue.dequeue()!;
 
-      expect(task.status).toBe('running');
+      expect(task.status).toBe('uploading');
       expect(task.startedAt).toBeDefined();
     });
 
@@ -168,15 +168,15 @@ describe('QueueManager', () => {
       expect(dequeued!.id).toBe('t2');
     });
 
-    it('发出 TASK_STARTED 事件', () => {
+    it('发出 TASK_UPLOADING 事件', () => {
       const eventBus = EventBus.getInstance();
       const handler = vi.fn();
-      const unsub = eventBus.on('task:started', handler);
+      const unsub = eventBus.on('task:uploading', handler);
 
       queue.enqueue(makeTask({ id: 't1' }));
       queue.dequeue();
 
-      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ id: 't1', status: 'running' }));
+      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ id: 't1', status: 'uploading' }));
       unsub();
     });
   });
@@ -206,18 +206,18 @@ describe('QueueManager', () => {
   describe('updateStatus', () => {
     it('更新任务状态', () => {
       queue.enqueue(makeTask({ id: 't1' }));
-      queue.updateStatus('t1', 'completed');
+      queue.updateStatus('t1', 'success');
 
-      const tasks = queue.getByStatus('completed');
+      const tasks = queue.getByStatus('success');
       expect(tasks).toHaveLength(1);
       expect(tasks[0].id).toBe('t1');
     });
 
-    it('设置 completedAt 当状态为 completed', () => {
+    it('设置 completedAt 当状态为 success', () => {
       queue.enqueue(makeTask({ id: 't1' }));
-      queue.updateStatus('t1', 'completed');
+      queue.updateStatus('t1', 'success');
 
-      const tasks = queue.getByStatus('completed');
+      const tasks = queue.getByStatus('success');
       expect(tasks[0].completedAt).toBeDefined();
     });
 
@@ -238,16 +238,16 @@ describe('QueueManager', () => {
     });
 
     it('对不存在的任务静默忽略', () => {
-      expect(() => queue.updateStatus('nonexistent', 'completed')).not.toThrow();
+      expect(() => queue.updateStatus('nonexistent', 'success')).not.toThrow();
     });
 
-    it('发出 completed 事件', () => {
+    it('发出 success 事件', () => {
       const eventBus = EventBus.getInstance();
       const handler = vi.fn();
-      const unsub = eventBus.on('task:completed', handler);
+      const unsub = eventBus.on('task:success', handler);
 
       queue.enqueue(makeTask({ id: 't1' }));
-      queue.updateStatus('t1', 'completed');
+      queue.updateStatus('t1', 'success');
 
       expect(handler).toHaveBeenCalled();
       unsub();
@@ -294,12 +294,12 @@ describe('QueueManager', () => {
     it('返回指定状态的任务列表', () => {
       queue.enqueue(makeTask({ id: 't1' }));
       queue.enqueue(makeTask({ id: 't2' }));
-      queue.updateStatus('t1', 'completed');
+      queue.updateStatus('t1', 'success');
 
-      const completed = queue.getByStatus('completed');
+      const success = queue.getByStatus('success');
       const queued = queue.getByStatus('queued');
 
-      expect(completed).toHaveLength(1);
+      expect(success).toHaveLength(1);
       expect(queued).toHaveLength(1);
     });
 
@@ -310,7 +310,7 @@ describe('QueueManager', () => {
     it('返回副本，不影响内部状态', () => {
       queue.enqueue(makeTask({ id: 't1' }));
       const tasks = queue.getByStatus('queued');
-      tasks[0].status = 'completed';
+      tasks[0].status = 'success';
 
       // Original should be unaffected
       const original = queue.getByStatus('queued');

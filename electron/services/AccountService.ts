@@ -1,11 +1,12 @@
 import * as crypto from 'crypto';
-import { session as electronSession } from 'electron';
+import { session as electronSession, BrowserWindow } from 'electron';
 import { Logger } from '../core/Logger';
 import { EventBus } from '../core/EventBus';
-import { securityLayer } from '../core/SecurityLayer';
 import { getDatabase, isDatabaseAvailable } from '../data/Database';
 import { PlatformRegistry } from '../platform/base/PlatformRegistry';
 import type { PlatformAdapter } from '../platform/base/interfaces';
+import { validateChannelsCookieSession } from '../platform/channels/login-detection';
+import { normalizePlatformId } from './platform-normalizer';
 import type {
   Account,
   AccountRow,
@@ -70,12 +71,13 @@ export class AccountService implements IAccountService {
   // ─── 账号绑定 ──────────────────────────────────────────
 
   async bindAccount(platform: string, groupId?: string): Promise<Account> {
-    const adapter = this.requireAdapter(platform);
+    const normalizedPlatform = normalizePlatformId(platform);
+    const adapter = this.requireAdapter(normalizedPlatform);
 
     const sessionId = crypto.randomUUID();
     const session: QRLoginSession = {
       sessionId,
-      platform,
+      platform: normalizedPlatform,
       groupId,
       startedAt: new Date(),
       status: 'waiting',
@@ -94,7 +96,7 @@ export class AccountService implements IAccountService {
         qrPath,
       });
 
-      logger.info(`扫码会话已创建: sessionId=${sessionId}, platform=${platform}`);
+      logger.info(`扫码会话已创建: sessionId=${sessionId}, platform=${normalizedPlatform}`);
 
       const loginResult = await adapter.login(sessionId, false);
 
@@ -107,22 +109,19 @@ export class AccountService implements IAccountService {
       session.status = 'confirmed';
       ACTIVE_LOGIN_SESSIONS.delete(sessionId);
 
-      const cookieRaw = await this.readCookieFile(loginResult.cookiePath);
-      const cookieEncrypted = await securityLayer.encrypt(cookieRaw);
-
       const accountId = crypto.randomUUID();
       const now = new Date().toISOString();
 
       const db = this.requireDatabase();
       db.prepare(
-        `INSERT INTO accounts (id, platform, name, avatar, cookie_encrypted, cookie_valid, last_cookie_check, group_id, status, created_at, updated_at)
+        `INSERT INTO accounts (id, platform, nickname, avatar_url, cookie_path, cookie_valid, last_login, group_id, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'active', ?, ?)`
       ).run(
         accountId,
-        platform,
+        normalizedPlatform,
         `账号-${accountId.slice(0, 8)}`,
         null,
-        cookieEncrypted,
+        loginResult.cookiePath || '',
         now,
         groupId ?? null,
         now,
@@ -131,10 +130,10 @@ export class AccountService implements IAccountService {
 
       const account = await this.getAccount(accountId);
 
-      const payload: AccountBoundPayload = { accountId, platform, groupId };
+      const payload: AccountBoundPayload = { accountId, platform: normalizedPlatform, groupId };
       EventBus.getInstance().emit(AccountEvent.ACCOUNT_BOUND, payload);
 
-      logger.info(`账号绑定成功: accountId=${accountId}, platform=${platform}`);
+      logger.info(`账号绑定成功: accountId=${accountId}, platform=${normalizedPlatform}`);
       return account!;
     } catch (err) {
       session.status = 'error';
@@ -145,12 +144,13 @@ export class AccountService implements IAccountService {
   }
 
   async getQRCode(platform: string): Promise<string> {
-    const adapter = this.requireAdapter(platform);
+    const normalizedPlatform = normalizePlatformId(platform);
+    const adapter = this.requireAdapter(normalizedPlatform);
     const sessionId = crypto.randomUUID();
 
     const session: QRLoginSession = {
       sessionId,
-      platform,
+      platform: normalizedPlatform,
       startedAt: new Date(),
       status: 'waiting',
     };
@@ -159,7 +159,7 @@ export class AccountService implements IAccountService {
     const qrPath = await adapter.getQRCode(sessionId);
     session.qrPath = qrPath;
 
-    logger.info(`二维码已生成: platform=${platform}, sessionId=${sessionId}`);
+    logger.info(`二维码已生成: platform=${normalizedPlatform}, sessionId=${sessionId}`);
     return qrPath;
   }
 
@@ -182,37 +182,61 @@ export class AccountService implements IAccountService {
   // ─── Cookie 管理 ──────────────────────────────────────
 
   async validateCookie(accountId: string): Promise<boolean> {
-    const account = await this.getAccount(accountId);
-    if (!account) {
+    const db = this.requireDatabase();
+    const row = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId) as
+      | (AccountRow & { cookie_path?: string | null })
+      | undefined;
+    if (!row) {
       logger.warn(`validateCookie: 账号不存在 accountId=${accountId}`);
       return false;
     }
 
+    const platform = normalizePlatformId(row.platform);
+    const cookiePath = row.cookie_path || undefined;
     let valid = false;
 
     try {
-      const adapter = PlatformRegistry.getAdapter(account.platform);
+      const adapter = PlatformRegistry.getAdapter(platform);
       if (adapter) {
-        valid = await adapter.checkCookie(accountId);
+        valid = await adapter.checkCookie(accountId, cookiePath);
+      } else {
+        logger.warn(`validateCookie: 平台未注册 accountId=${accountId}, platform=${platform}`);
       }
     } catch (err) {
       logger.error(`Cookie 验证异常: accountId=${accountId}`, err);
       valid = false;
     }
 
-    if (!valid && (account.platform === 'bilibili' || account.platform === 'kuaishou')) {
+    if (platform === 'channels') {
+      try {
+        const storageValid = valid;
+        const partition = `persist:${accountId}`;
+        const ses = electronSession.fromPartition(partition);
+        const partitionCookies = await ses.cookies.get({ url: 'https://channels.weixin.qq.com' });
+        const partitionValid = await validateChannelsCookieSession(
+          partitionCookies.filter(cookie => !this.isExpired(cookie))
+        );
+        valid = storageValid && partitionValid;
+        logger.info(
+          `validateCookie: channels storage=${storageValid}, partition=${partitionValid}`
+        );
+      } catch (err) {
+        logger.error(`Electron partition cookie 检查失败: accountId=${accountId}`, err);
+        valid = false;
+      }
+    } else if (!valid) {
       try {
         const partition = `persist:${accountId}`;
         const ses = electronSession.fromPartition(partition);
         const config = {
           bilibili: { domains: ['.bilibili.com'], required: ['SESSDATA'] },
           kuaishou: { domains: ['.kuaishou.com'], required: ['kuaishou.web.cp.api_ph', 'kuaishou.web.cp.api_st'] },
-        }[account.platform];
+        }[platform as 'bilibili' | 'kuaishou'];
         if (config) {
           for (const domain of config.domains) {
             const cookies = await ses.cookies.get({ domain });
             const names = cookies.filter(c => !this.isExpired(c)).map(c => c.name);
-            if (config.required.every(r => names.includes(r))) {
+            if (config.required.every(required => names.includes(required))) {
               valid = true;
               break;
             }
@@ -223,18 +247,17 @@ export class AccountService implements IAccountService {
       }
     }
 
-    const db = this.requireDatabase();
     const newStatus: AccountStatus = valid ? 'active' : 'expired';
     const now = new Date().toISOString();
 
     db.prepare(
-      `UPDATE accounts SET cookie_valid = ?, last_cookie_check = ?, status = ?, updated_at = ? WHERE id = ?`
-    ).run(valid ? 1 : 0, now, newStatus, now, accountId);
+      `UPDATE accounts SET platform = ?, cookie_valid = ?, last_cookie_check = ?, status = ?, updated_at = ? WHERE id = ?`
+    ).run(platform, valid ? 1 : 0, now, newStatus, now, accountId);
 
-    if (!valid && account.status !== 'expired') {
+    if (!valid && row.status !== 'expired') {
       const payload: AccountStatusPayload = {
         accountId,
-        oldStatus: account.status,
+        oldStatus: row.status as AccountStatus,
         newStatus: 'expired',
       };
       EventBus.getInstance().emit(AccountEvent.STATUS_CHANGED, payload);
@@ -261,30 +284,34 @@ export class AccountService implements IAccountService {
     const adapter = this.requireAdapter(account.platform);
     logger.info(`开始刷新 Cookie: accountId=${accountId}, platform=${account.platform}`);
 
-    const loginResult = await adapter.login(accountId, false);
+    const loginResult = await adapter.login(accountId, false, {
+      force: true,
+      onLoginConfirmed: () => {
+        const db = this.requireDatabase();
+        const now = new Date().toISOString();
+        db.prepare(
+          `UPDATE accounts SET cookie_valid = 1, status = 'active', last_login = ?, updated_at = ? WHERE id = ?`
+        ).run(now, now, accountId);
+
+        BrowserWindow.getAllWindows().forEach(win => {
+          win.webContents.send('account:login-status', {
+            status: 'online',
+            accountId,
+          });
+        });
+        logger.info(`登录确认，状态已即时更新: accountId=${accountId}`);
+      },
+    });
     if (!loginResult.success) {
       logger.error(`Cookie 刷新失败: accountId=${accountId}, reason=${loginResult.message}`);
       return false;
     }
 
-    const cookieRaw = await this.readCookieFile(loginResult.cookiePath);
-    const cookieEncrypted = await securityLayer.encrypt(cookieRaw);
-
     const db = this.requireDatabase();
     const now = new Date().toISOString();
-
     db.prepare(
-      `UPDATE accounts SET cookie_encrypted = ?, cookie_valid = 1, last_cookie_check = ?, status = 'active', updated_at = ? WHERE id = ?`
-    ).run(cookieEncrypted, now, now, accountId);
-
-    if (account.status !== 'active') {
-      const payload: AccountStatusPayload = {
-        accountId,
-        oldStatus: account.status,
-        newStatus: 'active',
-      };
-      EventBus.getInstance().emit(AccountEvent.STATUS_CHANGED, payload);
-    }
+      `UPDATE accounts SET cookie_path = ?, cookie_valid = 1, status = 'active', last_login = ?, updated_at = ? WHERE id = ?`
+    ).run(loginResult.cookiePath || null, now, now, accountId);
 
     EventBus.getInstance().emit(AccountEvent.COOKIE_REFRESHED, { accountId });
     logger.info(`Cookie 刷新成功: accountId=${accountId}`);
@@ -442,8 +469,10 @@ export class AccountService implements IAccountService {
 
     const db = this.requireDatabase();
     const now = new Date().toISOString();
-    db.prepare('UPDATE accounts SET status = ?, updated_at = ? WHERE id = ?').run(
+    const cookieValid = (status === 'active') ? 1 : 0;
+    db.prepare('UPDATE accounts SET status = ?, cookie_valid = ?, updated_at = ? WHERE id = ?').run(
       status,
+      cookieValid,
       now,
       accountId
     );
@@ -454,6 +483,18 @@ export class AccountService implements IAccountService {
       newStatus: status,
     };
     EventBus.getInstance().emit(AccountEvent.STATUS_CHANGED, payload);
+
+    const rendererStatus = status === 'active'
+      ? 'online'
+      : status === 'inactive'
+        ? 'offline'
+        : 'expired';
+    BrowserWindow.getAllWindows().forEach(win => {
+      win.webContents.send('account:login-status', {
+        status: rendererStatus,
+        accountId,
+      });
+    });
 
     logger.info(`状态更新: accountId=${accountId}, ${account.status} -> ${status}`);
   }
@@ -483,17 +524,20 @@ export class AccountService implements IAccountService {
       CREATE TABLE IF NOT EXISTS accounts (
         id TEXT PRIMARY KEY,
         platform TEXT NOT NULL,
-        name TEXT NOT NULL,
-        avatar TEXT,
-        cookie_encrypted TEXT NOT NULL,
+        nickname TEXT,
+        avatar_url TEXT,
+        cookie_path TEXT NOT NULL DEFAULT '',
         cookie_valid INTEGER NOT NULL DEFAULT 0,
-        last_cookie_check TEXT,
+        last_login TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
         group_id TEXT,
         fingerprint_id TEXT,
         proxy_id TEXT,
-        status TEXT NOT NULL DEFAULT 'active',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        browser_mode TEXT,
+        homepage_url TEXT,
+        remark TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
       CREATE INDEX IF NOT EXISTS idx_accounts_platform ON accounts(platform);
@@ -586,9 +630,10 @@ export class AccountService implements IAccountService {
   }
 
   private requireAdapter(platform: string): PlatformAdapter {
-    const adapter = PlatformRegistry.getAdapter(platform);
+    const normalizedPlatform = normalizePlatformId(platform);
+    const adapter = PlatformRegistry.getAdapter(normalizedPlatform);
     if (!adapter) {
-      throw new Error(`不支持的平台: ${platform}，可用平台: ${PlatformRegistry.getSupportedPlatforms().join(', ')}`);
+      throw new Error(`不支持的平台: ${normalizedPlatform}，可用平台: ${PlatformRegistry.getSupportedPlatforms().join(', ')}`);
     }
     return adapter;
   }
@@ -603,10 +648,10 @@ export class AccountService implements IAccountService {
   private rowToAccount(row: AccountRow): Account {
     return {
       id: row.id,
-      platform: row.platform,
-      name: row.name,
-      avatar: row.avatar ?? undefined,
-      cookieEncrypted: row.cookie_encrypted,
+      platform: normalizePlatformId(row.platform),
+      name: row.nickname || row.name || '',
+      avatar: (row.avatar_url || row.avatar) ?? undefined,
+      cookieEncrypted: row.cookie_encrypted || row.cookie_path || '',
       cookieValid: row.cookie_valid === 1,
       lastCookieCheck: row.last_cookie_check ? new Date(row.last_cookie_check) : undefined,
       groupId: row.group_id ?? undefined,

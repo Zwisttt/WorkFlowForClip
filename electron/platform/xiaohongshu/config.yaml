@@ -1,6 +1,18 @@
 # 小红书平台配置
 # 设计文档要求限流配置：hourly: 5, daily: 20, burst: 2
 
+riskControl:
+  enabled: true
+  typingDelayMs:
+    min: 80
+    max: 250
+  clickDelayMs:
+    min: 150
+    max: 400
+  stepIntervalSec:
+    min: 1.5
+    max: 2.5
+
 platform:
   id: xiaohongshu
   name: 小红书
@@ -37,6 +49,7 @@ rateLimit:
 capabilities:
   serverScheduledPublish: false
   maxScheduleDays: 0
+  maxTopics: 10
   comment: true
   image: true
 

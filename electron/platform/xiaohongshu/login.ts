@@ -6,6 +6,9 @@ import { Logger } from '../../core/Logger';
 import { XHS_URLS, LOGIN_SELECTORS } from './selectors';
 import { getCookiePath, saveCookie, cookieExists } from './cookie';
 import type { CookieResult } from '../base/types';
+import { PageRiskControl } from '../base/RiskControl';
+import { toPlatformError } from '../base/PlatformError';
+import { getDebugRecorder } from '../base/DebugRecorder';
 
 const logger = new Logger('XhsLogin');
 
@@ -139,6 +142,11 @@ async function waitForLogin(
   pollIntervalMs: number = 3000,
   maxChecks: number = 100
 ): Promise<boolean> {
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 80, max: 250 },
+    clickDelayMs: { min: 150, max: 400 },
+    stepIntervalSec: { min: 1.5, max: 2.5 },
+  });
   for (let i = 0; i < maxChecks; i++) {
     if (await isLoginCompleted(page)) {
       logger.info(`扫码成功，当前页面: ${page.url()}`);
@@ -150,9 +158,9 @@ async function waitForLogin(
       logger.info('二维码已过期，正在刷新...');
       const refreshBtn = page.locator(LOGIN_SELECTORS.qrRefreshBtn).first();
       if ((await refreshBtn.count())) {
-        await refreshBtn.click();
+        await rc.humanClick(LOGIN_SELECTORS.qrRefreshBtn);
       } else {
-        await expiredText.click();
+        await rc.humanClick('text="二维码已失效"');
       }
       await page.waitForTimeout(1500);
       const src = await extractQrCodeSrc(page);
@@ -173,10 +181,15 @@ export async function qrCodeLogin(
   onQRRefresh?: (path: string) => void
 ): Promise<CookieResult> {
   const cookiePath = getCookiePath(accountId);
+  const debugRecorder = getDebugRecorder();
+  debugRecorder.setSessionId(`xiaohongshu_login_${accountId}_${Date.now()}`);
+  const pageCtx = { accountId };
 
   if (cookieExists(cookiePath)) {
     logger.info('检查现有 cookie...');
-    const valid = await validateExistingCookie(cookiePath);
+    const valid = await debugRecorder.recordStep('validate_existing_cookie', async () => {
+      return await validateExistingCookie(cookiePath);
+    }, pageCtx);
     if (valid) {
       logger.info('Cookie 有效，无需重新登录');
       return { success: true, cookiePath, message: 'Cookie 有效' };
@@ -193,28 +206,36 @@ export async function qrCodeLogin(
 
   try {
     const page = await context.newPage();
+    const pageCtxWithPage = { page, ...pageCtx };
 
     logger.info('打开小红书创作者中心...');
-    await page.goto(XHS_URLS.loginPage);
+    await debugRecorder.recordStep('goto_login_page', async () => {
+      await page.goto(XHS_URLS.loginPage);
+    }, pageCtxWithPage);
 
-    const qrSrc = await extractQrCodeSrc(page);
-    const qrPath = await saveQrCodeImage(qrSrc, accountId);
+    await debugRecorder.recordStep('extract_qr_code', async () => {
+      const qrSrc = await extractQrCodeSrc(page);
+      const qrPath = await saveQrCodeImage(qrSrc, accountId);
+      logger.info('请使用小红书 APP 扫描二维码登录');
+      logger.info(`二维码文件: ${qrPath}`);
+      onQRReady?.(qrPath);
+    }, pageCtxWithPage);
 
-    logger.info('请使用小红书 APP 扫描二维码登录');
-    logger.info(`二维码文件: ${qrPath}`);
-    onQRReady?.(qrPath);
-
-    const loginSuccess = await waitForLogin(page, accountId, onQRRefresh);
-
-    if (!loginSuccess) {
-      return { success: false, cookiePath, message: '等待扫码超时' };
-    }
+    await debugRecorder.recordStep('wait_scan_login', async () => {
+      const loginSuccess = await waitForLogin(page, accountId, onQRRefresh);
+      if (!loginSuccess) {
+        throw new Error('等待扫码超时');
+      }
+    }, pageCtxWithPage);
 
     await page.waitForTimeout(2000);
     await saveCookie(context, cookiePath);
     logger.info(`Cookie 已保存: ${cookiePath}`);
 
-    const verifySuccess = await validateExistingCookie(cookiePath);
+    const verifySuccess = await debugRecorder.recordStep('verify_cookie', async () => {
+      return await validateExistingCookie(cookiePath);
+    }, pageCtx);
+
     if (!verifySuccess) {
       return { success: false, cookiePath, message: 'Cookie 保存后验证失败' };
     }

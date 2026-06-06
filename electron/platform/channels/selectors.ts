@@ -44,11 +44,13 @@ export const LOGIN_SELECTORS = {
   avatarIndicator: '.account-avatar, .user-avatar, [class*="avatar"], img[class*="avatar"]',
   usernameText: '.account-name, .user-name, [class*="nickname"], [class*="username"]',
 
-  /**
-   * 登录状态检测 —— 出现这些说明未登录
-   * 视频号未登录时页面会显示登录二维码
-   */
-  loginContainer: '.login-container, [class*="login-box"], [class*="login-page"]',
+  /** 登录成功后页面必有的发布 UI 元素 */
+  publishMarker: 'div:has-text("发表视频"), button:has-text("发表"), button:has-text("保存草稿")',
+
+  loginContainer: '.login-container, .login-qrcode-wrap, .qrcode-wrap, [class*="login-box"], [class*="login-page"]',
+
+  /** 视频号扫码登录标识文字 */
+  loginScannedTip: 'div.qr-tip div:has-text("已扫码"), div.qr-tip div:has-text("需在手机上进行确认"), span:has-text("微信扫码登录 视频号助手")',
 } as const;
 
 // ---- 上传/发布相关选择器 ----
@@ -73,7 +75,10 @@ export const UPLOAD_SELECTORS = {
   descInput: 'textarea[placeholder*="描述"], textarea[placeholder*="输入"], [class*="desc"] textarea, [contenteditable="true"]',
   descInputFallback: 'input[placeholder*="描述"], .desc-input, [class*="description"]',
 
-  /** 话题/标签输入 */
+  /** 短标题输入框（视频号特有） */
+  shortTitleInput: 'input[placeholder*="短标题"], input[placeholder*="标题"][maxlength="20"], [class*="short-title"] input',
+
+  /** 话题/标签输入（视频号实际上不支持，保留兼容性） */
   topicInput: 'input[placeholder*="话题"], input[placeholder*="标签"], [class*="topic"] input',
   topicSuggestion: '.topic-item, [class*="topic"] li, [class*="suggest"] li',
   topicTag: '.topic-tag, [class*="tag"] span',
@@ -98,6 +103,33 @@ export const UPLOAD_SELECTORS = {
   /** 发布结果提示 */
   publishSuccessToast: 'get_by_text("发布成功", exact=false), get_by_text("发表成功", exact=false)',
   publishFailedToast: 'get_by_text("发布失败", exact=false), get_by_text("发表失败", exact=false)',
+
+  /** 合集选择（视频号特有） */
+  collectionSelect: 'text="添加到合集" >> xpath=following-sibling::div, [class*="collection-select"], button:has-text("选择合集")',
+  collectionOption: '[class*="collection-option"], [class*="album-option"], [role="option"], .option-list-wrap > div',
+
+  /** 原创声明（视频号特有） */
+  originalStatement: 'get_by_label("视频为原创"), [class*="original-statement"] input, [class*="original-checkbox"] input, label:has-text("原创") input[type="checkbox"]',
+  originalAgreement: 'label:has-text("我已阅读并同意 《视频号原创声明使用条款》")',
+  originalCategoryForm: 'div.original-type-form div.form-label:has-text("原创类型")',
+  originalCategoryOption: 'ul.weui-desktop-dropdown__list li:has-text("{category}")',
+
+  /** 位置（视频号支持位置选择） */
+  locationInput: 'input[placeholder*="位置"], input[placeholder*="地点"], [class*="location"] input',
+  locationOption: '[class*="location-option"], [class*="poi-item"], [role="option"]:has-text("{location}")',
+
+  /** 链接（视频号支持添加推广链接） */
+  productLinkInput: 'input[placeholder*="链接"], input[placeholder*="商品"], [class*="product-link"] input',
+  productLinkAddBtn: 'button:has-text("添加链接"), button:has-text("添加商品")',
+
+  /** 定时发布（视频号 — 借鉴竞品 set_schedule_time_tencent） */
+  scheduleLabel: 'label:has-text("定时")',
+  scheduleDateInput: 'input[placeholder="请选择发表时间"]',
+  scheduleTimeInput: 'input[placeholder="请选择时间"]',
+  scheduleMonthLabel: 'span.weui-desktop-picker__panel__label:has-text("月")',
+  scheduleMonthNext: 'button.weui-desktop-btn__icon__right',
+  scheduleDayTable: 'table.weui-desktop-picker__table a',
+  scheduleDisabledClass: 'weui-desktop-picker__disabled',
 } as const;
 
 // ---- 数据统计选择器 ----

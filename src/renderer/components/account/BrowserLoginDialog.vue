@@ -409,7 +409,7 @@ const steps = [
 const platforms = [
   { label: '抖音', value: 'douyin', color: '#161823' },
   { label: '小红书', value: 'xiaohongshu', color: '#FE2C55' },
-  { label: '视频号', value: 'weixin_video', color: '#07C160' },
+  { label: '视频号', value: 'channels', color: '#07C160' },
   { label: '快手', value: 'kuaishou', color: '#FF4906' },
   { label: 'B站', value: 'bilibili', color: '#00A1D6' },
 ];

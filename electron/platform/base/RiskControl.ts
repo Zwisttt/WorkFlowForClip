@@ -10,12 +10,73 @@ export interface RiskTextFieldQuery {
   allowFallback?: boolean;
 }
 
+// ---- 拟人化操作选项 ----
+
+export interface HumanizedActionOptions {
+  /** 最小延迟 (ms)，默认从配置读取 */
+  minDelayMs?: number;
+  /** 最大延迟 (ms)，默认从配置读取 */
+  maxDelayMs?: number;
+  /** 是否记录调试日志 */
+  debug?: boolean;
+  /** 错误时是否抛出 */
+  throwOnError?: boolean;
+}
+
+export interface HumanizedTypeOptions extends HumanizedActionOptions {
+  /** 每个字符输入间隔 (ms)，默认 50-200 */
+  charDelayMs?: { min: number; max: number };
+  /** 输入前清空已有内容 */
+  clearBefore?: boolean;
+  /** 输入后按回车 */
+  pressEnterAfter?: boolean;
+}
+
+export interface HumanizedClickOptions extends HumanizedActionOptions {
+  /** 点击前是否悬停 */
+  hoverBefore?: boolean;
+  /** 悬停持续时间 (ms) */
+  hoverDurationMs?: number;
+}
+
+export interface HumanizedScrollOptions extends HumanizedActionOptions {
+  /** 滚动速度 (px/s)，默认 200-500 */
+  speedPxPerSec?: { min: number; max: number };
+}
+
+export interface HumanizedSelectOptions extends HumanizedActionOptions {
+  /** 选择前悬停持续时间 (ms) */
+  hoverDurationMs?: number;
+}
+
+export interface HumanizedUploadOptions extends HumanizedActionOptions {
+  /** 上传前等待时间 (ms) */
+  waitBeforeUploadMs?: number;
+}
+
+export interface HumanizedDragOptions extends HumanizedActionOptions {
+  /** 拖拽持续时间 (ms) */
+  dragDurationMs?: number;
+}
+
+export interface HumanizedReadOptions extends HumanizedActionOptions {
+  /** 阅读时间随机范围系数 (min * duration, max * duration) */
+  readTimeCoeff?: { min: number; max: number };
+}
+
+// ---- RiskControl 选项扩展 ----
+
 export interface RiskControlOptions {
   minWriteStepDelayMs?: number;
   maxWriteStepDelayMs?: number;
   minKeyDelayMs?: number;
   maxKeyDelayMs?: number;
   maxTags?: number;
+  // 拟人化参数
+  typingDelayMs?: { min: number; max: number };
+  clickDelayMs?: { min: number; max: number };
+  stepIntervalSec?: { min: number; max: number };
+  scrollSpeedPxPerSec?: { min: number; max: number };
 }
 
 interface SerializedPattern {
@@ -29,6 +90,10 @@ const DEFAULT_OPTIONS: Required<RiskControlOptions> = {
   minKeyDelayMs: 45,
   maxKeyDelayMs: 180,
   maxTags: 3,
+  typingDelayMs: { min: 50, max: 200 },
+  clickDelayMs: { min: 100, max: 300 },
+  stepIntervalSec: { min: 2.0, max: 3.0 },
+  scrollSpeedPxPerSec: { min: 200, max: 500 },
 };
 
 function escapeRegExpText(text: string): string {
@@ -258,6 +323,198 @@ export class PageRiskControl extends FengkongAbstractClass {
 
   protected async pressEnter(): Promise<void> {
     await this.page.keyboard.press('Enter');
+  }
+
+  // ============================================================
+  // 拟人化操作方法（PageRiskControl 实现）
+  // ============================================================
+
+  async humanWait(ms: number, options?: HumanizedActionOptions): Promise<void> {
+    const delay = this.randomInt(
+      options?.minDelayMs ?? ms * 0.8,
+      options?.maxDelayMs ?? ms * 1.2,
+    );
+    if (options?.debug) {
+      console.log(`  🕐 [RiskControl] wait ${delay}ms`);
+    }
+    await this.sleep(delay);
+  }
+
+  async humanType(
+    selector: string,
+    text: string,
+    options?: HumanizedTypeOptions,
+  ): Promise<void> {
+    const loc = this.page.locator(selector).first();
+    const charDelay = options?.charDelayMs ?? this.options.typingDelayMs ?? { min: 50, max: 200 };
+    if (options?.debug) {
+      console.log(`  ⌨️  [RiskControl] type "${text}" into ${selector}`);
+    }
+    await loc.waitFor({ state: 'visible', timeout: 10000 });
+    await this.sleep(this.randomInt(charDelay.min, charDelay.max));
+    if (options?.clearBefore !== false) {
+      await loc.clear();
+      await this.sleep(this.randomInt(charDelay.min, charDelay.max));
+    }
+    for (const char of Array.from(text)) {
+      await loc.type(char);
+      await this.sleep(this.randomInt(charDelay.min, charDelay.max));
+    }
+    if (options?.pressEnterAfter) {
+      await this.sleep(this.randomInt(charDelay.min, charDelay.max));
+      await this.pressEnter();
+    }
+  }
+
+  async humanClick(
+    selector: string,
+    options?: HumanizedClickOptions,
+  ): Promise<void> {
+    const loc = this.page.locator(selector).first();
+    if (options?.debug) {
+      console.log(`  🖱️  [RiskControl] click ${selector}`);
+    }
+    await loc.waitFor({ state: 'visible', timeout: 10000 });
+    if (options?.hoverBefore) {
+      await loc.hover();
+      await this.sleep(options?.hoverDurationMs ?? this.randomInt(150, 300));
+    }
+    await this.sleep(this.randomInt(
+      options?.minDelayMs ?? this.options.clickDelayMs?.min ?? 100,
+      options?.maxDelayMs ?? this.options.clickDelayMs?.max ?? 300,
+    ));
+    await loc.click();
+  }
+
+  async humanHover(
+    selector: string,
+    options?: HumanizedActionOptions,
+  ): Promise<void> {
+    const loc = this.page.locator(selector).first();
+    if (options?.debug) {
+      console.log(`  👆  [RiskControl] hover ${selector}`);
+    }
+    await loc.waitFor({ state: 'visible', timeout: 10000 });
+    await this.sleep(this.randomInt(
+      options?.minDelayMs ?? 100,
+      options?.maxDelayMs ?? 200,
+    ));
+    await loc.hover();
+  }
+
+  async humanScroll(
+    direction: 'up' | 'down' | 'top' | 'bottom',
+    distanceOrSelector?: number | string,
+    options?: HumanizedScrollOptions,
+  ): Promise<void> {
+    if (options?.debug) {
+      console.log(`  📜  [RiskControl] scroll ${direction}`);
+    }
+    const speed = options?.speedPxPerSec ?? this.options.scrollSpeedPxPerSec ?? { min: 200, max: 500 };
+    if (direction === 'top') {
+      await this.page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+    } else if (direction === 'bottom') {
+      await this.page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
+    } else {
+      const distance = typeof distanceOrSelector === 'number' ? distanceOrSelector : 300;
+      const duration = (distance / this.randomInt(speed.min, speed.max)) * 1000;
+      await this.page.evaluate(
+        ({ d, dist, dur }) => {
+          const scrollStep = dist / Math.ceil(dur / 50);
+          let pos = 0;
+          const step = () => {
+            pos += scrollStep;
+            window.scrollBy(0, d === 'down' ? scrollStep : -scrollStep);
+            if (pos < dist) setTimeout(step, 50);
+          };
+          step();
+        },
+        { d: direction, dist: distance, dur: duration },
+      );
+      await this.sleep(Math.ceil(duration));
+    }
+    await this.sleep(this.randomInt(
+      options?.minDelayMs ?? 200,
+      options?.maxDelayMs ?? 400,
+    ));
+  }
+
+  async humanSelect(
+    selector: string,
+    value: string,
+    options?: HumanizedSelectOptions,
+  ): Promise<void> {
+    const loc = this.page.locator(selector).first();
+    if (options?.debug) {
+      console.log(`  🔽  [RiskControl] select "${value}" in ${selector}`);
+    }
+    await loc.waitFor({ state: 'visible', timeout: 10000 });
+    await this.sleep(options?.hoverDurationMs ?? this.randomInt(150, 300));
+    await loc.selectOption(value);
+    await this.sleep(this.randomInt(
+      options?.minDelayMs ?? 100,
+      options?.maxDelayMs ?? 250,
+    ));
+  }
+
+  async humanUpload(
+    selector: string,
+    filePath: string,
+    options?: HumanizedUploadOptions,
+  ): Promise<void> {
+    const loc = this.page.locator(selector).first();
+    if (options?.debug) {
+      console.log(`  📤  [RiskControl] upload ${filePath} to ${selector}`);
+    }
+    await loc.waitFor({ state: 'visible', timeout: 10000 });
+    await this.sleep(options?.waitBeforeUploadMs ?? this.randomInt(500, 1000));
+    await loc.setInputFiles(filePath);
+    await this.sleep(this.randomInt(
+      options?.minDelayMs ?? 300,
+      options?.maxDelayMs ?? 600,
+    ));
+  }
+
+  async humanDrag(
+    sourceSelector: string,
+    targetSelector: string,
+    options?: HumanizedDragOptions,
+  ): Promise<void> {
+    const source = this.page.locator(sourceSelector).first();
+    const target = this.page.locator(targetSelector).first();
+    if (options?.debug) {
+      console.log(`  🤚  [RiskControl] drag ${sourceSelector} → ${targetSelector}`);
+    }
+    await source.waitFor({ state: 'visible', timeout: 10000 });
+    await target.waitFor({ state: 'visible', timeout: 10000 });
+    const dur = options?.dragDurationMs ?? this.randomInt(400, 800);
+    await source.dragTo(target, { targetPosition: { x: 5, y: 5 } });
+    await this.sleep(dur);
+  }
+
+  async humanRead(
+    selectorOrDuration: string | number,
+    options?: HumanizedReadOptions,
+  ): Promise<void> {
+    const duration = typeof selectorOrDuration === 'number'
+      ? selectorOrDuration
+      : 0;
+    const coeff = options?.readTimeCoeff ?? { min: 0.8, max: 1.5 };
+    if (options?.debug) {
+      console.log(`  👁️  [RiskControl] read${duration ? ` ${duration}ms` : ` ${selectorOrDuration}`}`);
+    }
+    if (duration > 0) {
+      const actualDuration = this.randomInt(
+        Math.floor(duration * coeff.min),
+        Math.floor(duration * coeff.max),
+      );
+      await this.sleep(actualDuration);
+    } else {
+      await this.sleep(this.randomInt(
+        options?.minDelayMs ?? 1000,
+        options?.maxDelayMs ?? 2000,
+      ));
+    }
   }
 }
 

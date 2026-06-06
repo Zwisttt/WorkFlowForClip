@@ -7,5 +7,5 @@ export const PLATFORM_ICONS: Record<string, string> = {
 
   bilibili: `<svg width="36" height="36" viewBox="0 0 24 24" fill="#00A1D6"><path d="M17.8 4.5h-3.6l-2.2 2.42L9.8 4.5H6.2c-.66 0-1.2.54-1.2 1.2v11.1c0 .66.54 1.2 1.2 1.2h11.6c.66 0 1.2-.54 1.2-1.2V5.7c0-.66-.54-1.2-1.2-1.2zm-4.8 9.5c-.94 0-1.7-.76-1.7-1.7s.76-1.7 1.7-1.7 1.7.76 1.7 1.7-.76 1.7-1.7 1.7zm4.7 0c-.94 0-1.7-.76-1.7-1.7s.76-1.7 1.7-1.7 1.7.76 1.7 1.7-.76 1.7-1.7 1.7z"/><rect x="1" y="1" width="22" height="22" rx="5" stroke="#00A1D6" stroke-width="1.5" fill="none"/></svg>`,
 
-  weixin_video: `<svg width="36" height="36" viewBox="0 0 24 24" fill="#07C160"><rect x="2" y="2" width="20" height="20" rx="5" stroke="#07C160" stroke-width="1.5" fill="none"/><path d="M9.5 8.5l6 3.5-6 3.5z" fill="#07C160"/></svg>`,
+  channels: `<svg width="36" height="36" viewBox="0 0 24 24" fill="#07C160"><rect x="2" y="2" width="20" height="20" rx="5" stroke="#07C160" stroke-width="1.5" fill="none"/><path d="M9.5 8.5l6 3.5-6 3.5z" fill="#07C160"/></svg>`,
 };

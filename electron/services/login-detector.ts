@@ -1,6 +1,8 @@
 import type { BrowserContext } from 'patchright';
 import type { ILoginDetector, Platform, PlatformCookieConfig } from './types';
 import { PLATFORM_COOKIE_CONFIGS } from './types';
+import { detectChannelsLoginInPage } from '../platform/channels/login-detection';
+import { isChannelsPlatform } from './platform-normalizer';
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -39,6 +41,9 @@ export class AdaptiveCookiePoller implements ILoginDetector {
         if (detected) {
           return true;
         }
+        if (isChannelsPlatform(platform) && await this.detectChannelsPageLogin(context)) {
+          return true;
+        }
         this.onSuccess();
       } catch (e) {
         this.onFailure();
@@ -63,6 +68,16 @@ export class AdaptiveCookiePoller implements ILoginDetector {
     const cookieMap = new Map(cookies.map(c => [c.name, c.value]));
 
     return config.requiredCookies.every(name => cookieMap.has(name));
+  }
+
+  private async detectChannelsPageLogin(context: BrowserContext): Promise<boolean> {
+    for (const page of context.pages()) {
+      const detection = await detectChannelsLoginInPage(page);
+      if (detection.loggedIn) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private onSuccess(): void {

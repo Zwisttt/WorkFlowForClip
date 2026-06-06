@@ -32,6 +32,10 @@ const ALLOWED_CHANNELS = new Set([
   'update:status',
   'update:progress',
   'material:upload-progress',
+  'watchdog:warn',
+  'watchdog:escalate',
+  'watchdog:abandon',
+  'watchdog:retry',
 ]);
 
 const api = {
@@ -456,6 +460,20 @@ const api = {
       callback(taskId, status, data);
     ipcRenderer.on('task:status-change', handler);
     return () => ipcRenderer.removeListener('task:status-change', handler);
+  },
+
+  onWatchdogEvent: (callback: (event: string, taskId: string, message: string) => void) => {
+    if (!ALLOWED_CHANNELS.has('watchdog:warn')) return () => {};
+    const handler = (_event: Electron.IpcRendererEvent, event: string, taskId: string, message: string) =>
+      callback(event, taskId, message);
+    for (const ch of ['watchdog:warn', 'watchdog:escalate', 'watchdog:abandon']) {
+      ipcRenderer.on(ch, handler);
+    }
+    return () => {
+      for (const ch of ['watchdog:warn', 'watchdog:escalate', 'watchdog:abandon']) {
+        ipcRenderer.removeListener(ch, handler);
+      }
+    };
   },
 };
 

@@ -33,6 +33,7 @@ import { initDatabase, closeDatabase } from './data/Database';
 import { registerAllAdapters, PlatformRegistry } from './platform/adapter';
 import { multiPanelService } from './services/MultiPanelService';
 import { publishService } from './services/PublishService';
+import { accountService } from './services/AccountService';
 import { materialService } from './services/MaterialService';
 import { browserManager } from './services/embedded-browser/browser-manager';
 
@@ -228,6 +229,9 @@ app.whenReady().then(async () => {
 
   registerAllAdapters();
   logger.info(`已注册平台: ${PlatformRegistry.getSupportedPlatforms().join(', ')}`);
+
+  await accountService.initialize();
+  logger.info('账号管理服务已初始化');
 
   registerIpcHandlers();
   registerAccountLoginHandlers();

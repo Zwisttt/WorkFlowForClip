@@ -42,6 +42,9 @@ import type {
 } from './types/publish';
 import { PublishEvent } from './types/publish';
 import type { PublishEvent as BusPublishEvent } from '../core/types/eventbus';
+import type { TaskStatus } from '../core/types/task';
+import { toPlatformError, type PlatformId } from '../platform/base/PlatformError';
+import { watchdog } from './Watchdog';
 
 const logger = new Logger('PublishService');
 
@@ -139,6 +142,8 @@ export class PublishService implements IPublishService {
         const result = await this.executeNow(publishTaskId);
         return { success: result.success, error: result.error };
       } catch (err) {
+      const platformErr = toPlatformError(err);
+      logger.warn(`PlatformError: ${platformErr.category} retryable=${platformErr.retryable}`);
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
     };
@@ -148,6 +153,7 @@ export class PublishService implements IPublishService {
       logger.error(`启动时恢复残留任务失败: ${err}`);
     });
     this.startStuckTaskMonitor();
+    watchdog.start();
     logger.info('发布管理服务已初始化');
   }
 
@@ -157,6 +163,11 @@ export class PublishService implements IPublishService {
     const adapter = this.requireAdapter(request.platform);
 
     await this.validateCookieForAccount(request.accountId);
+
+    if (request.platform === 'xiaohongshu' && request.scheduledAt) {
+      logger.warn(`小红书不支持定时发布，自动清空定时字段: accountId=${request.accountId}`);
+      request.scheduledAt = undefined;
+    }
 
     const taskId = randomUUID();
     const now = nowISO();
@@ -348,17 +359,39 @@ export class PublishService implements IPublishService {
         await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'completed');
         this.eventBus.emit(PublishEvent.TASK_COMPLETED, { taskId, result } as TaskCompletedPayload);
       } else {
+        const failMsg = result.error ?? '未知错误';
+        const isAuthError = /登录已过期|请重新登录|Cookie 已失效|需要重新登录|登录页/.test(failMsg);
+        if (isAuthError && dbTask.account_id) {
+          try {
+            await accountService.updateStatus(dbTask.account_id, 'expired');
+            logger.info(`[executeNow] 检测到认证失败，已将账号标记为expired: accountId=${dbTask.account_id}`);
+          } catch (statusErr) {
+            logger.warn(`[executeNow] 更新账号状态失败: ${statusErr}`);
+          }
+        }
         await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'failed');
-        await this.handleTaskFailure(taskId, result.error ?? '未知错误', dbTask.retry_count, dbTask.max_retries, options);
+        await this.handleTaskFailure(taskId, failMsg, dbTask.retry_count, dbTask.max_retries, options);
       }
 
       return result;
     } catch (err) {
+      const platformErr = toPlatformError(err);
+      logger.warn(`PlatformError: ${platformErr.category} retryable=${platformErr.retryable}`);
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.error(`[executeNow] 任务执行异常: taskId=${taskId} error=${errMsg}`);
       if (err instanceof Error && err.stack) {
         logger.error(`[executeNow] stack: ${err.stack}`);
       }
+
+      if (platformErr.category === 'AuthError' && dbTask.account_id) {
+        try {
+          await accountService.updateStatus(dbTask.account_id, 'expired');
+          logger.info(`[executeNow] AuthError: 已将账号标记为expired: accountId=${dbTask.account_id}`);
+        } catch (statusErr) {
+          logger.warn(`[executeNow] 更新账号状态失败: ${statusErr}`);
+        }
+      }
+
       await this.closeStandaloneBrowserAfterPublish(dbTask.account_id ?? '', 'failed');
       await this.handleTaskFailure(taskId, errMsg, dbTask.retry_count, dbTask.max_retries, options);
       return { success: false, error: errMsg };
@@ -455,12 +488,15 @@ export class PublishService implements IPublishService {
       const browserRuntime = this.getAccountBrowserRuntime(accountId);
       const uploadCtx = buildUploadContextFromTask(dbTask, accountId, videoPath, taskMeta, browserRuntime);
 
+      this.markStatus(taskId, 'uploading');
       const uploadResult = await adapter.uploadVideo(uploadCtx);
       if (!uploadResult.success) {
         await taskItemRepo.markFailed(targetItem.id, uploadResult.message);
         this.emitItemFailed(taskId, targetItem.id, uploadResult.message);
         return { success: false, error: `上传失败: ${uploadResult.message}` };
       }
+
+      this.markStatus(taskId, 'publishing');
 
       if (dbTask.scheduled_at && adapter.schedule) {
         const scheduleCtx: ScheduleContext = {
@@ -478,6 +514,8 @@ export class PublishService implements IPublishService {
       } else if (dbTask.scheduled_at) {
         logger.info(`平台不支持定时发布 API，使用本地 TaskScheduler 调度`);
       }
+
+      this.markStatus(taskId, 'audit');
 
       const publishCtx: PublishContext = {
         accountId,
@@ -508,6 +546,8 @@ export class PublishService implements IPublishService {
       this.emitItemFailed(taskId, targetItem.id, publishRes.message);
       return { success: false, error: `发布失败: ${publishRes.message}` };
     } catch (err) {
+      const platformErr = toPlatformError(err);
+      logger.warn(`PlatformError: ${platformErr.category} retryable=${platformErr.retryable}`);
       const errMsg = err instanceof Error ? err.message : String(err);
       await taskItemRepo.markFailed(targetItem.id, errMsg);
       this.emitItemFailed(taskId, targetItem.id, errMsg);
@@ -554,6 +594,8 @@ export class PublishService implements IPublishService {
       await taskItemRepo.markStarted(targetItem.id);
       this.emitItemStarted(taskId, targetItem.id, accountId, dbTask.platform);
     } catch (itemErr) {
+      const platformErr = toPlatformError(itemErr);
+      logger.warn(`PlatformError: ${platformErr.category} retryable=${platformErr.retryable}`);
       const errMsg = itemErr instanceof Error ? itemErr.message : String(itemErr);
       logger.error(`[publishFromClient] taskItem 初始化失败: ${errMsg}`);
       return { success: false, error: `任务项初始化失败: ${errMsg}` };
@@ -569,12 +611,15 @@ export class PublishService implements IPublishService {
 
       logger.info(`[publishFromClient] 开始上传: videoPath=${videoPath} headless=${uploadCtx.headless} slowMo=${uploadCtx.slowMo}`);
 
+      this.markStatus(taskId, 'uploading');
       const uploadResult = await adapter.uploadVideo(uploadCtx);
       if (!uploadResult.success) {
         await taskItemRepo.markFailed(targetItem.id, uploadResult.message);
         this.emitItemFailed(taskId, targetItem.id, uploadResult.message);
         return { success: false, error: `上传失败: ${uploadResult.message}` };
       }
+
+      this.markStatus(taskId, 'publishing');
 
       let finalVideoId = uploadResult.videoId;
       let finalPublishUrl = '';
@@ -586,6 +631,7 @@ export class PublishService implements IPublishService {
             videoId: uploadResult.videoId ?? '',
             title: uploadCtx.title,
           };
+          this.markStatus(taskId, 'audit');
           const res = await adapter.publish(ctx);
           if (res.success) {
             finalPublishUrl = res.publishUrl || '';
@@ -610,6 +656,8 @@ export class PublishService implements IPublishService {
         publishedAt: new Date(),
       };
     } catch (err) {
+      const platformErr = toPlatformError(err);
+      logger.warn(`PlatformError: ${platformErr.category} retryable=${platformErr.retryable}`);
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.error(`[publishFromClient] 上传异常: ${errMsg}`);
       if (err instanceof Error && err.stack) {
@@ -761,20 +809,16 @@ export class PublishService implements IPublishService {
 
   private async closeStandaloneBrowserAfterPublish(accountId: string, outcome: 'completed' | 'failed'): Promise<void> {
     if (!accountId) return;
-    const keepOnFail = process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === '1'
-      || process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === 'true';
-    if (outcome === 'failed' && keepOnFail) {
-      logger.warn(`调试模式保留发布失败弹窗: accountId=${accountId}`);
-      return;
-    }
-
     try {
       const { browserManager } = await import('./embedded-browser/browser-manager');
       if (browserManager.hasStandaloneTab(accountId)) {
         await browserManager.closeTab(accountId);
+        logger.info(`发布${outcome === 'completed' ? '完成' : '失败'}后已关闭独立发布浏览器: accountId=${accountId}`);
       }
     } catch (err) {
-      logger.warn(`关闭发布${outcome === 'completed' ? '完成' : '失败'}弹窗失败: accountId=${accountId} error=${err}`);
+      const platformErr = toPlatformError(err);
+      logger.warn(`PlatformError: ${platformErr.category} retryable=${platformErr.retryable}`);
+      logger.warn(`关闭发布${outcome === 'completed' ? '完成' : '失败'}独立浏览器失败: accountId=${accountId} error=${err}`);
     }
   }
 
@@ -810,6 +854,11 @@ export class PublishService implements IPublishService {
     const account = await accountRepo.findById(accountId);
     if (!account) throw new Error(`账号不存在: ${accountId}`);
     logger.info(`[validateCookie] accountId=${accountId} platform=${account.platform} cookie_valid=${account.cookie_valid}`);
+
+    const valid = await accountService.validateCookie(accountId);
+    if (!valid) {
+      throw new Error(`账号登录状态已失效，请重新登录: ${accountId}`);
+    }
   }
 
   private requireAdapter(platform: string): PlatformAdapter {
@@ -875,6 +924,26 @@ export class PublishService implements IPublishService {
   private emitItemFailed(taskId: string, itemId: string, error: string): void {
     const payload: ItemFailedPayload = { taskId, itemId, error };
     this.eventBus.emit(PublishEvent.ITEM_FAILED, payload);
+  }
+
+  private markStatus(taskId: string, status: TaskStatus, error?: string): void {
+    const now = nowISO();
+    publishTaskRepo.update(taskId, { status: status as any, updated_at: now }).catch((err) => {
+      logger.warn(`markStatus 更新失败: taskId=${taskId} status=${status} error=${err}`);
+    });
+
+    const eventMap: Record<string, PublishEvent> = {
+      uploading: PublishEvent.ITEM_STARTED,
+      publishing: PublishEvent.TASK_PUBLISHING,
+      audit: PublishEvent.TASK_AUDIT,
+    };
+
+    const eventType = eventMap[status];
+    if (eventType) {
+      this.eventBus.emit(eventType, { taskId, status, error } as any);
+    }
+
+    logger.info(`任务状态标记: taskId=${taskId} status=${status}`);
   }
 
   async preCheckAccounts(request: BatchPublishRequest): Promise<{ healthy: string[]; unhealthy: string[] }> {
@@ -991,6 +1060,8 @@ export class PublishService implements IPublishService {
             const result = await this.retryTask(taskId);
             return { taskId, result };
           } catch (err) {
+      const platformErr = toPlatformError(err);
+      logger.warn(`PlatformError: ${platformErr.category} retryable=${platformErr.retryable}`);
             return { taskId, result: { success: false, error: err instanceof Error ? err.message : String(err) } };
           }
         }),
@@ -1008,6 +1079,8 @@ export class PublishService implements IPublishService {
           await this.cancelPublish(taskId);
           return { taskId, success: true };
         } catch (err) {
+      const platformErr = toPlatformError(err);
+      logger.warn(`PlatformError: ${platformErr.category} retryable=${platformErr.retryable}`);
           return { taskId, success: false, error: err instanceof Error ? err.message : String(err) };
         }
       }),
@@ -1021,6 +1094,8 @@ export class PublishService implements IPublishService {
           await this.deleteTask(taskId);
           return { taskId, success: true };
         } catch (err) {
+      const platformErr = toPlatformError(err);
+      logger.warn(`PlatformError: ${platformErr.category} retryable=${platformErr.retryable}`);
           return { taskId, success: false, error: err instanceof Error ? err.message : String(err) };
         }
       }),

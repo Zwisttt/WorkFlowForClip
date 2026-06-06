@@ -22,6 +22,7 @@ const mockAccountService = {
   bindAccount: vi.fn().mockResolvedValue({ id: 'acc-1', platform: 'douyin' }),
   deleteAccount: vi.fn().mockResolvedValue(undefined),
   validateCookie: vi.fn().mockResolvedValue(true),
+  refreshCookie: vi.fn().mockResolvedValue(true),
   getAccount: vi.fn().mockResolvedValue(null),
   setFingerprint: vi.fn().mockResolvedValue(undefined),
   setProxy: vi.fn().mockResolvedValue(undefined),
@@ -599,7 +600,7 @@ describe('IPC Handlers', () => {
 
       const result = await handler(fakeEvent, 'acc-1');
       expect(result.success).toBe(true);
-      expect(mockAdapter.login).toHaveBeenCalledWith('acc-1', false);
+      expect(mockAdapter.login).toHaveBeenCalledWith('acc-1', false, { force: true });
     });
 
     it('platform:login fails for missing account', async () => {

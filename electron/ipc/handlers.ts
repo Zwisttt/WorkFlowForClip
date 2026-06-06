@@ -26,6 +26,7 @@ import { SessionManager } from '../services/session-manager';
 import { fingerprintTemplateRepo } from '../data/repositories/FingerprintTemplateRepository';
 import { getIPLimitSettingsService } from '../services/ip-limit-settings';
 import { getAIRiskSettingsService } from '../services/ai-risk-settings';
+import { normalizePlatformId } from '../services/platform-normalizer';
 import type { RiskContext } from '../services/ai-risk-settings';
 import {
   generateFingerprintSeed,
@@ -430,7 +431,41 @@ export function registerIpcHandlers(): void {
       if (!account) throw new Error('账号不存在');
       const adapter = PlatformRegistry.getAdapter(account.platform);
       if (!adapter) throw new Error(`平台 ${account.platform} 未注册`);
-      return adapter.login(accountId, false);
+
+      const result = await adapter.login(accountId, false, {
+        force: true,
+        onLoginConfirmed: () => {
+          const db = getDatabase();
+          const now = new Date().toISOString();
+          db.prepare(
+            `UPDATE accounts SET cookie_valid = 1, status = 'active', last_login = ?, updated_at = ? WHERE id = ?`
+          ).run(now, now, accountId);
+
+          BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('account:login-status', {
+              status: 'online',
+              accountId,
+            });
+          });
+        },
+      });
+
+      if (result.success) {
+        const db = getDatabase();
+        const now = new Date().toISOString();
+        db.prepare(
+          `UPDATE accounts SET cookie_path = ?, cookie_valid = 1, status = 'active', last_login = ?, updated_at = ? WHERE id = ?`
+        ).run(result.cookiePath || null, now, now, accountId);
+
+        BrowserWindow.getAllWindows().forEach(win => {
+          win.webContents.send('account:login-success', {
+            accountId,
+            platform: account.platform,
+          });
+        });
+      }
+
+      return result;
     });
   });
 
@@ -473,7 +508,11 @@ export function registerIpcHandlers(): void {
         proxyId: row.proxy_id || undefined,
         browserMode: row.browser_mode || 'embedded',
         browser_mode: row.browser_mode || 'embedded',
-        status: row.cookie_valid === 1 ? 'online' : 'offline',
+        status: row.status === 'expired'
+          ? 'expired'
+          : row.cookie_valid === 1
+            ? 'online'
+            : 'offline',
         remark: row.remark || undefined,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -517,10 +556,11 @@ export function registerIpcHandlers(): void {
     try {
       const account = await accountService.getAccount(accountId);
       if (!account) return { success: false, message: '账号不存在' };
-      const adapter = PlatformRegistry.getAdapter(account.platform);
-      if (!adapter) return { success: false, message: `平台 ${account.platform} 未注册` };
-      const result = await adapter.login(accountId, false);
-      return { success: true, data: result };
+      const refreshed = await accountService.refreshCookie(accountId);
+      if (!refreshed) {
+        return { success: false, message: '重新登录失败' };
+      }
+      return { success: true };
     } catch (error) {
       return { success: false, message: `${error}` };
     }
@@ -1402,7 +1442,7 @@ export function registerIpcHandlers(): void {
           }
         }
 
-        await browserManager.createTab(accountId, row.platform || 'kuaishou', url);
+        await browserManager.createTab(accountId, normalizePlatformId(row.platform || 'kuaishou'), url);
         return { success: true };
       }
 

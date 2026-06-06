@@ -3,6 +3,7 @@ import type {
   PlatformConfig,
   PlatformCapabilities,
   CookieResult,
+  LoginOptions,
   UploadContext,
   UploadResult,
   PublishContext,
@@ -22,6 +23,7 @@ export type {
   PlatformConfig,
   PlatformCapabilities,
   CookieResult,
+  LoginOptions,
   UploadContext,
   UploadResult,
   PublishContext,
@@ -47,8 +49,8 @@ export interface IPlatformInfo {
 }
 
 export interface ILoginAdapter {
-  login(accountId: string, headless?: boolean): Promise<CookieResult>;
-  checkCookie(accountId: string): Promise<boolean>;
+  login(accountId: string, headless?: boolean, options?: LoginOptions): Promise<CookieResult>;
+  checkCookie(accountId: string, cookiePath?: string): Promise<boolean>;
   getQRCode(accountId: string): Promise<string>;
   checkHealth?(accountId: string): Promise<HealthCheckResult>;
 }

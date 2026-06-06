@@ -5,8 +5,28 @@
 /** 任务类型 */
 export type TaskType = 'upload' | 'publish' | 'stats' | 'comment';
 
-/** 任务状态 */
-export type TaskStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'retry' | 'skipped';
+/** 任务状态 - v0.3.1 8态状态机
+ *
+ *   queued → pending → uploading → publishing → audit → success
+ *                          |           |           |
+ *                          └───────────┴───────────┘ → failed / cancelled
+ *
+ * 迁移说明:
+ * - running → publishing (旧运行态映射到新发布中态)
+ * - completed → success (语义明确化)
+ * - retry/skipped 保留为内部辅助状态
+ */
+export type TaskStatus =
+  | 'queued'      // 排队中
+  | 'pending'     // 等待中
+  | 'uploading'   // 上传中
+  | 'publishing'  // 发布中
+  | 'audit'       // 审核中
+  | 'success'     // 已发布
+  | 'failed'      // 失败
+  | 'cancelled'   // 已取消
+  | 'retry'       // 重试中（内部辅助状态）
+  | 'skipped';    // 已跳过（内部辅助状态）
 
 /** 任务优先级（数值越大优先级越高） */
 export const enum TaskPriority {
@@ -128,8 +148,12 @@ export const TaskEvents = {
   TASK_CREATED: 'task:created',
   TASK_QUEUED: 'task:queued',
   TASK_STARTED: 'task:started',
+  TASK_UPLOADING: 'task:uploading',
+  TASK_PUBLISHING: 'task:publishing',
+  TASK_AUDIT: 'task:audit',
   TASK_PROGRESS: 'task:progress',
   TASK_COMPLETED: 'task:completed',
+  TASK_SUCCESS: 'task:success',
   TASK_FAILED: 'task:failed',
   TASK_RETRY: 'task:retry',
   TASK_RETRYING: 'task:retrying',

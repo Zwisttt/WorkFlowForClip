@@ -120,17 +120,16 @@ export enum PublishEvent {
   TASK_CREATED = 'publish:task-created',
   TASK_SCHEDULED = 'publish:task-scheduled',
   TASK_STARTED = 'publish:task-started',
+  TASK_UPLOADING = 'publish:task-uploading',
+  TASK_PUBLISHING = 'publish:task-publishing',
+  TASK_AUDIT = 'publish:task-audit',
   TASK_UPDATED = 'publish:task-updated',
   TASK_COMPLETED = 'publish:task-completed',
   TASK_FAILED = 'publish:task-failed',
   TASK_CANCELLED = 'publish:task-cancelled',
-  /** 子项开始 */
   ITEM_STARTED = 'publish:item-started',
-  /** 子项完成 */
   ITEM_COMPLETED = 'publish:item-completed',
-  /** 子项失败 */
   ITEM_FAILED = 'publish:item-failed',
-  /** 规则已应用 */
   RULES_APPLIED = 'publish:rules-applied',
 }
 

@@ -344,8 +344,7 @@ const PLATFORM_HOMEPAGE: Record<string, string> = {
   xiaohongshu: 'https://creator.xiaohongshu.com/',
   kuaishou: 'https://cp.kuaishou.com/',
   bilibili: 'https://member.bilibili.com/platform/home',
-  channels: 'https://channels.weixin.qq.com/',
-  weixin_video: 'https://channels.weixin.qq.com/',
+  channels: 'https://channels.weixin.qq.com/platform',
 };
 
 async function openHomepage() {

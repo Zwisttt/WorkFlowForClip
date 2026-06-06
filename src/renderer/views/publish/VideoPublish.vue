@@ -136,7 +136,7 @@
                   </div>
                   <div class="publish-queue__message">{{ item.message }}</div>
                 </div>
-                <div v-if="item.status === 'running' || item.status === 'opening'" class="publish-queue__pulse" />
+                <div v-if="item.status === 'running'" class="publish-queue__pulse" />
               </div>
             </div>
           </div>
@@ -219,7 +219,7 @@ interface CommonConfig {
   scheduledAt?: string;
 }
 
-type QueueStatus = 'queued' | 'preparing' | 'opening' | 'running' | 'success' | 'failed';
+type QueueStatus = 'queued' | 'preparing' | 'running' | 'success' | 'failed';
 
 interface PublishQueueItem {
   id: string;
@@ -268,7 +268,6 @@ const platformInfoMap: Record<string, { label: string; color: string; short: str
   douyin: { label: '抖音', color: '#000000', short: '音' },
   bilibili: { label: 'B站', color: '#FB7299', short: 'B' },
   channels: { label: '视频号', color: '#07C160', short: '视' },
-  weixin_video: { label: '视频号', color: '#07C160', short: '视' },
   kuaishou: { label: '快手', color: '#FF4906', short: '快' },
   weibo: { label: '微博', color: '#E6162D', short: '博' },
   zhihu: { label: '知乎', color: '#0066FF', short: '知' },
@@ -645,13 +644,6 @@ async function handlePublish() {
 
         if (item) item.taskId = taskId;
 
-        updateQueueItem(account.id, { status: 'opening', message: '准备打开发布弹窗' });
-        await sleep(650);
-
-        if (!headlessMode.value && isEmbeddedBrowserAccount(account)) {
-          await openStandalonePublishWindow(account);
-        }
-
         updateQueueItem(account.id, { status: 'running', message: '正在自动填写并提交发布' });
         await taskStore.retryTask(taskId);
         executedCount++;
@@ -755,33 +747,6 @@ function getDefaultPlatformConfig(platform?: string): PlatformConfig {
 function updateQueueItem(accountId: string, patch: Partial<PublishQueueItem>) {
   const item = publishQueue.value.find(q => q.accountId === accountId);
   if (item) Object.assign(item, patch);
-}
-
-function isEmbeddedBrowserAccount(account: Account) {
-  const mode = (account as Account & { browser_mode?: string }).browser_mode || account.browserMode || 'embedded';
-  return mode === 'embedded';
-}
-
-async function openStandalonePublishWindow(account: Account) {
-  updateQueueItem(account.id, { status: 'opening', message: '打开账号发布弹窗' });
-  const url = getPublishPageUrl(account.platform);
-  const result = await window.matrixflow.browser.openAccountBrowser(account.id, url);
-  if (!result?.success) {
-    throw new Error(result?.message || '打开账号发布弹窗失败');
-  }
-  await sleep(500);
-}
-
-function getPublishPageUrl(platform: string) {
-  const urls: Record<string, string> = {
-    douyin: 'https://creator.douyin.com/creator-micro/content/post/video?enter_from=publish_page',
-    xiaohongshu: 'https://creator.xiaohongshu.com/publish/publish',
-    kuaishou: 'https://cp.kuaishou.com/article/publish/video',
-    channels: 'https://channels.weixin.qq.com/platform/post/create',
-    weixin_video: 'https://channels.weixin.qq.com/platform/post/create',
-    bilibili: 'https://member.bilibili.com/platform/upload/video/frame',
-  };
-  return urls[platform] || 'about:blank';
 }
 
 function sleep(ms: number) {
@@ -1026,7 +991,6 @@ function sleep(ms: number) {
 }
 
 .publish-queue__item--preparing .publish-queue__step,
-.publish-queue__item--opening .publish-queue__step,
 .publish-queue__item--running .publish-queue__step {
   color: #fff;
   background: var(--color-primary);

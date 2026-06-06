@@ -6,6 +6,9 @@ import { Logger } from '../../core/Logger';
 import { DOUYIN_URLS } from './selectors';
 import { getCookiePath, cookieExists } from './cookie';
 import type { CookieResult } from '../base/types';
+import { PageRiskControl } from '../base/RiskControl';
+import { toPlatformError } from '../base/PlatformError';
+import { getDebugRecorder } from '../base/DebugRecorder';
 
 const logger = new Logger('DouyinLogin');
 
@@ -58,7 +61,8 @@ export async function validateExistingCookie(cookiePath: string): Promise<boolea
 
     return true;
   } catch (error) {
-    logger.error('Cookie 验证失败:', error);
+    const pErr = toPlatformError(error, 'douyin');
+    logger.error('Cookie 验证失败: ' + pErr.message);
     return false;
   } finally {
     await browser.close();
@@ -146,6 +150,11 @@ async function waitForLogin(
   pollIntervalMs: number = 3000,
   maxChecks: number = 100
 ): Promise<boolean> {
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 100, max: 300 },
+    clickDelayMs: { min: 200, max: 500 },
+    stepIntervalSec: { min: 2.0, max: 3.0 },
+  });
   for (let i = 0; i < maxChecks; i++) {
     if (await isLoginCompleted(page)) {
       logger.info(`扫码成功，已跳转到: ${page.url()}`);
@@ -155,7 +164,7 @@ async function waitForLogin(
     const expiredBox = page.getByText('二维码失效', { exact: true }).locator('..').first();
     if ((await expiredBox.count()) && (await expiredBox.isVisible())) {
       logger.info('二维码已过期，正在刷新...');
-      await expiredBox.click();
+      await rc.humanClick('text="二维码失效"');
       await page.waitForTimeout(1000);
       const src = await extractQrCodeSrc(page);
       const qrPath = await saveQrCodeImage(src, accountId);
@@ -175,10 +184,15 @@ export async function qrCodeLogin(
   onQRRefresh?: (path: string) => void
 ): Promise<CookieResult> {
   const cookiePath = getCookiePath(accountId);
+  const debugRecorder = getDebugRecorder();
+  debugRecorder.setSessionId(`douyin_login_${accountId}_${Date.now()}`);
+  const pageCtx = { accountId };
 
   if (cookieExists(cookiePath)) {
     logger.info('检查现有 cookie...');
-    const valid = await validateExistingCookie(cookiePath);
+    const valid = await debugRecorder.recordStep('validate_existing_cookie', async () => {
+      return await validateExistingCookie(cookiePath);
+    }, pageCtx);
     if (valid) {
       logger.info('Cookie 有效，无需重新登录');
       return {
@@ -199,26 +213,27 @@ export async function qrCodeLogin(
 
   try {
     const page = await context.newPage();
+    const pageCtxWithPage = { page, ...pageCtx };
 
     logger.info('打开抖音创作者中心...');
-    await page.goto(DOUYIN_URLS.loginPage);
+    await debugRecorder.recordStep('goto_login_page', async () => {
+      await page.goto(DOUYIN_URLS.loginPage);
+    }, pageCtxWithPage);
 
-    const qrSrc = await extractQrCodeSrc(page);
-    const qrPath = await saveQrCodeImage(qrSrc, accountId);
+    await debugRecorder.recordStep('extract_qr_code', async () => {
+      const qrSrc = await extractQrCodeSrc(page);
+      const qrPath = await saveQrCodeImage(qrSrc, accountId);
+      logger.info('请使用抖音 APP 扫描二维码登录');
+      logger.info(`二维码文件: ${qrPath}`);
+      onQRReady?.(qrPath);
+    }, pageCtxWithPage);
 
-    logger.info('请使用抖音 APP 扫描二维码登录');
-    logger.info(`二维码文件: ${qrPath}`);
-    onQRReady?.(qrPath);
-
-    const loginSuccess = await waitForLogin(page, accountId, onQRRefresh);
-
-    if (!loginSuccess) {
-      return {
-        success: false,
-        cookiePath,
-        message: '等待扫码超时',
-      };
-    }
+    await debugRecorder.recordStep('wait_scan_login', async () => {
+      const loginSuccess = await waitForLogin(page, accountId, onQRRefresh);
+      if (!loginSuccess) {
+        throw new Error('等待扫码超时');
+      }
+    }, pageCtxWithPage);
 
     await page.waitForTimeout(2000);
     logger.info(`登录成功，Cookie 已自动保存到: ${getUserDataDir(accountId)}`);
@@ -229,10 +244,11 @@ export async function qrCodeLogin(
       message: '扫码登录成功',
     };
   } catch (error) {
+    const pErr = toPlatformError(error, 'douyin');
     return {
       success: false,
       cookiePath: getCookiePath(accountId),
-      message: `登录过程出错: ${error}`,
+      message: `登录过程出错: ${pErr.message}`,
     };
   } finally {
     await context.close();

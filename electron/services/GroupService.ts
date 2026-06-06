@@ -510,9 +510,9 @@ export class GroupService implements IGroupService {
     return {
       id: row.id,
       platform: row.platform,
-      name: row.name,
-      avatar: row.avatar ?? undefined,
-      cookieEncrypted: row.cookie_encrypted,
+      name: row.nickname || row.name || '',
+      avatar: (row.avatar_url || row.avatar) ?? undefined,
+      cookieEncrypted: row.cookie_encrypted || row.cookie_path || '',
       cookieValid: row.cookie_valid === 1,
       lastCookieCheck: row.last_cookie_check ? new Date(row.last_cookie_check) : undefined,
       groupId: row.group_id ?? undefined,

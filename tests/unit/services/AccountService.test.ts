@@ -4,6 +4,22 @@ import { AccountEvent } from '@electron/services/types/account';
 import type { AccountRow } from '@electron/services/types/account';
 
 const eventBusEmit = vi.fn();
+const electronMocks = vi.hoisted(() => ({
+  cookiesGet: vi.fn(),
+}));
+
+vi.mock('electron', () => ({
+  session: {
+    fromPartition: vi.fn(() => ({
+      cookies: {
+        get: electronMocks.cookiesGet,
+      },
+    })),
+  },
+  BrowserWindow: {
+    getAllWindows: vi.fn(() => []),
+  },
+}));
 
 vi.mock('@electron/core/EventBus', () => ({
   EventBus: {
@@ -39,7 +55,7 @@ const mockAdapter = {
 
 vi.mock('@electron/platform/base/PlatformRegistry', () => ({
   PlatformRegistry: {
-    getAdapter: (platform: string) => platform === 'douyin' ? mockAdapter : undefined,
+    getAdapter: (platform: string) => ['douyin', 'channels'].includes(platform) ? mockAdapter : undefined,
     getSupportedPlatforms: () => ['douyin', 'xiaohongshu', 'channels', 'kuaishou'],
     getAllAdapters: () => [],
   },
@@ -96,6 +112,7 @@ describe('AccountService', () => {
   beforeEach(() => {
     resetSingleton();
     vi.clearAllMocks();
+    electronMocks.cookiesGet.mockResolvedValue([]);
     dbAvailable = true;
     mockDb.prepare.mockReturnValue(stmt());
     mockDb.transaction = vi.fn((fn: Function) => fn);
@@ -103,6 +120,7 @@ describe('AccountService', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     resetSingleton();
   });
 
@@ -213,6 +231,41 @@ describe('AccountService', () => {
       );
     });
 
+    it('normalizes legacy video account platform and validates saved cookie path', async () => {
+      const row = {
+        ...createAccountRow({ platform: 'weixin_video' }),
+        cookie_path: '/tmp/channels-cookie.json',
+      };
+      const updateStmt = stmt();
+      mockDb.prepare
+        .mockReturnValueOnce(stmt(row))
+        .mockReturnValueOnce(updateStmt);
+      electronMocks.cookiesGet.mockResolvedValueOnce([
+        { name: 'sessionid', value: 'session-value' },
+        { name: 'wxuin', value: 'uin-value' },
+      ]);
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          errCode: 0,
+          data: { finderUser: { uniqId: 'finder-001' } },
+        }),
+      }));
+
+      const result = await service.validateCookie('acc-001');
+
+      expect(result).toBe(true);
+      expect(mockAdapter.checkCookie).toHaveBeenCalledWith('acc-001', '/tmp/channels-cookie.json');
+      expect(updateStmt.run).toHaveBeenCalledWith(
+        'channels',
+        1,
+        expect.any(String),
+        'active',
+        expect.any(String),
+        'acc-001'
+      );
+    });
+
     it('returns false when cookie check throws', async () => {
       const row = createAccountRow();
       mockDb.prepare.mockReturnValueOnce(stmt(row));
@@ -260,6 +313,7 @@ describe('AccountService', () => {
 
       const result = await service.refreshCookie('acc-001');
       expect(result).toBe(true);
+      expect(mockAdapter.login).toHaveBeenCalledWith('acc-001', false, { force: true });
       expect(eventBusEmit).toHaveBeenCalledWith(
         AccountEvent.STATUS_CHANGED,
         expect.objectContaining({ newStatus: 'active' }),
@@ -285,6 +339,14 @@ describe('AccountService', () => {
       expect(result!.id).toBe('acc-001');
       expect(result!.platform).toBe('douyin');
       expect(result!.status).toBe('active');
+    });
+
+    it('normalizes legacy platform ids when mapping an account', async () => {
+      mockDb.prepare.mockReturnValueOnce(stmt(createAccountRow({ platform: 'weixin_video' })));
+
+      const result = await service.getAccount('acc-001');
+
+      expect(result?.platform).toBe('channels');
     });
   });
 
@@ -456,7 +518,7 @@ describe('AccountService', () => {
 
       await service.updateStatus('acc-001', 'inactive');
 
-      expect(updateStmt.run).toHaveBeenCalledWith('inactive', expect.any(String), 'acc-001');
+      expect(updateStmt.run).toHaveBeenCalledWith('inactive', 0, expect.any(String), 'acc-001');
       expect(eventBusEmit).toHaveBeenCalledWith(
         AccountEvent.STATUS_CHANGED,
         expect.objectContaining({ oldStatus: 'active', newStatus: 'inactive' }),
@@ -508,7 +570,7 @@ describe('AccountService', () => {
 
       await service.updateStatus('acc-001', 'inactive');
 
-      expect(updateStmt.run).toHaveBeenCalledWith('inactive', expect.any(String), 'acc-001');
+      expect(updateStmt.run).toHaveBeenCalledWith('inactive', 0, expect.any(String), 'acc-001');
       expect(eventBusEmit).toHaveBeenCalledWith(
         AccountEvent.STATUS_CHANGED,
         expect.objectContaining({ oldStatus: 'active', newStatus: 'inactive' }),

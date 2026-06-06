@@ -13,7 +13,7 @@ export interface AIRiskSettings {
   platformRiskWeights: {
     xiaohongshu: number;
     douyin: number;
-    weixin_video: number;
+    channels: number;
     kuaishou: number;
     bilibili: number;
   };
@@ -50,7 +50,7 @@ const DEFAULT_SETTINGS: AIRiskSettings = {
   platformRiskWeights: {
     xiaohongshu: 1.0,
     douyin: 0.9,
-    weixin_video: 0.7,
+    channels: 0.7,
     kuaishou: 0.6,
     bilibili: 0.3,
   },
@@ -68,7 +68,7 @@ export class AIRiskSettingsService {
   async load(): Promise<AIRiskSettings> {
     try {
       const content = await fs.readFile(this.configPath, 'utf-8');
-      this.settings = JSON.parse(content);
+      this.settings = this.normalizeSettings(JSON.parse(content));
       return this.settings;
     } catch {
       await this.ensureConfigDir();
@@ -80,8 +80,9 @@ export class AIRiskSettingsService {
 
   async save(settings: AIRiskSettings): Promise<void> {
     await this.ensureConfigDir();
-    await fs.writeFile(this.configPath, JSON.stringify(settings, null, 2), 'utf-8');
-    this.settings = settings;
+    const normalized = this.normalizeSettings(settings);
+    await fs.writeFile(this.configPath, JSON.stringify(normalized, null, 2), 'utf-8');
+    this.settings = normalized;
   }
 
   get(): AIRiskSettings {
@@ -149,6 +150,22 @@ export class AIRiskSettingsService {
   private async ensureConfigDir(): Promise<void> {
     const dir = path.dirname(this.configPath);
     try { await fs.mkdir(dir, { recursive: true }); } catch {}
+  }
+
+  private normalizeSettings(settings: AIRiskSettings): AIRiskSettings {
+    const weights = {
+      ...settings.platformRiskWeights,
+    } as AIRiskSettings['platformRiskWeights'] & { weixin_video?: number };
+
+    if (weights.weixin_video !== undefined && weights.channels === undefined) {
+      weights.channels = weights.weixin_video;
+    }
+    delete weights.weixin_video;
+
+    return {
+      ...settings,
+      platformRiskWeights: weights,
+    };
   }
 }
 

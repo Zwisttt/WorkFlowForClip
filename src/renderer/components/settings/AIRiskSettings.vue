@@ -135,7 +135,7 @@ const weights = reactive({
 const platformWeights = reactive<Record<string, number>>({
   xiaohongshu: 1.0,
   douyin: 0.9,
-  weixin_video: 0.7,
+  channels: 0.7,
   kuaishou: 0.6,
   bilibili: 0.3,
 });
@@ -143,7 +143,7 @@ const platformWeights = reactive<Record<string, number>>({
 const platformWeightList = computed(() => [
   { name: '小红书', value: platformWeights.xiaohongshu, color: 'var(--color-plat-xiaohongshu)' },
   { name: '抖音', value: platformWeights.douyin, color: 'var(--color-plat-douyin)' },
-  { name: '视频号', value: platformWeights.weixin_video, color: 'var(--color-plat-wechat)' },
+  { name: '视频号', value: platformWeights.channels, color: 'var(--color-plat-wechat)' },
   { name: '快手', value: platformWeights.kuaishou, color: 'var(--color-plat-kuaishou)' },
   { name: 'B站', value: platformWeights.bilibili, color: 'var(--color-plat-bilibili)' },
 ]);
@@ -215,7 +215,7 @@ function resetSettings() {
   weights.accountHistory = 30;
   platformWeights.xiaohongshu = 1.0;
   platformWeights.douyin = 0.9;
-  platformWeights.weixin_video = 0.7;
+  platformWeights.channels = 0.7;
   platformWeights.kuaishou = 0.6;
   platformWeights.bilibili = 0.3;
   dirty.value = true;

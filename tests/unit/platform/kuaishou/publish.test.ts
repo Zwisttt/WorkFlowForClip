@@ -4,9 +4,13 @@ function createMockPage(overrides: Record<string, unknown> = {}) {
   const mockLocator = {
     waitFor: vi.fn(() => Promise.resolve()),
     click: vi.fn(() => Promise.resolve()),
+    hover: vi.fn(() => Promise.resolve()),
+    clear: vi.fn(() => Promise.resolve()),
+    type: vi.fn(() => Promise.resolve()),
     fill: vi.fn(() => Promise.resolve()),
     isVisible: vi.fn(() => Promise.resolve(true)),
     first: vi.fn(function(this: any) { return this; }),
+    count: vi.fn(() => 1),
   };
 
   return {

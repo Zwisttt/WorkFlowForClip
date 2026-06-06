@@ -49,7 +49,7 @@
       <div class="form-group">
         <label class="form-label">
           标题
-          <span class="form-hint">最多{{ titleLimit }}字，覆盖公共标题</span>
+          <span class="form-hint">{{ titleHint }}</span>
         </label>
         <input
           v-model="localConfig.title"
@@ -57,8 +57,9 @@
           class="form-input"
           :placeholder="`输入${platformLabel}标题`"
           :maxlength="titleLimit"
-          @input="emitUpdate"
+          @input="handleTitleInput"
         />
+        <div v-if="titleValidationError" class="form-error">{{ titleValidationError }}</div>
       </div>
     </div>
 
@@ -66,14 +67,14 @@
       <h4>内容描述</h4>
       <div class="form-group">
         <label class="form-label">
-          作品描述
+          视频描述
           <span class="form-hint">最多{{ descLimit }}字</span>
         </label>
         <textarea
           v-model="localConfig.description"
           class="form-textarea"
           rows="4"
-          :placeholder="`输入${platformLabel}作品描述`"
+          :placeholder="`输入${platformLabel}视频描述`"
           :maxlength="descLimit"
           @input="emitUpdate"
         ></textarea>
@@ -167,6 +168,7 @@
       <div class="form-group">
         <label class="form-label">互动设置</label>
         <div class="checkbox-group">
+          <!-- 视频号不支持自动评论功能，这里只显示抖音 -->
           <label class="checkbox-item">
             <input v-model="localConfig.allowComment" type="checkbox" @change="emitUpdate" />
             <span>允许评论</span>
@@ -177,6 +179,46 @@
           </label>
         </div>
       </div>
+    </div>
+
+    <!-- 视频号专属配置 -->
+    <div v-if="platform === 'channels'" class="config-section">
+      <h4>视频号专属</h4>
+      <div class="form-group">
+        <label class="form-label">定时发表</label>
+        <div class="radio-group">
+          <label class="radio-item">
+            <input type="radio" v-model="localConfig.scheduleMode" value="immediate" @change="emitUpdate" />
+            <span>立即发表</span>
+          </label>
+          <label class="radio-item">
+            <input type="radio" v-model="localConfig.scheduleMode" value="scheduled" @change="emitUpdate" />
+            <span>定时发表</span>
+          </label>
+          <input
+            v-if="localConfig.scheduleMode === 'scheduled'"
+            v-model="localConfig.scheduledAt"
+            type="datetime-local"
+            class="schedule-inline"
+            @input="emitUpdate"
+          />
+        </div>
+        <span class="form-hint">视频号定时发表需提前 2 小时以上，最多 7 天</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label">声明原创</label>
+        <div class="radio-group">
+          <label class="radio-item">
+            <input
+              type="checkbox"
+              :checked="isOriginal === true"
+              @change="handleIsOriginalChange($event)"
+            />
+            <span>声明视频为原创（需阅读并同意《视频号原创声明使用条款》）</span>
+          </label>
+        </div>
+      </div>
+      <!-- 视频号不支持自动评论，不显示评论配置 -->
     </div>
 
     <div v-if="platform === 'kuaishou'" class="config-section">
@@ -269,6 +311,7 @@ interface PlatformConfig {
   allowSameFrame?: boolean;
   allowDownload?: boolean;
   showInCity?: boolean;
+  isOriginal?: boolean;
 }
 
 interface CommonConfig {
@@ -298,6 +341,7 @@ const localConfig = reactive<PlatformConfig>({
   allowSameFrame: false,
   allowDownload: false,
   showInCity: true,
+  isOriginal: false,
   ...props.platformConfig,
 });
 const tagInput = ref('');
@@ -328,6 +372,7 @@ const coverRatioLabel = computed(() => {
 });
 
 const titleLimit = computed(() => {
+  if (platform.value === 'channels') return 16;
   if (platform.value === 'xiaohongshu') return 20;
   if (platform.value === 'douyin') return 40;
   if (platform.value === 'bilibili') return 80;
@@ -339,6 +384,49 @@ const descLimit = computed(() => {
   if (platform.value === 'douyin') return 2000;
   return 5000;
 });
+
+const titleMinLen = 6;
+const titleForbiddenChars = /[^\u4e00-\u9fa5a-zA-Z0-9]/;
+
+const titleValidationError = computed(() => {
+  if (platform.value !== 'channels') return '';
+  const value = (localConfig.title || '').trim();
+  if (value.length === 0) return '';
+  if (value.length > titleLimit.value) return `视频号标题最多 ${titleLimit.value} 字，当前 ${value.length} 字`;
+  if (value.length < titleMinLen) return `视频号标题至少 ${titleMinLen} 字，当前 ${value.length} 字`;
+  if (titleForbiddenChars.test(value)) return '视频号标题不能包含标点符号或特殊字符';
+  return '';
+});
+
+const titleHint = computed(() => {
+  if (platform.value === 'channels') {
+    return `6-16 字，仅中文/英文/数字，不可含标点符号，覆盖公共标题`;
+  }
+  return `最多 ${titleLimit.value} 字，覆盖公共标题`;
+});
+
+const isOriginal = computed(() => localConfig.isOriginal === true);
+
+function handleTitleInput(event: Event) {
+  const inputEl = event.target as HTMLInputElement;
+  let value = inputEl.value;
+
+  if (platform.value === 'channels') {
+    const sanitized = value.replace(titleForbiddenChars, '');
+    if (sanitized !== value) {
+      value = sanitized;
+      inputEl.value = sanitized;
+    }
+  }
+  localConfig.title = value;
+  emitUpdate();
+}
+
+function handleIsOriginalChange(event: Event) {
+  const checked = (event.target as HTMLInputElement).checked;
+  localConfig.isOriginal = checked;
+  emitUpdate();
+}
 
 watch(
   () => props.platformConfig,

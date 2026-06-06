@@ -43,13 +43,13 @@ const viewMode = ref<'platform' | 'group'>('platform');
 const searchQuery = ref('');
 
 // 展开状态
-const expandedPlatforms = ref<Set<string>>(new Set(['douyin', 'xiaohongshu', 'weixin_video', 'kuaishou', 'bilibili']));
+const expandedPlatforms = ref<Set<string>>(new Set(['douyin', 'xiaohongshu', 'channels', 'kuaishou', 'bilibili']));
 
 // 平台配置
 const platformConfig: Record<string, { label: string; color: string }> = {
   douyin: { label: '抖音', color: 'var(--color-plat-douyin)' },
   xiaohongshu: { label: '小红书', color: 'var(--color-plat-xiaohongshu)' },
-  weixin_video: { label: '视频号', color: 'var(--color-plat-wechat)' },
+  channels: { label: '视频号', color: 'var(--color-plat-wechat)' },
   kuaishou: { label: '快手', color: 'var(--color-plat-kuaishou)' },
   bilibili: { label: 'B站', color: 'var(--color-plat-bilibili, #00a1d6)' },
 };
@@ -59,7 +59,7 @@ const groupedByPlatform = computed(() => {
   const groups: Record<string, Account[]> = {
     douyin: [],
     xiaohongshu: [],
-    weixin_video: [],
+    channels: [],
     kuaishou: [],
     bilibili: [],
   };

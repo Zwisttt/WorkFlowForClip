@@ -261,6 +261,7 @@ interface MatrixFlowAPI {
   onPublishStatus: (callback: (batch: any[]) => void) => () => void;
   onTaskProgress: (callback: (taskId: string, progress: number, message?: string) => void) => () => void;
   onTaskStatusChange: (callback: (taskId: string, status: string, data?: any) => void) => () => void;
+  onWatchdogEvent: (callback: (event: string, taskId: string, message: string) => void) => () => void;
 }
 
 declare module 'echarts/core' {

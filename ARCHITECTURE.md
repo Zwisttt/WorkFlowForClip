@@ -83,7 +83,7 @@ TaskScheduler
 - 抖音：支持 serverScheduledPublish，maxScheduleDays=30
 - 小红书：不支持定时发布，maxScheduleDays=0
 - 视频号：支持 serverScheduledPublish，maxScheduleDays=7
-- 快手：支持 serverScheduledPublish，maxScheduleDays=7
+- 快手：支持 serverScheduledPublish，maxScheduleDays=14
 
 ### 4. 数据层
 

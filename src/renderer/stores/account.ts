@@ -73,7 +73,12 @@ export const useAccountStore = defineStore('account', () => {
 
   async function loginAccount(id: string) {
     if (!window.matrixflow) return;
-    return window.matrixflow.accounts.login(id);
+    const result = await window.matrixflow.accounts.login(id);
+    if (!result?.success) {
+      throw new Error(result?.message || '重新登录失败');
+    }
+    await fetchAccounts();
+    return result;
   }
 
   async function checkCookie(id: string) {
@@ -152,6 +157,7 @@ export const useAccountStore = defineStore('account', () => {
         const account = accounts.value.find(a => a.id === accountId);
         if (account) {
           account.status = status as Account['status'];
+          account.cookieValid = status === 'online';
         }
       }
     };

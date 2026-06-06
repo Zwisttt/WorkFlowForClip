@@ -8,7 +8,7 @@ import type { BrowserContext, Browser } from 'patchright';
 // 平台类型
 // ============================================================
 
-export type Platform = 'douyin' | 'kuaishou' | 'bilibili' | 'xiaohongshu' | 'weixin_video';
+export type Platform = 'douyin' | 'kuaishou' | 'bilibili' | 'xiaohongshu' | 'channels';
 
 // ============================================================
 // 浏览器配置
@@ -31,6 +31,7 @@ export interface PlatformCookieConfig {
   domains: string[];
   requiredCookies: string[];
   loginUrl: string;
+  maxTopics?: number;
 }
 
 export const PLATFORM_COOKIE_CONFIGS: Record<Platform, PlatformCookieConfig> = {
@@ -54,10 +55,11 @@ export const PLATFORM_COOKIE_CONFIGS: Record<Platform, PlatformCookieConfig> = {
     requiredCookies: ['web_session', 'a1', 'customer-sso-sid'],
     loginUrl: 'https://creator.xiaohongshu.com/',
   },
-  weixin_video: {
-    domains: ['.weixin.qq.com'],
+  channels: {
+    domains: ['channels.weixin.qq.com'],
     requiredCookies: ['sessionid', 'wxuin'],
-    loginUrl: 'https://channels.weixin.qq.com/',
+    loginUrl: 'https://channels.weixin.qq.com/platform',
+    maxTopics: 10,
   },
 };
 

@@ -254,6 +254,43 @@
         </div>
       </el-tab-pane>
 
+      <el-tab-pane label="调试模式" name="debug">
+        <div class="settings-card">
+          <div class="debug-mode-section">
+            <div class="debug-mode-section__header">
+              <el-icon :size="18"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm56-532h32v240h-32V352zm-96 0h32v240h-32V352zm-96 0h32v240h-32V352z" fill="currentColor"/></svg></el-icon>
+              <span>调试模式</span>
+            </div>
+            <div class="config-info" style="margin-bottom: 16px;">
+              <div class="config-info__icon"><el-icon :size="16"><svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm32 664c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V456c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v272zm-32-344c-26.5 0-48-21.5-48-48s21.5-48 48-48 48 21.5 48 48-21.5 48-48 48z" fill="currentColor"/></svg></el-icon></div>
+              <div class="config-info__body">
+                <div class="config-info__title">记录每步截图与 HTML 快照</div>
+                <div class="config-info__desc">调试模式开启后，发布流程的每一步都会自动截图并保存 HTML 快照，方便排查平台改版后的选择器问题。截图默认 7 天后自动清理。</div>
+              </div>
+            </div>
+            <el-form label-width="140px" class="settings-form">
+              <el-form-item label="调试模式">
+                <el-switch
+                  v-model="settings.settings.debugMode"
+                  @change="(v: boolean) => onDebugModeChange(v)"
+                />
+              </el-form-item>
+              <el-form-item label="数据保留天数">
+                <el-select
+                  v-model="settings.settings.debugRetentionDays"
+                  :disabled="!settings.settings.debugMode"
+                  @change="(v: number) => settings.updateSetting('debugRetentionDays', v)"
+                >
+                  <el-option :value="7" label="7 天" />
+                  <el-option :value="30" label="30 天" />
+                  <el-option :value="90" label="90 天" />
+                </el-select>
+              </el-form-item>
+            </el-form>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane label="关于" name="about">
         <div class="settings-card">
           <AboutPanel />
@@ -265,7 +302,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useSettingsStore } from '@/renderer/stores/settings';
 import type { AppSettings } from '@/renderer/stores/settings';
 import AIRiskSettings from '@/renderer/components/settings/AIRiskSettings.vue';
@@ -289,6 +326,27 @@ onMounted(async () => {
 
 async function onBrowserModeChange(mode: AppSettings['browserMode']) {
   await settings.updateSetting('browserMode', mode);
+}
+
+async function onDebugModeChange(enabled: boolean) {
+  if (enabled) {
+    const confirmed = await new Promise<boolean>((resolve) => {
+      ElMessageBox.confirm(
+        '调试模式会记录每步截图与 HTML，可能包含敏感信息（如账号 ID、手机号）。确认开启？',
+        '确认开启调试模式',
+        {
+          confirmButtonText: '确认开启',
+          cancelButtonText: '取消',
+          type: 'warning',
+        },
+      ).then(() => resolve(true)).catch(() => resolve(false));
+    });
+    if (!confirmed) {
+      settings.updateSetting('debugMode', false);
+      return;
+    }
+  }
+  await settings.updateSetting('debugMode', enabled);
 }
 
 async function selectChromePath() {

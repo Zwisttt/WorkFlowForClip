@@ -289,7 +289,7 @@ export class BrowserManager {
 
     const platformNames: Record<string, string> = {
       douyin: '抖音', xiaohongshu: '小红书',
-      weixin_video: '视频号', kuaishou: '快手', bilibili: 'B站',
+      channels: '视频号', kuaishou: '快手', bilibili: 'B站',
     };
 
     return new BrowserWindow({

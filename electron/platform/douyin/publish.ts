@@ -4,6 +4,10 @@ import { Logger } from '../../core/Logger';
 import { UPLOAD_SELECTORS, DOUYIN_URLS } from './selectors';
 import { getCookiePath, cookieExists } from './cookie';
 import type { PublishContext, PublishResult } from '../base/types';
+import { PageRiskControl } from '../base/RiskControl';
+import { toPlatformError } from '../base/PlatformError';
+import { TopicSanitizer } from '../base/TopicSanitizer';
+import { getDebugRecorder } from '../base/DebugRecorder';
 
 const logger = new Logger('DouyinPublish');
 
@@ -22,18 +26,24 @@ export async function fillVideoMetadata(
   description?: string,
   tags?: string[]
 ): Promise<void> {
-  const titleInput = page.getByPlaceholder('填写作品标题，为作品获得更多流量');
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 100, max: 300 },
+    clickDelayMs: { min: 200, max: 500 },
+    stepIntervalSec: { min: 2.0, max: 3.0 },
+  });
+
+  const titleInput = page.locator(UPLOAD_SELECTORS.titleInput).first();
   await titleInput.waitFor({ state: 'visible', timeout: 10000 });
-  await titleInput.click();
-  await titleInput.fill(title);
+  await rc.humanClick(UPLOAD_SELECTORS.titleInput);
+  await rc.humanType(UPLOAD_SELECTORS.titleInput, title);
   logger.info(`标题已填写: ${title}`);
 
   if (description) {
     const descInput = page.locator(UPLOAD_SELECTORS.descriptionEditor);
     const hasDesc = await descInput.count();
     if (hasDesc) {
-      await descInput.click();
-      await descInput.fill(description);
+      await rc.humanClick(UPLOAD_SELECTORS.descriptionEditor);
+      await rc.humanType(UPLOAD_SELECTORS.descriptionEditor, description);
       logger.info('描述已填写');
     }
   }
@@ -43,10 +53,11 @@ export async function fillVideoMetadata(
     const hasTagInput = await tagInput.count();
     if (hasTagInput) {
       for (const tag of tags) {
-        await tagInput.click();
-        await tagInput.fill(tag);
+        await rc.humanClick(UPLOAD_SELECTORS.addTagDropdown);
+        await rc.humanType(UPLOAD_SELECTORS.addTagDropdown, tag);
         await page.waitForTimeout(500);
-        await page.keyboard.press('Enter');
+        await rc.humanClick(UPLOAD_SELECTORS.tagOption);
+        await page.waitForTimeout(300);
         logger.info(`标签已添加: ${tag}`);
       }
     }
@@ -61,16 +72,20 @@ async function handleCoverPrompt(page: Page): Promise<boolean> {
     return false;
   }
 
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 100, max: 300 },
+    clickDelayMs: { min: 200, max: 500 },
+  });
   logger.info('检测到封面提示，自动选择推荐封面');
 
   const recommendCover = page.locator("[class^='recommendCover-']").first();
   if (await recommendCover.isVisible().catch(() => false)) {
-    await recommendCover.click();
+    await rc.humanClick("[class^='recommendCover-']");
     await page.waitForTimeout(500);
 
     const confirmBtn = page.getByRole('button', { name: '确定' });
     if (await confirmBtn.isVisible().catch(() => false)) {
-      await confirmBtn.click();
+      await rc.humanClick('button:has-text("确定")');
       logger.info('封面已设置');
       return true;
     }
@@ -80,10 +95,15 @@ async function handleCoverPrompt(page: Page): Promise<boolean> {
 }
 
 async function executePublish(page: Page, maxRetries: number = 3): Promise<boolean> {
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 100, max: 300 },
+    clickDelayMs: { min: 200, max: 500 },
+    stepIntervalSec: { min: 2.0, max: 3.0 },
+  });
   for (let retry = 0; retry < maxRetries; retry++) {
     const publishBtn = page.getByRole('button', { name: '发布', exact: true });
     await publishBtn.waitFor({ state: 'visible', timeout: 10000 });
-    await publishBtn.click();
+    await rc.humanClick('button:has-text("发布")');
     logger.info(`发布按钮已点击（第 ${retry + 1} 次）`);
 
     await page.waitForTimeout(2000);
@@ -135,18 +155,22 @@ export async function publish(ctx: PublishContext): Promise<PublishResult> {
     return { success: false, message: `Cookie 文件不存在: ${cookiePath}` };
   }
 
+  const debugRecorder = getDebugRecorder();
+  debugRecorder.setSessionId(`douyin_${accountId}_${Date.now()}`);
+
   const browser = await chromium.launch({ channel: 'chrome', headless: false, args: CHROME_ARGS });
   const context = await browser.newContext({ storageState: cookiePath });
 
   try {
     const page = await context.newPage();
-    await page.goto(DOUYIN_URLS.upload, { waitUntil: 'domcontentloaded' });
+    const pageCtx = { page, accountId };
+    await debugRecorder.recordStep('goto_upload_page', async () => {
+      await page.goto(DOUYIN_URLS.upload, { waitUntil: 'domcontentloaded' });
+    }, pageCtx);
     return await executePublishOnPage(page, title, description, tags, scheduledTime, ctx.dryRun, ctx.accountId, ctx.videoId);
   } catch (error) {
-    return { success: false, message: `发布出错: ${error instanceof Error ? error.message : String(error)}` };
-  } finally {
-    await context.close();
-    await browser.close();
+    const pErr = toPlatformError(error, 'douyin');
+    return { success: false, message: pErr.message };
   }
 }
 
@@ -160,8 +184,18 @@ async function executePublishOnPage(
   accountId?: string,
   videoId?: string
 ): Promise<PublishResult> {
+  const debugRecorder = getDebugRecorder();
+  const pageCtx = { page, accountId };
+
   try {
-    await fillVideoMetadata(page, title, description, tags);
+    const sanitizedTags = TopicSanitizer.cleanTopics(tags ?? [], {
+      maxTopics: 5,
+      platform: 'douyin',
+    });
+    const limitedTags = TopicSanitizer.limitTopics(sanitizedTags, 5);
+    await debugRecorder.recordStep('fill_video_metadata', async () => {
+      await fillVideoMetadata(page, title, description, limitedTags);
+    }, pageCtx);
 
     if (scheduledTime) {
       logger.warn('抖音定时发布请使用 schedule 方法');
@@ -176,9 +210,13 @@ async function executePublishOnPage(
       };
     }
 
-    const success = await executePublish(page);
+    await debugRecorder.recordStep('wait_upload_complete', async () => {}, pageCtx);
+    const success = await debugRecorder.recordStep('execute_publish', async () => {
+      return await executePublish(page);
+    }, pageCtx);
 
     if (success) {
+      await debugRecorder.recordStep('extract_video_id', async () => {}, pageCtx);
       const currentUrl = page.url();
       const videoId = extractVideoId(currentUrl);
       return { success: true, message: '视频发布成功', videoId };
@@ -186,7 +224,8 @@ async function executePublishOnPage(
       return { success: false, message: '视频发布失败，请检查是否有未填写的必填项' };
     }
   } catch (error) {
-    return { success: false, message: `发布出错: ${error instanceof Error ? error.message : String(error)}` };
+    const pErr = toPlatformError(error, 'douyin');
+    return { success: false, message: pErr.message };
   }
 }
 

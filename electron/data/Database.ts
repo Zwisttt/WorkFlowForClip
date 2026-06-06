@@ -128,6 +128,24 @@ function fixSchema(database: BetterSqlite3Database): void {
   } catch (error) {
     logger.warn('Schema fix check failed:', error);
   }
+
+  try {
+    const columns = database
+      .prepare("PRAGMA table_info(accounts)")
+      .all() as { name: string }[];
+    const columnNames = new Set(columns.map((c) => c.name));
+
+    if (!columnNames.has('last_cookie_check')) {
+      database.exec('ALTER TABLE accounts ADD COLUMN last_cookie_check TEXT');
+      logger.info('Schema fix: added last_cookie_check to accounts');
+    }
+
+    database
+      .prepare("UPDATE accounts SET platform = 'channels' WHERE platform = 'weixin_video'")
+      .run();
+  } catch (error) {
+    logger.warn('Account schema fix check failed:', error);
+  }
 }
 
 export function getDatabase(): BetterSqlite3Database {

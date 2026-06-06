@@ -141,7 +141,7 @@ const settings = reactive<IPLimitSettings>({
 const platformLimits = reactive([
   { id: 'xiaohongshu', name: '小红书', icon: '📕', riskLevel: 'high', riskLabel: '高风控', maxAccounts: 3 },
   { id: 'douyin', name: '抖音', icon: '🎵', riskLevel: 'high', riskLabel: '高风控', maxAccounts: 5 },
-  { id: 'weixin_video', name: '视频号', icon: '📺', riskLevel: 'medium', riskLabel: '中风控', maxAccounts: 5 },
+  { id: 'channels', name: '视频号', icon: '📺', riskLevel: 'medium', riskLabel: '中风控', maxAccounts: 5 },
   { id: 'kuaishou', name: '快手', icon: '⚡', riskLevel: 'medium', riskLabel: '中风控', maxAccounts: 8 },
   { id: 'bilibili', name: 'B站', icon: '📺', riskLevel: 'low', riskLabel: '低风控', maxAccounts: 10 },
 ]);

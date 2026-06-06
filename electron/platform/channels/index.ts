@@ -18,6 +18,7 @@ import type {
   VideoStatsData,
   TimePeriod,
   PageChangeReport,
+  LoginOptions,
 } from '../base/types';
 
 const CHANNELS_CONFIG: PlatformConfig = {
@@ -83,12 +84,12 @@ class ChannelsAdapter implements PlatformAdapter {
     };
   }
 
-  async login(accountId: string, headless: boolean = false): Promise<CookieResult> {
-    return qrCodeLogin(accountId, headless);
+  async login(accountId: string, headless: boolean = false, options?: LoginOptions): Promise<CookieResult> {
+    return qrCodeLogin(accountId, headless, undefined, undefined, options);
   }
 
-  async checkCookie(accountId: string): Promise<boolean> {
-    return checkCookie(accountId);
+  async checkCookie(accountId: string, cookiePath?: string): Promise<boolean> {
+    return checkCookie(accountId, cookiePath);
   }
 
   async getQRCode(accountId: string): Promise<string> {

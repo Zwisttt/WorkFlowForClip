@@ -29,14 +29,21 @@ export interface Account {
 export interface AccountRow {
   id: string;
   platform: string;
-  name: string;
-  avatar: string | null;
-  cookie_encrypted: string;
+  name?: string;
+  nickname?: string;
+  avatar?: string | null;
+  avatar_url?: string | null;
+  cookie_encrypted?: string;
+  cookie_path?: string;
   cookie_valid: number;
-  last_cookie_check: string | null;
+  last_cookie_check?: string | null;
+  last_login?: string | null;
   group_id: string | null;
   fingerprint_id: string | null;
   proxy_id: string | null;
+  browser_mode?: string | null;
+  homepage_url?: string | null;
+  remark?: string | null;
   status: string;
   created_at: string;
   updated_at: string;

@@ -60,7 +60,7 @@ MatrixFlow/
 - 抖音：serverScheduledPublish=true, maxScheduleDays=30
 - 小红书：不支持定时，maxScheduleDays=0
 - 视频号：serverScheduledPublish=true, maxScheduleDays=7
-- 快手：serverScheduledPublish=true, maxScheduleDays=7
+- 快手：serverScheduledPublish=true, maxScheduleDays=14
 
 **任务状态机：** pending → running → success/failed（重试用指数退避）
 

@@ -351,7 +351,7 @@ describe('TaskScheduler', () => {
       scheduler.schedule(makeTask({ id: 't1' }));
       await startAndTick();
 
-      const completed = queue.getByStatus('completed');
+      const completed = queue.getByStatus('success');
       expect(completed).toHaveLength(1);
       expect(completed[0].id).toBe('t1');
     });
@@ -462,7 +462,7 @@ describe('TaskScheduler', () => {
     it('返回正确统计', () => {
       scheduler.schedule(makeTask({ id: 't1' }));
       scheduler.schedule(makeTask({ id: 't2' }));
-      queue.updateStatus('t1', 'completed');
+      queue.updateStatus('t1', 'success');
       queue.updateStatus('t2', 'failed');
 
       const stats = scheduler.getStats();

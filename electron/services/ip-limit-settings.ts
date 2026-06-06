@@ -38,7 +38,7 @@ const DEFAULT_SETTINGS: IPLimitSettings = {
     limits: [
       { platform: 'xiaohongshu', maxAccounts: 3 },
       { platform: 'douyin', maxAccounts: 5 },
-      { platform: 'weixin_video', maxAccounts: 5 },
+      { platform: 'channels', maxAccounts: 5 },
       { platform: 'kuaishou', maxAccounts: 8 },
       { platform: 'bilibili', maxAccounts: 10 },
     ],
@@ -57,7 +57,7 @@ export class IPLimitSettingsService {
   async load(): Promise<IPLimitSettings> {
     try {
       const content = await fs.readFile(this.configPath, 'utf-8');
-      this.settings = JSON.parse(content);
+      this.settings = this.normalizeSettings(JSON.parse(content));
       return this.settings;
     } catch (error) {
       await this.ensureConfigDir();
@@ -69,8 +69,9 @@ export class IPLimitSettingsService {
 
   async save(settings: IPLimitSettings): Promise<void> {
     await this.ensureConfigDir();
-    await fs.writeFile(this.configPath, JSON.stringify(settings, null, 2), 'utf-8');
-    this.settings = settings;
+    const normalized = this.normalizeSettings(settings);
+    await fs.writeFile(this.configPath, JSON.stringify(normalized, null, 2), 'utf-8');
+    this.settings = normalized;
   }
 
   get(): IPLimitSettings {
@@ -117,6 +118,19 @@ export class IPLimitSettingsService {
     try {
       await fs.mkdir(dir, { recursive: true });
     } catch {}
+  }
+
+  private normalizeSettings(settings: IPLimitSettings): IPLimitSettings {
+    return {
+      ...settings,
+      platformSpecific: {
+        ...settings.platformSpecific,
+        limits: settings.platformSpecific.limits.map((limit) => ({
+          ...limit,
+          platform: limit.platform === 'weixin_video' ? 'channels' : limit.platform,
+        })),
+      },
+    };
   }
 }
 

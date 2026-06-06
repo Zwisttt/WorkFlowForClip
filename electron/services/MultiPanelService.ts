@@ -300,7 +300,7 @@ class MultiPanelService {
       douyin: 'https://creator.douyin.com/',
       xiaohongshu: 'https://creator.xiaohongshu.com/',
       kuaishou: 'https://cp.kuaishou.com/',
-      weixin_video: 'https://channels.weixin.qq.com/',
+      channels: 'https://channels.weixin.qq.com/platform',
       bilibili: 'https://member.bilibili.com/platform/home',
     };
     return urls[platform] || 'about:blank';

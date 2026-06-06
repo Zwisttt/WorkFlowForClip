@@ -29,7 +29,7 @@ function getNavigatorPlatform(platform: Platform): string {
       return 'Macintosh';
     case 'xiaohongshu':
       return 'iPhone';
-    case 'weixin_video':
+    case 'channels':
       return 'Windows NT 10.0';
     default:
       return 'Windows NT 10.0';
@@ -40,7 +40,7 @@ function toFingerprintPlatform(platform: Platform): FingerprintPlatform {
   switch (platform) {
     case 'douyin':
     case 'kuaishou':
-    case 'weixin_video':
+    case 'channels':
       return 'windows';
     case 'bilibili':
       return 'macos';

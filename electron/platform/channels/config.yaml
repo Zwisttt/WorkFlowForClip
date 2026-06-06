@@ -1,3 +1,15 @@
+riskControl:
+  enabled: true
+  typingDelayMs:
+    min: 50
+    max: 200
+  clickDelayMs:
+    min: 100
+    max: 300
+  stepIntervalSec:
+    min: 1.0
+    max: 2.0
+
 platform:
   id: channels
   name: 微信视频号
@@ -28,7 +40,7 @@ upload:
     - avi
     - mkv
   max_description_length: 1000
-  max_tags: 10
+  max_tags: 0
   has_title_field: false
 
 rate_limit:
@@ -39,11 +51,14 @@ rate_limit:
 capabilities:
   server_scheduled_publish: true
   max_schedule_days: 7
-  comment: true
+  maxTopics: 0
+  comment: false
   image: true
 
 notes:
   - 视频号登录必须使用微信扫码，不支持手机号或其他方式
   - 视频号没有独立的"标题"字段，只有描述
+  - 视频号不支持话题功能（maxTopics=0）
+  - 视频号不支持自动评论功能（comment=false）
   - 二维码有效期约 5 分钟，过期需要刷新
   - Cookie 存储在 channels.weixin.qq.com 域名下

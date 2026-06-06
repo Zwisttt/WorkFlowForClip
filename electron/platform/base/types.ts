@@ -32,6 +32,13 @@ export interface CookieResult {
   message: string;
 }
 
+export interface LoginOptions {
+  /** 用户显式发起重新登录时，不复用已有 Cookie。 */
+  force?: boolean;
+  /** 登录确认后立即回调（Cookie 已保存但验证可能还未完成），用于即时更新 UI 状态。 */
+  onLoginConfirmed?: () => void;
+}
+
 export interface UploadContext {
   accountId: string;
   videoPath: string;
@@ -74,6 +81,18 @@ export interface PublishContext {
   tags?: string[];
   scheduledTime?: Date;
   dryRun?: boolean;
+  /** 视频号短标题（≤ 16 字符） */
+  shortTitle?: string;
+  /** 发布位置（视频号支持位置选择；空=不设置） */
+  location?: string;
+  /** 合集名（视频号特有） */
+  collection?: string;
+  /** 商品链接 / 推广链接（视频号、抖音、快手支持） */
+  productLink?: string;
+  /** 商品标题（productLink 配套文案） */
+  productTitle?: string;
+  /** 声明原创（视频号特有） */
+  isOriginal?: boolean;
 }
 
 export interface PublishResult {

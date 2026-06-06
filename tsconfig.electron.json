@@ -12,7 +12,7 @@
     "rootDir": "./electron",
     "declaration": false,
     "sourceMap": true,
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM"],
     "types": ["node"]
   },
   "include": ["electron/**/*.ts"],

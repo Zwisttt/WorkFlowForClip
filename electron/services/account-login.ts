@@ -17,6 +17,14 @@ import { browserManager } from './embedded-browser/browser-manager';
 import { session as electronSession } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  detectChannelsLoginInWebContents,
+  detectChannelsProfileInPage,
+  detectChannelsProfileInWebContents,
+  normalizeChannelsProfile,
+  type ChannelsProfileResult,
+} from '../platform/channels/login-detection';
+import { isChannelsPlatform, normalizePlatformId } from './platform-normalizer';
 
 export interface UserProfile {
   nickname: string;
@@ -73,7 +81,7 @@ const PROFILE_SELECTORS: Record<string, { nickname: string[]; avatar: string[]; 
       'a[class*="avatar"]',
     ],
   },
-  weixin_video: {
+  channels: {
     nickname: [
       '.user-name', '.nickname', '[class*="userName"]',
       '[class*="nick"]', '.account-name', '[class*="nickname"]',
@@ -105,7 +113,7 @@ export interface AccountLoginServiceOptions {
   sendIPC: (channel: string, data: unknown) => void;
   onLog?: (message: string, data?: Record<string, unknown>) => void;
   getExistingAccounts?: (platform: Platform) => Promise<Array<{ id: string; nickname?: string }>>;
-  updateAccountStatus?: (accountId: string, status: string, storagePath?: string) => Promise<void>;
+  updateAccountStatus?: (accountId: string, status: string, storagePath?: string, profile?: UserProfile, browserMode?: string) => Promise<string | void>;
   createAccount?: (accountId: string, platform: Platform, storagePath: string, profile: UserProfile | undefined, browserMode: string) => Promise<string>;
 }
 
@@ -129,7 +137,8 @@ export class AccountLoginService {
   }
 
   async startLogin(payload: LoginStartPayload): Promise<LoginResult> {
-    const { platform, browserConfig, existingAccountId } = payload;
+    const platform = normalizePlatformId(payload.platform);
+    const { browserConfig, existingAccountId } = payload;
     
     this.log('startLogin', { platform, browserType: browserConfig.type, existingAccountId });
     
@@ -171,23 +180,27 @@ export class AccountLoginService {
 
       let storagePath: string;
       let profile: UserProfile | undefined;
+      let persistedAccountId = accountId;
 
       if (browserConfig.type === 'embedded') {
         const result = await this.handleEmbeddedLogin(platform, accountId);
         storagePath = result.storagePath;
         profile = result.profile;
       } else {
-        storagePath = await this.handleExternalLogin(platform, accountId, browserConfig);
+        const result = await this.handleExternalLogin(platform, accountId, browserConfig);
+        storagePath = result.storagePath;
+        profile = result.profile;
       }
 
       this.log('loginFlowCompleted', { accountId, storagePath, profile: profile ? { nickname: profile.nickname, hasAvatar: !!profile.avatarUrl } : null, hasUpdateAccountStatus: !!this.options.updateAccountStatus, hasCreateAccount: !!this.options.createAccount });
 
-      if (this.options.updateAccountStatus) {
-        await this.options.updateAccountStatus(accountId, 'online', storagePath);
-        this.log('accountStatusUpdated', { accountId });
+      if (decision.action === 'overwrite' && this.options.updateAccountStatus) {
+        const updatedAccountId = await this.options.updateAccountStatus(accountId, 'online', storagePath, profile, browserConfig.type);
+        persistedAccountId = updatedAccountId || accountId;
+        this.log('accountStatusUpdated', { accountId: persistedAccountId });
       } else if (this.options.createAccount) {
-        await this.options.createAccount(accountId, platform, storagePath, profile, browserConfig.type);
-        this.log('accountCreated', { accountId, platform });
+        persistedAccountId = await this.options.createAccount(accountId, platform, storagePath, profile, browserConfig.type);
+        this.log('accountCreated', { accountId: persistedAccountId, platform });
       } else {
         this.log('WARNING: no account persistence callback', { accountId });
       }
@@ -195,17 +208,17 @@ export class AccountLoginService {
       await this.cleanup();
 
       this.options.sendIPC('account:login-success', {
-        accountId,
+        accountId: persistedAccountId,
         platform,
         storagePath,
       });
 
-      this.log('loginSuccess', { accountId, platform });
+      this.log('loginSuccess', { accountId: persistedAccountId, platform });
 
       return {
         success: true,
         status: 'online',
-        accountId,
+        accountId: persistedAccountId,
         platform,
         storagePath,
       };
@@ -252,7 +265,7 @@ export class AccountLoginService {
 
     this.log('waitForEmbeddedLogin start', { platform, accountId });
 
-    const loginSuccess = await this.waitForCookies(accountId, platform, config);
+    const loginSuccess = await this.waitForCookies(accountId, platform, config, contentView.webContents);
 
     this.log('waitForEmbeddedLogin result', { loginSuccess });
 
@@ -265,12 +278,14 @@ export class AccountLoginService {
 
     const partition = `persist:${accountId}`;
     const ses = electronSession.fromPartition(partition);
-    const cookies = await ses.cookies.get({ domain: config.domains[0] });
-
     const allCookies: Electron.Cookie[] = [];
-    for (const domain of config.domains) {
-      const domainCookies = await ses.cookies.get({ domain });
-      allCookies.push(...domainCookies);
+    if (isChannelsPlatform(platform)) {
+      allCookies.push(...await ses.cookies.get({ url: 'https://channels.weixin.qq.com' }));
+    } else {
+      for (const domain of config.domains) {
+        const domainCookies = await ses.cookies.get({ domain });
+        allCookies.push(...domainCookies);
+      }
     }
 
     this.log('cookies read', { count: allCookies.length, cookieNames: allCookies.map(c => c.name) });
@@ -290,25 +305,57 @@ export class AccountLoginService {
     accountId: string,
     platform: Platform,
     config: PlatformCookieConfig,
+    webContents: Electron.WebContents | null,
     timeout = 300000
   ): Promise<boolean> {
     const partition = `persist:${accountId}`;
     const startTime = Date.now();
     const checkInterval = 3000;
+    const loginUrl = config.loginUrl.replace(/\/$/, '');
 
     while (Date.now() - startTime < timeout) {
       try {
         const ses = electronSession.fromPartition(partition);
-        for (const domain of config.domains) {
-          const cookies = await ses.cookies.get({ domain });
+        let hasAllRequiredCookies = false;
+        const cookieGroups = isChannelsPlatform(platform)
+          ? [await ses.cookies.get({ url: 'https://channels.weixin.qq.com' })]
+          : await Promise.all(config.domains.map(domain => ses.cookies.get({ domain })));
+        for (const cookies of cookieGroups) {
           const cookieNames = cookies.map(c => c.name);
-          const hasAllRequired = config.requiredCookies.every(name => cookieNames.includes(name));
-          if (hasAllRequired) {
+          if (config.requiredCookies.every(name => cookieNames.includes(name))) {
+            hasAllRequiredCookies = true;
+            break;
+          }
+        }
+
+        if (hasAllRequiredCookies) {
+          if (!isChannelsPlatform(platform)) {
+            return true;
+          }
+
+          if (webContents && !webContents.isDestroyed()) {
+            const currentUrl = webContents.getURL();
+            const detection = await detectChannelsLoginInWebContents(webContents, currentUrl);
+            if (detection.loggedIn) {
+              this.log('waitForCookies: channels page detected login', {
+                currentUrl,
+                reason: detection.reason,
+                errCode: detection.errCode,
+              });
+              return true;
+            }
+          }
+        }
+
+        if (webContents && !webContents.isDestroyed() && !isChannelsPlatform(platform)) {
+          const currentUrl = webContents.getURL();
+          if (currentUrl && currentUrl !== 'about:blank' && !currentUrl.includes(loginUrl) && !currentUrl.includes('login')) {
+            this.log('waitForCookies: URL fallback detected login', { currentUrl, loginUrl });
             return true;
           }
         }
-      } catch {
-        // Ignore cookie check errors
+      } catch (err) {
+        this.log('waitForCookies error', { error: String(err) });
       }
 
       await new Promise(resolve => setTimeout(resolve, checkInterval));
@@ -320,6 +367,13 @@ export class AccountLoginService {
   private async extractProfileFromWebContents(platform: Platform, webContents: Electron.WebContents, accountId: string): Promise<UserProfile | undefined> {
     if (platform === 'bilibili') {
       return this.extractBilibiliProfile(webContents, accountId);
+    }
+    let channelsProfile: UserProfile | undefined;
+    if (isChannelsPlatform(platform)) {
+      channelsProfile = await this.extractChannelsProfileFromWebContents(webContents, accountId);
+      if (this.hasLocalAvatar(channelsProfile)) {
+        return channelsProfile;
+      }
     }
 
     const selectors = PROFILE_SELECTORS[platform];
@@ -379,19 +433,19 @@ export class AccountLoginService {
           }
         }
         return {
-          nickname: result.nickname || '',
-          avatarUrl: avatarPath || result.avatarUrl || '',
-          homepageUrl: result.homepageUrl || undefined,
+          nickname: result.nickname || channelsProfile?.nickname || '',
+          avatarUrl: avatarPath || channelsProfile?.avatarUrl || result.avatarUrl || '',
+          homepageUrl: result.homepageUrl || channelsProfile?.homepageUrl || undefined,
         };
       }
     } catch (err) {
       this.log('extractProfile error', { error: String(err) });
     }
 
-    return undefined;
+    return channelsProfile;
   }
 
-  private async handleExternalLogin(platform: Platform, accountId: string, browserConfig: BrowserConfig): Promise<string> {
+  private async handleExternalLogin(platform: Platform, accountId: string, browserConfig: BrowserConfig): Promise<{ storagePath: string; profile?: UserProfile }> {
     this.currentLauncher = createBrowserLauncher(browserConfig);
 
     const context = await this.currentLauncher.launch(browserConfig, accountId);
@@ -435,7 +489,9 @@ export class AccountLoginService {
       throw new Error('登录超时');
     }
 
-    return await this.sessionManager.save(context, accountId, platform);
+    const storagePath = await this.sessionManager.save(context, accountId, platform);
+    const profile = await this.extractProfileFromBrowserContext(platform, context, page, accountId);
+    return { storagePath, profile };
   }
 
   private async waitForEmbeddedLogin(page: Page, context: BrowserContext, platform: Platform, accountId: string): Promise<boolean> {
@@ -455,10 +511,18 @@ export class AccountLoginService {
     }
   }
 
-  private async extractProfileFromBrowser(platform: Platform, page: Page): Promise<UserProfile | undefined> {
+  private async extractProfileFromBrowser(platform: Platform, page: Page, accountId?: string): Promise<UserProfile | undefined> {
     if (!page) {
       this.log('extractProfile skipped', { reason: 'no page' });
       return undefined;
+    }
+
+    let channelsProfile: UserProfile | undefined;
+    if (isChannelsPlatform(platform) && accountId) {
+      channelsProfile = await this.extractChannelsProfileFromPage(page, accountId);
+      if (this.hasLocalAvatar(channelsProfile)) {
+        return channelsProfile;
+      }
     }
 
     const selectors = PROFILE_SELECTORS[platform];
@@ -514,17 +578,49 @@ export class AccountLoginService {
       this.log('extractProfile raw result', result);
 
       if (result && (result.nickname || result.avatarUrl)) {
+        let avatarPath = '';
+        if (accountId && result.avatarUrl && result.avatarUrl.startsWith('http')) {
+          try {
+            avatarPath = await this.downloadAvatar(result.avatarUrl, platform, accountId);
+          } catch (err) {
+            this.log('downloadAvatar browser error', { error: String(err), platform });
+          }
+        }
         return {
-          nickname: result.nickname || '',
-          avatarUrl: result.avatarUrl || '',
-          homepageUrl: result.homepageUrl || undefined,
+          nickname: result.nickname || channelsProfile?.nickname || '',
+          avatarUrl: avatarPath || channelsProfile?.avatarUrl || result.avatarUrl || '',
+          homepageUrl: result.homepageUrl || channelsProfile?.homepageUrl || undefined,
         };
       }
     } catch (err) {
       this.log('extractProfile error', { error: String(err) });
     }
 
-    return undefined;
+    return channelsProfile;
+  }
+
+  private async extractProfileFromBrowserContext(
+    platform: Platform,
+    context: BrowserContext,
+    fallbackPage: Page,
+    accountId: string
+  ): Promise<UserProfile | undefined> {
+    let bestChannelsProfile: UserProfile | undefined;
+    if (isChannelsPlatform(platform)) {
+      for (const candidate of context.pages()) {
+        const profile = await this.extractChannelsProfileFromPage(candidate, accountId);
+        if (this.hasLocalAvatar(profile)) {
+          return profile;
+        }
+        bestChannelsProfile = bestChannelsProfile || profile;
+      }
+    }
+
+    const fallbackProfile = await this.extractProfileFromBrowser(platform, fallbackPage, accountId);
+    if (this.hasLocalAvatar(fallbackProfile)) {
+      return fallbackProfile;
+    }
+    return fallbackProfile || bestChannelsProfile;
   }
 
   private async cleanup(): Promise<void> {
@@ -539,6 +635,184 @@ export class AccountLoginService {
     }
 
     this.currentDetector = null;
+  }
+
+  private async extractChannelsProfileFromWebContents(webContents: Electron.WebContents, accountId: string): Promise<UserProfile | undefined> {
+    let bestProfile: UserProfile | undefined;
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      try {
+        const profile = await detectChannelsProfileInWebContents(webContents, webContents.getURL())
+          || await this.fetchChannelsProfileFromElectronSession(webContents);
+        const built = await this.buildChannelsProfile(profile, accountId);
+        if (this.hasLocalAvatar(built)) {
+          return built;
+        }
+        bestProfile = built || bestProfile;
+      } catch (err) {
+        this.log('extractChannelsProfile error', { error: String(err), attempt });
+      }
+      await this.sleep(1000);
+    }
+    return bestProfile;
+  }
+
+  private async extractChannelsProfileFromPage(page: Page, accountId: string): Promise<UserProfile | undefined> {
+    let bestProfile: UserProfile | undefined;
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      try {
+        const profile = await detectChannelsProfileInPage(page)
+          || await this.fetchChannelsProfileFromBrowserPage(page);
+        const built = await this.buildChannelsProfile(profile, accountId);
+        if (this.hasLocalAvatar(built)) {
+          return built;
+        }
+        bestProfile = built || bestProfile;
+      } catch (err) {
+        this.log('extractChannelsProfile page error', { error: String(err), attempt });
+      }
+      await this.sleep(1000);
+    }
+    return bestProfile;
+  }
+
+  private async fetchChannelsProfileFromElectronSession(webContents: Electron.WebContents): Promise<ChannelsProfileResult | null> {
+    try {
+      const cookies = await webContents.session.cookies.get({ url: 'https://channels.weixin.qq.com' });
+      const wxCookies = await webContents.session.cookies.get({ url: 'https://weixin.qq.com' }).catch(() => []);
+      const mpCookies = await webContents.session.cookies.get({ url: 'https://mp.weixin.qq.com' }).catch(() => []);
+      const cookieHeader = [...cookies, ...wxCookies]
+        .concat(mpCookies)
+        .filter((cookie, index, arr) => arr.findIndex(item => item.name === cookie.name && item.domain === cookie.domain) === index)
+        .map(c => `${c.name}=${c.value}`)
+        .join('; ');
+      return await this.fetchChannelsProfileWithCookie(cookieHeader);
+    } catch (err) {
+      this.log('fetchChannelsProfileFromElectronSession error', { error: String(err) });
+      return null;
+    }
+  }
+
+  private async fetchChannelsProfileFromBrowserPage(page: Page): Promise<ChannelsProfileResult | null> {
+    try {
+      const cookies = await page.context().cookies([
+        'https://channels.weixin.qq.com',
+        'https://weixin.qq.com',
+        'https://mp.weixin.qq.com',
+      ]);
+      const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+      return await this.fetchChannelsProfileWithCookie(cookieHeader);
+    } catch (err) {
+      this.log('fetchChannelsProfileFromBrowserPage error', { error: String(err) });
+      return null;
+    }
+  }
+
+  private async fetchChannelsProfileWithCookie(cookieHeader: string): Promise<ChannelsProfileResult | null> {
+    if (!cookieHeader) {
+      return null;
+    }
+
+    const nowHex = Math.floor(Date.now() / 1000).toString(16);
+    const randomHex = Array.from({ length: 8 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    const body = JSON.stringify({
+      timestamp: Date.now(),
+      _log_finder_uin: '',
+      _log_finder_id: '',
+      rawKeyBuff: null,
+      pluginSessionId: null,
+      scene: 7,
+      reqScene: 7,
+    });
+
+    const responseBody = await new Promise<string>((resolve, reject) => {
+      const https = require('https');
+      const req = https.request(
+        `https://channels.weixin.qq.com/cgi-bin/mmfinderassistant-bin/auth/get_auth_info?_aid=&_rid=${nowHex}-${randomHex}&_pageUrl=https:%2F%2Fchannels.weixin.qq.com%2Fplatform`,
+        {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json, text/plain, */*',
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(body),
+            'Cookie': cookieHeader,
+            'Origin': 'https://channels.weixin.qq.com',
+            'Referer': 'https://channels.weixin.qq.com/platform',
+            'Sec-Fetch-Site': 'same-origin',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'X-Wechat-Uin': '0000000000',
+          },
+          timeout: 8000,
+        },
+        (res: any) => {
+          let data = '';
+          res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+          res.on('end', () => resolve(data));
+        }
+      );
+      req.on('error', reject);
+      req.on('timeout', () => req.destroy(new Error('channels auth_info timeout')));
+      req.write(body);
+      req.end();
+    });
+
+    try {
+      const parsed = JSON.parse(responseBody);
+      const errCode = parsed?.errCode ?? parsed?.errcode ?? parsed?.err_code;
+      if (errCode !== 0) {
+        this.log('fetchChannelsProfileWithCookie not ready', { errCode });
+        return null;
+      }
+      const profile = normalizeChannelsProfile(parsed);
+      if (profile) {
+        profile.cookieHeader = cookieHeader;
+      }
+      return profile;
+    } catch (err) {
+      this.log('fetchChannelsProfileWithCookie parse error', { error: String(err) });
+      return null;
+    }
+  }
+
+  private async buildChannelsProfile(profile: ChannelsProfileResult | null, accountId: string): Promise<UserProfile | undefined> {
+    if (!profile) {
+      return undefined;
+    }
+
+    const avatarUrl = this.normalizeChannelsAvatarUrl(profile.avatarUrl);
+    let avatarPath = '';
+
+    if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://')) {
+      try {
+        const cookieHeader = profile.cookieHeader || '';
+        avatarPath = await this.downloadAvatar(avatarUrl, 'channels', accountId, 0, cookieHeader ? { Cookie: cookieHeader } : {});
+      } catch (err) {
+        this.log('downloadChannelsAvatar error', { error: String(err) });
+      }
+    }
+
+    return {
+      nickname: profile.nickname || '',
+      avatarUrl: avatarPath || avatarUrl,
+      homepageUrl: profile.homepageUrl || 'https://channels.weixin.qq.com/platform',
+    };
+  }
+
+  private normalizeChannelsAvatarUrl(url: string): string {
+    if (!url) {
+      return '';
+    }
+    if (url.startsWith('//')) {
+      return `https:${url}`;
+    }
+    return url;
+  }
+
+  private hasLocalAvatar(profile: UserProfile | undefined): boolean {
+    return !!profile?.avatarUrl && profile.avatarUrl.startsWith('local-file://');
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private async extractBilibiliProfile(webContents: Electron.WebContents, accountId: string): Promise<UserProfile | undefined> {
@@ -661,33 +935,81 @@ export class AccountLoginService {
     return path.join(dir, `${platform}_${accountId}.jpg`);
   }
 
-  private downloadAvatar(url: string, platform: string, accountId: string): Promise<string> {
+  private downloadAvatar(
+    url: string,
+    platform: string,
+    accountId: string,
+    redirectCount = 0,
+    extraHeaders: Record<string, string> = {},
+  ): Promise<string> {
     const filePath = this.getAvatarPath(platform, accountId);
     return new Promise((resolve, reject) => {
-      const https = require('https');
-      const file = fs.createWriteStream(filePath);
-      https.get(url, {
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        reject(new Error(`Invalid avatar URL: ${url}`));
+        return;
+      }
+
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        reject(new Error(`Unsupported avatar protocol: ${parsed.protocol}`));
+        return;
+      }
+
+      const client = require(parsed.protocol === 'http:' ? 'http' : 'https');
+      const req = client.get(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+          'Referer': 'https://channels.weixin.qq.com/',
+          ...extraHeaders,
         },
         timeout: 15000,
       }, (res: any) => {
+        const statusCode = res.statusCode || 0;
+        const location = res.headers?.location;
+
+        if (statusCode >= 300 && statusCode < 400 && location) {
+          if (redirectCount >= 5) {
+            reject(new Error('Avatar redirect limit exceeded'));
+            return;
+          }
+          const nextUrl = new URL(location, url).toString();
+          this.downloadAvatar(nextUrl, platform, accountId, redirectCount + 1, extraHeaders).then(resolve, reject);
+          return;
+        }
+
         if (res.statusCode && res.statusCode >= 400) {
-          file.close();
-          fs.unlinkSync(filePath);
           reject(new Error(`HTTP ${res.statusCode}`));
           return;
         }
+
+        const file = fs.createWriteStream(filePath);
+        let bytes = 0;
+        res.on('data', (chunk: Buffer) => {
+          bytes += chunk.length;
+        });
         res.pipe(file);
         file.on('finish', () => {
           file.close();
+          if (bytes <= 0) {
+            fs.unlink(filePath, () => {});
+            reject(new Error('Avatar response is empty'));
+            return;
+          }
           resolve(`local-file://${filePath}`);
         });
         file.on('error', (err: Error) => {
           fs.unlink(filePath, () => {});
           reject(err);
         });
-      }).on('error', (err: Error) => {
+      });
+
+      req.on('timeout', () => {
+        req.destroy(new Error('Avatar download timeout'));
+      });
+
+      req.on('error', (err: Error) => {
         fs.unlink(filePath, () => {});
         reject(err);
       });

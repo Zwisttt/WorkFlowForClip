@@ -1,6 +1,24 @@
 # 抖音平台配置
 # 设计文档要求限流配置：hourly: 10, daily: 50, burst: 3
 
+riskControl:
+  enabled: true
+  level: EXTREME
+  typingDelayMs:
+    min: 100
+    max: 300
+  clickDelayMs:
+    min: 200
+    max: 500
+  stepIntervalSec:
+    min: 2.0
+    max: 3.0
+  scrollSpeedPxPerSec:
+    min: 200
+    max: 500
+  maxRetries: 3
+  retryDelayMs: 1000
+
 platform:
   id: douyin
   name: 抖音
@@ -41,8 +59,11 @@ rateLimit:
 capabilities:
   serverScheduledPublish: true
   maxScheduleDays: 30
+  maxTopics: 5
   comment: true
   image: true
+  video: true
+  live: false
 
 actions:
   uploadVideo:

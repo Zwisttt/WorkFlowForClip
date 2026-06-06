@@ -8,6 +8,8 @@ interface AppConfig {
   logLevel: string;
   maxConcurrentPublish: number;
   browserMode: 'embedded' | 'system-chrome' | 'fingerprint';
+  debugMode: boolean;
+  debugRetentionDays: number;
 }
 
 export class ConfigManager {
@@ -35,6 +37,8 @@ export class ConfigManager {
       logLevel: 'info',
       maxConcurrentPublish: 5,
       browserMode: 'system-chrome',
+      debugMode: false,
+      debugRetentionDays: 7,
     };
   }
 

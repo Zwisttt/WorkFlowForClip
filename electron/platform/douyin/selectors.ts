@@ -50,6 +50,41 @@ export const UPLOAD_SELECTORS = {
   finishEditBtn: 'button:has-text("完成编辑")',
 } as const;
 
+export const PUBLISH_FLOW_SELECTORS = {
+  step1_openCreatorCenter: 'a[href*="/creator-micro/home"]',
+  step2_clickUpload: 'button:has-text("上传视频"), a:has-text("上传")',
+  step3_fileInput: UPLOAD_SELECTORS.videoFileInput,
+  step4_titleInput: UPLOAD_SELECTORS.titleInput,
+  step5_descriptionInput: UPLOAD_SELECTORS.descriptionEditor,
+  step6_addTag: UPLOAD_SELECTORS.addTagDropdown,
+  step7_selectCover: UPLOAD_SELECTORS.coverButton,
+  step8_declarationSelect: '[class*="declaration"], [class*="statement"]',
+  step9_scheduleToggle: UPLOAD_SELECTORS.scheduleRadio,
+  step10_scheduleDatePicker: UPLOAD_SELECTORS.scheduleDatePicker,
+  step11_publishButton: UPLOAD_SELECTORS.publishButton,
+} as const;
+
+export const RISK_CONTROL_SELECTORS = {
+  captchaContainer: '.captcha-container, [class*="captcha"]',
+  verifyCodeInput: 'input[placeholder*="验证码"], input[name="verifyCode"]',
+  smsVerifyButton: 'button:has-text("获取验证码")',
+  riskWarningText: 'text=/操作频繁|请稍后|验证|安全验证/',
+} as const;
+
+export const SUCCESS_INDICATORS = {
+  publishSuccessToast: 'text=/发布成功|提交成功/',
+  managePageUrl: '/content/manage',
+  scheduleSuccessText: 'text=/定时发布设置成功|已设置定时发布/',
+  uploadSuccessText: 'text=上传成功',
+} as const;
+
+export const ERROR_INDICATORS = {
+  uploadFailedText: 'text=上传失败',
+  publishFailedText: 'text=发布失败',
+  cookieExpiredText: 'text=/登录|扫码登录|请登录/',
+  contentRejectedText: 'text=/违规|审核|不通过/',
+} as const;
+
 export const PUBLISH_URL_PATTERNS = {
   version1: '/content/publish?enter_from=publish_page',
   version2: '/content/post/video?enter_from=publish_page',
