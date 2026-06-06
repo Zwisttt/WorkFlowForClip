@@ -64,14 +64,13 @@ const PLATFORM_PRE_PUBLISH_RULES: Record<string, { titleMinLen?: number; titleMi
   channels: { titleMinLen: 6, titleMinLenMsg: '视频号标题至少需要6个字符' },
 };
 
-function prePublishValidate(dbTask: DbPublishTask): string | null {
-  const platform = dbTask.platform;
+function prePublishValidate(platform: string, title: string): string | null {
   const rules = PLATFORM_PRE_PUBLISH_RULES[platform];
   if (!rules) return null;
 
-  const title = ((dbTask as any).title || '').trim();
-  if (rules.titleMinLen && title.length > 0 && title.length < rules.titleMinLen) {
-    return `${rules.titleMinLenMsg}（当前${title.length}个字符）`;
+  const trimmed = title.trim();
+  if (rules.titleMinLen && trimmed.length > 0 && trimmed.length < rules.titleMinLen) {
+    return `${rules.titleMinLenMsg}（当前${trimmed.length}个字符）`;
   }
   return null;
 }
@@ -176,10 +175,10 @@ export class PublishService implements IPublishService {
   // ─── 任务创建 ─────────────────────────────────────────────
 
   async createPublishTask(request: PublishRequest): Promise<PublishTask> {
-    const preCheckError = prePublishValidate({
-      platform: request.platform,
-      title: (request.title ?? request.metadata?.title ?? '') as string,
-    } as DbPublishTask);
+    const preCheckError = prePublishValidate(
+      request.platform,
+      (request.title ?? request.metadata?.title ?? '') as string,
+    );
     if (preCheckError) {
       throw new Error(preCheckError);
     }
@@ -591,7 +590,7 @@ export class PublishService implements IPublishService {
 
     logger.info(`客户端发布开始: taskId=${taskId} platform=${dbTask.platform} accountId=${accountId}`);
 
-    const preCheckError = prePublishValidate(dbTask);
+    const preCheckError = prePublishValidate(dbTask.platform, (dbTask as any).title || '');
     if (preCheckError) {
       logger.error(`[publishFromClient] 前置校验失败: ${preCheckError}`);
       try {
