@@ -176,6 +176,14 @@ export class PublishService implements IPublishService {
   // ─── 任务创建 ─────────────────────────────────────────────
 
   async createPublishTask(request: PublishRequest): Promise<PublishTask> {
+    const preCheckError = prePublishValidate({
+      platform: request.platform,
+      title: (request.title ?? request.metadata?.title ?? '') as string,
+    } as DbPublishTask);
+    if (preCheckError) {
+      throw new Error(preCheckError);
+    }
+
     const adapter = this.requireAdapter(request.platform);
 
     await this.validateCookieForAccount(request.accountId);
