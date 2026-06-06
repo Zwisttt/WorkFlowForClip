@@ -211,6 +211,7 @@ export interface TaskFilter {
 export interface TaskListResult {
   items: PublishTask[];
   total: number;
+  statusBreakdown?: Record<string, number>;
 }
 
 // ─── 服务接口 ────────────────────────────────────────────────
