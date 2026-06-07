@@ -1,8 +1,9 @@
-import { BrowserWindow, ipcMain, shell } from 'electron';
+import { BrowserWindow, ipcMain, shell, session as electronSession } from 'electron';
 import { Logger } from '../core/Logger';
 import { getDatabase, isDatabaseAvailable } from '../data/Database';
 import { browserManager } from './embedded-browser/browser-manager';
 import type { Platform } from './types';
+import { PLATFORM_COOKIE_CONFIGS } from './types';
 
 const logger = new Logger('MultiPanelService');
 
@@ -136,6 +137,28 @@ class MultiPanelService {
     const id = `panel_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     try {
+      const cookieConfig = PLATFORM_COOKIE_CONFIGS[account.platform as Platform];
+      if (cookieConfig) {
+        const partition = `persist:${accountId}`;
+        const ses = electronSession.fromPartition(partition);
+        const nowSec = Date.now() / 1000;
+
+        let hasValidCookies = false;
+        for (const domain of cookieConfig.domains) {
+          const cookies = await ses.cookies.get({ domain });
+          const unexpired = cookies.filter(c => !c.expirationDate || c.expirationDate > nowSec);
+          if (cookieConfig.requiredCookies.every((name: string) => unexpired.some(c => c.name === name))) {
+            hasValidCookies = true;
+            break;
+          }
+        }
+
+        if (!hasValidCookies) {
+          logger.warn(`打开面板失败: 账号 ${accountId} 的登录态已过期`);
+          return null;
+        }
+      }
+
       const creatorUrl = this.getCreatorCenterUrl(account.platform);
       await browserManager.createEmbeddedTab(accountId, account.platform as Platform, creatorUrl);
 
@@ -297,9 +320,9 @@ class MultiPanelService {
 
   private getCreatorCenterUrl(platform: string): string {
     const urls: Record<string, string> = {
-      douyin: 'https://creator.douyin.com/',
-      xiaohongshu: 'https://creator.xiaohongshu.com/',
-      kuaishou: 'https://cp.kuaishou.com/',
+      douyin: 'https://creator.douyin.com/creator-micro/content',
+      xiaohongshu: 'https://creator.xiaohongshu.com/publish/publish',
+      kuaishou: 'https://cp.kuaishou.com/article/publish/video',
       channels: 'https://channels.weixin.qq.com/platform',
       bilibili: 'https://member.bilibili.com/platform/home',
     };

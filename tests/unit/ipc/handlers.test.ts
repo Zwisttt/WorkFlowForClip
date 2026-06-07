@@ -32,6 +32,17 @@ vi.mock('@electron/services/AccountService', () => ({
   accountService: mockAccountService,
 }));
 
+const mockStartAccountLogin = vi.fn().mockResolvedValue({
+  success: true,
+  status: 'online',
+  accountId: 'acc-1',
+  platform: 'xiaohongshu',
+});
+
+vi.mock('@electron/services/ipc-handlers', () => ({
+  startAccountLogin: mockStartAccountLogin,
+}));
+
 const mockPublishService = {
   createPublishTask: vi.fn().mockResolvedValue({ id: 'task-1' }),
   cancelPublish: vi.fn().mockResolvedValue(undefined),
@@ -388,6 +399,28 @@ describe('IPC Handlers', () => {
       expect(mockAccountService.validateCookie).toHaveBeenCalledWith('acc-1');
     });
 
+    it('accounts:login reuses the account persistent browser mode', async () => {
+      const prepare = vi.fn(() => ({
+        get: vi.fn(() => ({ platform: 'xiaohongshu', browser_mode: 'embedded' })),
+        run: vi.fn(),
+      }));
+      mockGetDatabase.mockReturnValueOnce({ prepare });
+
+      const { registerIpcHandlers } = await import('@electron/ipc/handlers');
+      registerIpcHandlers();
+      const handler = await getHandler('accounts:login');
+
+      const result = await handler(fakeEvent, 'acc-1');
+
+      expect(result).toEqual({ success: true });
+      expect(mockStartAccountLogin).toHaveBeenCalledWith({
+        platform: 'xiaohongshu',
+        browserConfig: { type: 'embedded' },
+        existingAccountId: 'acc-1',
+      });
+      expect(mockAccountService.refreshCookie).not.toHaveBeenCalled();
+    });
+
     it('account:openBrowser opens embedded homepage in standalone browser window', async () => {
       const url = 'https://cp.kuaishou.com/article/publish/video';
       const prepare = vi.fn(() => ({
@@ -600,7 +633,11 @@ describe('IPC Handlers', () => {
 
       const result = await handler(fakeEvent, 'acc-1');
       expect(result.success).toBe(true);
-      expect(mockAdapter.login).toHaveBeenCalledWith('acc-1', false, { force: true });
+      expect(mockAdapter.login).toHaveBeenCalledWith(
+        'acc-1',
+        false,
+        expect.objectContaining({ force: true })
+      );
     });
 
     it('platform:login fails for missing account', async () => {

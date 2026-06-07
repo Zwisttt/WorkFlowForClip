@@ -340,9 +340,9 @@ async function clearAllGroups() {
 }
 
 const PLATFORM_HOMEPAGE: Record<string, string> = {
-  douyin: 'https://creator.douyin.com/',
-  xiaohongshu: 'https://creator.xiaohongshu.com/',
-  kuaishou: 'https://cp.kuaishou.com/',
+  douyin: 'https://creator.douyin.com/creator-micro/content',
+  xiaohongshu: 'https://creator.xiaohongshu.com/publish/publish',
+  kuaishou: 'https://cp.kuaishou.com/article/publish/video',
   bilibili: 'https://member.bilibili.com/platform/home',
   channels: 'https://channels.weixin.qq.com/platform',
 };
@@ -356,7 +356,12 @@ async function openHomepage() {
 
   const url = props.account.homepageUrl || PLATFORM_HOMEPAGE[props.account.platform];
   if (!url) return;
-  await window.matrixflow.browser.openAccountBrowser(props.account.id, url);
+
+  const result = await window.matrixflow.browser.openAccountBrowser(props.account.id, url);
+  if (!result.success) {
+    ElMessage.warning(result.message || '登录态已过期，请重新登录');
+    emit('login', props.account.id);
+  }
 }
 </script>
 

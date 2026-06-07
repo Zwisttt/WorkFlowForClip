@@ -24,6 +24,11 @@ import {
   normalizeChannelsProfile,
   type ChannelsProfileResult,
 } from '../platform/channels/login-detection';
+import {
+  detectXhsLoginInWebContents,
+  detectXhsProfileInWebContents,
+  type XhsProfileResult,
+} from '../platform/xiaohongshu/login-detection';
 import { isChannelsPlatform, normalizePlatformId } from './platform-normalizer';
 
 export interface UserProfile {
@@ -290,7 +295,13 @@ export class AccountLoginService {
 
     this.log('cookies read', { count: allCookies.length, cookieNames: allCookies.map(c => c.name) });
 
-    const storagePath = await this.sessionManager.saveFromElectronCookies(allCookies, accountId, platform);
+    const origins = await this.extractStorageOrigins(contentView.webContents);
+    const storagePath = await this.sessionManager.saveFromElectronCookies(
+      allCookies,
+      accountId,
+      platform,
+      origins
+    );
     this.log('sessionSaved', { storagePath });
 
     const profile = await this.extractProfileFromWebContents(platform, contentView.webContents, accountId);
@@ -330,7 +341,22 @@ export class AccountLoginService {
 
         if (hasAllRequiredCookies) {
           if (!isChannelsPlatform(platform)) {
-            return true;
+            // For XHS, also verify the page shows logged-in state before returning
+            if (platform === 'xiaohongshu' && webContents && !webContents.isDestroyed()) {
+              const currentUrl = webContents.getURL();
+              const detection = await detectXhsLoginInWebContents(webContents, currentUrl);
+              if (detection.loggedIn) {
+                this.log('waitForCookies: xhs page detected login', {
+                  currentUrl,
+                  reason: detection.reason,
+                });
+                return true;
+              }
+              // Cookies present but page doesn't show logged-in state yet - keep waiting
+              this.log('waitForCookies: xhs cookies present but page not logged in', { currentUrl, reason: detection.reason });
+            } else {
+              return true;
+            }
           }
 
           if (webContents && !webContents.isDestroyed()) {
@@ -349,6 +375,20 @@ export class AccountLoginService {
 
         if (webContents && !webContents.isDestroyed() && !isChannelsPlatform(platform)) {
           const currentUrl = webContents.getURL();
+
+          // XHS-specific: use page-based login detection as fallback
+          if (platform === 'xiaohongshu') {
+            const detection = await detectXhsLoginInWebContents(webContents, currentUrl);
+            if (detection.loggedIn) {
+              this.log('waitForCookies: xhs page fallback detected login', {
+                currentUrl,
+                reason: detection.reason,
+              });
+              return true;
+            }
+          }
+
+          // URL-based fallback for non-XHS platforms
           if (currentUrl && currentUrl !== 'about:blank' && !currentUrl.includes(loginUrl) && !currentUrl.includes('login')) {
             this.log('waitForCookies: URL fallback detected login', { currentUrl, loginUrl });
             return true;
@@ -368,11 +408,23 @@ export class AccountLoginService {
     if (platform === 'bilibili') {
       return this.extractBilibiliProfile(webContents, accountId);
     }
+
     let channelsProfile: UserProfile | undefined;
     if (isChannelsPlatform(platform)) {
       channelsProfile = await this.extractChannelsProfileFromWebContents(webContents, accountId);
       if (this.hasLocalAvatar(channelsProfile)) {
         return channelsProfile;
+      }
+    }
+
+    let xhsProfile: UserProfile | undefined;
+    if (platform === 'xiaohongshu') {
+      xhsProfile = await this.extractXhsProfileFromWebContents(webContents, accountId);
+      if (xhsProfile && (xhsProfile.nickname || xhsProfile.avatarUrl)) {
+        if (this.hasLocalAvatar(xhsProfile)) {
+          return { ...xhsProfile, homepageUrl: xhsProfile.homepageUrl || channelsProfile?.homepageUrl || undefined };
+        }
+        return xhsProfile;
       }
     }
 
@@ -673,6 +725,61 @@ export class AccountLoginService {
       await this.sleep(1000);
     }
     return bestProfile;
+  }
+
+  private async extractXhsProfileFromWebContents(webContents: Electron.WebContents, accountId: string): Promise<UserProfile | undefined> {
+    let bestProfile: UserProfile | undefined;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const profile = await detectXhsProfileInWebContents(webContents, webContents.getURL());
+        if (profile && (profile.nickname || profile.avatarUrl)) {
+          this.log('extractXhsProfile found', { attempt, nickname: profile.nickname, hasAvatar: !!profile.avatarUrl });
+          let avatarPath = '';
+          if (profile.avatarUrl && (profile.avatarUrl.startsWith('http://') || profile.avatarUrl.startsWith('https://'))) {
+            try {
+              avatarPath = await this.downloadAvatar(profile.avatarUrl, 'xiaohongshu', accountId);
+            } catch (err) {
+              this.log('extractXhsProfile downloadAvatar error', { error: String(err) });
+            }
+          }
+          const builtProfile = {
+            nickname: profile.nickname || '',
+            avatarUrl: avatarPath || profile.avatarUrl || '',
+            homepageUrl: profile.homepageUrl || 'https://creator.xiaohongshu.com',
+          };
+          if (builtProfile.nickname) {
+            return builtProfile;
+          }
+          bestProfile = builtProfile;
+        }
+      } catch (err) {
+        this.log('extractXhsProfile error', { error: String(err), attempt });
+      }
+      await this.sleep(1500);
+    }
+    return bestProfile;
+  }
+
+  private async extractStorageOrigins(
+    webContents: Electron.WebContents
+  ): Promise<Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>> {
+    try {
+      const result = await webContents.executeJavaScript(`
+        (function () {
+          if (!window.location.origin || window.location.origin === 'null') return [];
+          var entries = [];
+          for (var i = 0; i < localStorage.length; i++) {
+            var name = localStorage.key(i);
+            if (name) entries.push({ name: name, value: localStorage.getItem(name) || '' });
+          }
+          return [{ origin: window.location.origin, localStorage: entries }];
+        })()
+      `);
+      return Array.isArray(result) ? result : [];
+    } catch (err) {
+      this.log('extractStorageOrigins error', { error: String(err) });
+      return [];
+    }
   }
 
   private async fetchChannelsProfileFromElectronSession(webContents: Electron.WebContents): Promise<ChannelsProfileResult | null> {

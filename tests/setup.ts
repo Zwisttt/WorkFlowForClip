@@ -14,13 +14,33 @@ vi.mock('electron', () => ({
     whenReady: vi.fn(() => Promise.resolve()),
     quit: vi.fn(),
   },
-  BrowserWindow: vi.fn().mockImplementation(() => ({
-    webContents: {
-      send: vi.fn(),
-    },
-    isDestroyed: vi.fn(() => false),
-    close: vi.fn(),
-  })),
+  BrowserWindow: Object.assign(
+    vi.fn().mockImplementation(() => ({
+      webContents: {
+        send: vi.fn(),
+      },
+      isDestroyed: vi.fn(() => false),
+      close: vi.fn(),
+    })),
+    {
+      getAllWindows: vi.fn(() => []),
+    }
+  ),
+  session: {
+    fromPartition: vi.fn(() => ({
+      cookies: {
+        get: vi.fn(() => Promise.resolve([
+          { name: 'sessionid', value: 'session', domain: '.douyin.com' },
+          { name: 'kuaishou.web.cp.api_ph', value: 'ph', domain: '.kuaishou.com' },
+          { name: 'kuaishou.web.cp.api_st', value: 'st', domain: '.kuaishou.com' },
+          { name: 'SESSDATA', value: 'sessdata', domain: '.bilibili.com' },
+          { name: 'a1', value: 'device', domain: '.xiaohongshu.com' },
+          { name: 'customer-sso-sid', value: 'sso', domain: '.xiaohongshu.com' },
+          { name: 'wxuin', value: 'wxuin', domain: 'channels.weixin.qq.com' },
+        ])),
+      },
+    })),
+  },
   ipcMain: {
     handle: vi.fn(),
     on: vi.fn(),

@@ -52,8 +52,8 @@ export const PLATFORM_COOKIE_CONFIGS: Record<Platform, PlatformCookieConfig> = {
   },
   xiaohongshu: {
     domains: ['.xiaohongshu.com', '.xhscdn.com'],
-    requiredCookies: ['web_session', 'a1', 'customer-sso-sid'],
-    loginUrl: 'https://creator.xiaohongshu.com/',
+    requiredCookies: ['a1', 'customer-sso-sid'],
+    loginUrl: 'https://creator.xiaohongshu.com/login',
   },
   channels: {
     domains: ['channels.weixin.qq.com'],

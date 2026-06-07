@@ -24,7 +24,13 @@ export interface PageLoginProbe {
 
 const XHS_HOST = 'creator.xiaohongshu.com';
 
-export const XHS_REQUIRED_COOKIES = ['web_session', 'a1'] as const;
+export const XHS_REQUIRED_COOKIES = ['a1'] as const;
+export const XHS_AUTH_COOKIES = [
+  'customer-sso-sid',
+  'access-token-creator.xiaohongshu.com',
+  'galaxy_creator_session_id',
+  'web_session',
+] as const;
 
 export interface XhsCookieLike {
   name: string;
@@ -117,13 +123,16 @@ function readErrCode(source: unknown): unknown {
 
 export function hasRequiredXhsCookies(cookies: XhsCookieLike[]): boolean {
   const nowSeconds = Date.now() / 1000;
-  return XHS_REQUIRED_COOKIES.every((requiredName) =>
-    cookies.some((cookie) => {
+  const validNames = new Set(cookies
+    .filter((cookie) => {
       const expires = cookie.expirationDate ?? cookie.expires;
-      const notExpired = typeof expires !== 'number' || expires <= 0 || expires > nowSeconds;
-      return cookie.name === requiredName && cookie.value.trim().length > 0 && notExpired;
+      return cookie.value.trim().length > 0 &&
+        (typeof expires !== 'number' || expires <= 0 || expires > nowSeconds);
     })
-  );
+    .map(cookie => cookie.name));
+
+  return XHS_REQUIRED_COOKIES.every(name => validNames.has(name)) &&
+    XHS_AUTH_COOKIES.some(name => validNames.has(name));
 }
 
 function readString(source: Record<string, unknown>, fields: string[]): string {
@@ -139,11 +148,13 @@ function readString(source: Record<string, unknown>, fields: string[]): string {
 function profileScore(source: Record<string, unknown>): number {
   const nickname = readString(source, [
     'nickname', 'nickName', 'name', 'userName', 'username', 'displayName',
+    'accountName', 'creatorName',
   ]);
   const avatarUrl = readString(source, [
     'avatarUrl', 'headImgUrl', 'avatar', 'headImg', 'head_img_url', 'logo',
+    'avatar_url', 'image',
   ]);
-  return (nickname ? 1 : 0) + (avatarUrl ? 2 : 0);
+  return (nickname ? 2 : 0) + (avatarUrl ? 1 : 0);
 }
 
 function findXhsProfileObject(source: unknown, depth = 0, visited = new Set<unknown>()): Record<string, unknown> | null {
@@ -311,48 +322,196 @@ export function buildXhsProfileProbeScript(): string {
     return /xiaohongshu|qlogo|qpic|image|avatar|headimg/i.test(url || '');
   }
 
+  function isNickname(text) {
+    if (!text || text.length > 40) return false;
+    return !/首页|内容管理|数据中心|设置|通知|发布|作品|登录|注册|扫码|消息|帮助|反馈|创作服务平台/i.test(text);
+  }
+
+  function readString(source, fields) {
+    if (!source || typeof source !== 'object') return '';
+    for (var i = 0; i < fields.length; i++) {
+      var value = source[fields[i]];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+  }
+
+  function profileScore(source) {
+    var nickname = readString(source, [
+      'nickname', 'nickName', 'name', 'userName', 'username', 'displayName',
+      'accountName', 'creatorName'
+    ]);
+    var avatarUrl = readString(source, [
+      'avatarUrl', 'headImgUrl', 'avatar', 'headImg', 'head_img_url', 'logo',
+      'avatar_url', 'image'
+    ]);
+    return (nickname ? 2 : 0) + (avatarUrl ? 1 : 0);
+  }
+
+  function findProfileObject(source, depth, visited) {
+    if (!source || typeof source !== 'object' || depth > 6 || visited.indexOf(source) >= 0) return null;
+    visited.push(source);
+    var best = profileScore(source) > 0 ? source : null;
+    var bestScore = best ? profileScore(best) : 0;
+    Object.keys(source).forEach(function (key) {
+      var value = source[key];
+      if (!value || typeof value !== 'object') return;
+      var values = Array.isArray(value) ? value : [value];
+      values.forEach(function (item) {
+        var candidate = findProfileObject(item, depth + 1, visited);
+        var score = candidate ? profileScore(candidate) : 0;
+        if (candidate && score > bestScore) {
+          best = candidate;
+          bestScore = score;
+        }
+      });
+    });
+    return best;
+  }
+
+  function extractStateProfile() {
+    var sources = [
+      window.__INITIAL_STATE__,
+      window.__NUXT__,
+      window.__APOLLO_STATE__,
+      window.__STORE__,
+      window.__PINIA__,
+    ];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var value = localStorage.getItem(localStorage.key(i));
+        if (!value || (value.charAt(0) !== '{' && value.charAt(0) !== '[')) continue;
+        try {
+          sources.push(JSON.parse(value));
+        } catch (error) {}
+      }
+    } catch (error) {}
+
+    var best = null;
+    var bestScore = 0;
+    sources.forEach(function (source) {
+      var candidate = findProfileObject(source, 0, []);
+      var score = candidate ? profileScore(candidate) : 0;
+      if (candidate && score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    });
+    return best;
+  }
+
   function extractDomAvatar() {
     var candidates = [];
+
+    var avatarImgSelectors = [
+      '[class*="avatar"] img',
+      '[class*="user-avatar"] img',
+      '[class*="header"] img',
+      '[class*="sidebar"] img',
+      '.menu-avatar img',
+      '.profile-avatar img',
+      'img[class*="avatar"]',
+      'img[class*="head"]',
+    ];
+    avatarImgSelectors.forEach(function (sel) {
+      queryAll(sel).forEach(function (el) {
+        var src = el.currentSrc || el.src || el.getAttribute('src') || '';
+        if (!src && el.getAttribute('srcset')) {
+          src = String(el.getAttribute('srcset')).split(',')[0].trim().split(/\\s+/)[0];
+        }
+        src = normalizeUrl(src);
+        if (src && isAvatarUrl(src) && !/qrcode|qr_code|login|logo|icon_/i.test(src)) candidates.push(src);
+      });
+    });
+
     queryAll('img, image').forEach(function (el) {
       var src = el.currentSrc || el.src || el.getAttribute('src') || el.getAttribute('xlink:href') || '';
       if (!src && el.getAttribute('srcset')) {
         src = String(el.getAttribute('srcset')).split(',')[0].trim().split(/\\s+/)[0];
       }
       src = normalizeUrl(src);
-      if (src && isAvatarUrl(src) && !/qrcode|qr_code|login/i.test(src)) candidates.push(src);
+      if (src && isAvatarUrl(src) && !/qrcode|qr_code|login|logo|icon_/i.test(src)) candidates.push(src);
     });
-    queryAll('[style], [class*="avatar"], [class*="head"], [class*="user"], [class*="account"]').forEach(function (el) {
+    queryAll('[style], [class*="avatar"], [class*="head"], [class*="user"], [class*="account"], [class*="profile"]').forEach(function (el) {
       var bg = '';
       try {
         bg = (el.ownerDocument.defaultView || window).getComputedStyle(el).backgroundImage || '';
       } catch (error) {}
       var match = bg.match(/url\\((['"]?)(.*?)\\1\\)/i);
       var src = normalizeUrl(match && match[2] ? match[2] : '');
-      if (src && isAvatarUrl(src) && !/qrcode|qr_code|login/i.test(src)) candidates.push(src);
+      if (src && isAvatarUrl(src) && !/qrcode|qr_code|login|logo|icon_/i.test(src)) candidates.push(src);
     });
-    return candidates[0] || '';
+
+    var preferred = '';
+    for (var k = 0; k < candidates.length; k++) {
+      var url = candidates[k];
+      if (preferred.indexOf('/') > 0 && url.indexOf('132') < 0 && url.indexOf('/avatar') < 0) continue;
+      if (url.indexOf('/avatar') >= 0 || url.indexOf('h_') >= 0) {
+        preferred = url;
+        break;
+      }
+      if (!preferred) preferred = url;
+    }
+    return preferred || candidates[0] || '';
   }
 
   function extractDomNickname() {
     var selectors = [
+      '.top-nickname',
+      '.user-info-nickname',
       '[class*="nickname"]',
       '[class*="user-name"]',
       '[class*="username"]',
       '[class*="account-name"]',
-      '[class*="display-name"]'
+      '[class*="display-name"]',
+      '[class*="creator-name"]',
+      '.sidebar .name',
+      '.header .name',
+      '[class*="sidebar"] [class*="user"]',
+      '[class*="header"] [class*="user"]',
+      '.menu-item-name',
+      '.profile-name',
+      '.name-text',
+      '[class*="user-info"] span',
+      '.avatar-name',
     ];
     for (var i = 0; i < selectors.length; i++) {
       var nodes = queryAll(selectors[i]);
       for (var j = 0; j < nodes.length; j++) {
         var text = (nodes[j].innerText || nodes[j].textContent || '').trim();
-        if (text && text.length <= 40 && !/首页|内容管理|数据中心|设置|通知|发布|作品/.test(text)) return text;
+        if (isNickname(text)) return text;
       }
     }
+
+    var avatarNodes = queryAll('[class*="avatar"] img, [class*="user-avatar"] img, .avatar img, img[class*="avatar"]');
+    for (var k = 0; k < avatarNodes.length; k++) {
+      var el = avatarNodes[k];
+      var alt = (el.getAttribute('alt') || '').trim();
+      if (isNickname(alt) && !/头像|avatar|icon|logo|默认/i.test(alt)) return alt;
+
+      var parent = el.parentElement;
+      for (var depth = 0; parent && depth < 4; depth++, parent = parent.parentElement) {
+        var textNodes = parent.querySelectorAll('span, div, p');
+        for (var n = 0; n < textNodes.length; n++) {
+          var nearbyText = (textNodes[n].innerText || textNodes[n].textContent || '').trim();
+          if (isNickname(nearbyText)) return nearbyText;
+        }
+      }
+    }
+
     return '';
   }
 
-  var nickname = extractDomNickname();
-  var avatarUrl = extractDomAvatar();
+  var stateProfile = extractStateProfile();
+  var nickname = readString(stateProfile, [
+    'nickname', 'nickName', 'name', 'userName', 'username', 'displayName',
+    'accountName', 'creatorName'
+  ]) || extractDomNickname();
+  var avatarUrl = normalizeUrl(readString(stateProfile, [
+    'avatarUrl', 'headImgUrl', 'avatar', 'headImg', 'head_img_url', 'logo',
+    'avatar_url', 'image'
+  ])) || extractDomAvatar();
+  var userId = readString(stateProfile, ['userId', 'user_id', 'redId', 'xhsId', 'id']);
 
   if (!nickname && !avatarUrl) {
     return null;
@@ -362,7 +521,7 @@ export function buildXhsProfileProbeScript(): string {
     nickname: nickname,
     avatarUrl: avatarUrl,
     homepageUrl: window.location.origin || 'https://creator.xiaohongshu.com',
-    userId: ''
+    userId: userId
   };
 })()
 `;
@@ -394,19 +553,21 @@ export function normalizeXhsProfile(result: unknown): XhsProfileResult | null {
   }
 
   const record = result as Record<string, unknown>;
-  const nickname = readString(record, [
+  const profile = findXhsProfileObject(record) || record;
+  const nickname = readString(profile, [
     'nickname', 'nickName', 'name', 'userName', 'username', 'displayName',
+    'accountName', 'creatorName',
   ]);
-  const avatarUrl = readString(record, [
+  const avatarUrl = readString(profile, [
     'avatarUrl', 'headImgUrl', 'avatar', 'headImg', 'head_img_url', 'logo',
+    'avatar_url', 'image',
   ]);
-  const homepageUrl = typeof record.homepageUrl === 'string' && record.homepageUrl.trim()
-    ? record.homepageUrl.trim()
+  const homepageUrl = typeof profile.homepageUrl === 'string' && profile.homepageUrl.trim()
+    ? profile.homepageUrl.trim()
+    : typeof record.homepageUrl === 'string' && record.homepageUrl.trim()
+      ? record.homepageUrl.trim()
     : `https://${XHS_HOST}`;
-  const userId = readString(record, ['userId', 'uniqId', 'userId']) ||
-    (typeof record.userId === 'string' && record.userId.trim()
-      ? record.userId.trim()
-      : undefined);
+  const userId = readString(profile, ['userId', 'user_id', 'uniqId', 'redId', 'xhsId', 'id']) || undefined;
 
   if (!nickname && !avatarUrl) {
     return null;

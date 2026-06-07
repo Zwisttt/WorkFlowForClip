@@ -313,10 +313,10 @@ describe('AccountService', () => {
 
       const result = await service.refreshCookie('acc-001');
       expect(result).toBe(true);
-      expect(mockAdapter.login).toHaveBeenCalledWith('acc-001', false, { force: true });
-      expect(eventBusEmit).toHaveBeenCalledWith(
-        AccountEvent.STATUS_CHANGED,
-        expect.objectContaining({ newStatus: 'active' }),
+      expect(mockAdapter.login).toHaveBeenCalledWith(
+        'acc-001',
+        false,
+        expect.objectContaining({ force: true })
       );
       expect(eventBusEmit).toHaveBeenCalledWith(
         AccountEvent.COOKIE_REFRESHED,

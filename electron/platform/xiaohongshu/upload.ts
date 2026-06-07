@@ -104,16 +104,32 @@ const EMBEDDED_DOM_HELPERS = `
   };
 
   const pickFileInput = (kind) => {
-    const selectors = kind === 'image'
-      ? ['input[type="file"][accept*="image"]', 'input[type="file"]']
-      : ['input[type="file"][accept*="video"]', 'input[type="file"][accept*="mp4"]', 'input[type="file"][accept*=".mp4"]', 'input[type="file"]'];
+    if (kind === 'image') {
+      const coverScopes = queryAll('[class*="cover-section"], [class*="cover-area"], [class*="cover-setting"], [class*="cover-wrap"], [class*="cover-modal"], [class*="cover-dialog"]');
+      let scopedInputs = [];
+      for (const scope of coverScopes) {
+        scopedInputs.push(...Array.from(scope.querySelectorAll('input[type="file"]')));
+      }
+      scopedInputs = Array.from(new Set(scopedInputs)).filter((el) => {
+        const accept = String(el.getAttribute?.('accept') || '').toLowerCase();
+        return /image|png|jpe?g|webp|\.png|\.jpg|\.jpeg|\.webp/.test(accept) || accept === '' || accept === '*';
+      });
+      if (scopedInputs.length > 0) return scopedInputs[0];
+
+      const globalInputs = queryAll('input[type="file"][accept*="image"]');
+      const filtered = globalInputs.filter((el) => {
+        const accept = String(el.getAttribute?.('accept') || '').toLowerCase();
+        return /image|png|jpe?g|webp/.test(accept);
+      });
+      if (filtered.length > 0) return filtered[0];
+      return null;
+    }
+    const selectors = ['input[type="file"][accept*="video"]', 'input[type="file"][accept*="mp4"]', 'input[type="file"][accept*=".mp4"]', 'input[type="file"]'];
     const inputs = selectors.flatMap((selector) => queryAll(selector));
     const uniqueInputs = Array.from(new Set(inputs));
     return uniqueInputs.find((input) => {
       const accept = String(input.getAttribute?.('accept') || '').toLowerCase();
-      return kind === 'image'
-        ? /image|png|jpe?g|webp/.test(accept)
-        : /video|mp4|mov|quicktime|mpeg/.test(accept);
+      return /video|mp4|mov|quicktime|mpeg/.test(accept);
     }) || uniqueInputs[0] || null;
   };
 `;
@@ -1069,29 +1085,35 @@ async function fillEmbeddedDescriptionAndTags(
 async function setEmbeddedCover(wc: WebContents, coverPath?: string): Promise<void> {
   const normalizedCoverPath = normalizeLocalFilePath(coverPath);
   if (!normalizedCoverPath || !fs.existsSync(normalizedCoverPath)) {
+    logger.info('[setEmbeddedCover] 无封面文件或文件不存在，跳过');
     return;
   }
 
-  logger.info('在内嵌浏览器中设置小红书封面...');
+  logger.info('[setEmbeddedCover] 在内嵌浏览器中设置小红书封面...');
   const opened = await clickEmbeddedText(wc, [/封面/, /设置封面/]);
+  logger.info(`[setEmbeddedCover] clickEmbeddedText(封面) result=${opened}`);
   if (!opened) {
-    logger.warn('未找到小红书封面设置入口，跳过封面设置');
+    logger.warn('[setEmbeddedCover] 未找到小红书封面设置入口，跳过封面设置');
     return;
   }
   await sleep(1000);
 
-  await clickEmbeddedText(wc, [/上传封面/, /本地上传/]);
+  const uploadClicked = await clickEmbeddedText(wc, [/上传封面/, /本地上传/]);
+  logger.info(`[setEmbeddedCover] clickEmbeddedText(上传封面) result=${uploadClicked}`);
   await sleep(500);
 
   const shouldDetach = await attachDebuggerIfNeeded(wc);
   try {
     const handle = await findEmbeddedFileInputHandle(wc, 'image');
+    logger.info(`[setEmbeddedCover] findEmbeddedFileInputHandle(image) result=${handle ? 'FOUND' : 'null'}`);
     if (!handle) {
-      logger.warn('未找到封面上传控件，跳过封面设置');
+      logger.warn('[setEmbeddedCover] 未找到封面上传控件，跳过封面设置');
       return;
     }
     await setEmbeddedFilesByHandle(wc, handle, [normalizedCoverPath]);
+    logger.info(`[setEmbeddedCover] setEmbeddedFilesByHandle done: ${normalizedCoverPath}`);
     await notifyEmbeddedFileInputChanged(wc, 'image');
+    logger.info('[setEmbeddedCover] notifyEmbeddedFileInputChanged done');
   } finally {
     if (shouldDetach && wc.debugger.isAttached()) {
       wc.debugger.detach();
@@ -1099,7 +1121,8 @@ async function setEmbeddedCover(wc: WebContents, coverPath?: string): Promise<vo
   }
 
   await sleep(1000);
-  await clickEmbeddedText(wc, [/^确认$/, /^确定$/, /^完成$/]);
+  const confirmed = await clickEmbeddedText(wc, [/^确认$/, /^确定$/, /^完成$/]);
+  logger.info(`[setEmbeddedCover] clickEmbeddedText(确认) result=${confirmed}`);
 }
 
 async function clickEmbeddedText(wc: WebContents, patterns: TextPattern[]): Promise<boolean> {
@@ -1403,7 +1426,34 @@ async function addTopics(page: Page, tags?: string[]): Promise<void> {
 }
 
 async function setCover(page: Page, coverPath?: string): Promise<void> {
-  if (!coverPath || !fs.existsSync(coverPath)) return;
+  if (!coverPath || !fs.existsSync(coverPath)) {
+    logger.info('[setCover] 无封面文件或文件不存在，跳过');
+    return;
+  }
+
+  const logPageState = async (label: string) => {
+    try {
+      const tabState = await page.evaluate(() => {
+        const tabs = Array.from(document.querySelectorAll('[class*="tab"], [role="tab"], [class*="nav-item"]'));
+        return tabs
+          .filter(t => /视频|图文|直播/.test((t as HTMLElement).innerText || ''))
+          .map(t => {
+            const el = t as HTMLElement;
+            const cls = el.className || '';
+            const selected = cls.includes('active') || cls.includes('selected') || el.getAttribute('aria-selected') === 'true';
+            return `${el.innerText.trim()}:${selected ? 'ACTIVE' : 'inactive'}`;
+          })
+          .join(', ');
+      });
+      const url = page.url();
+      const hasCoverInput = await page.locator('input[type="file"][accept*="image"]').count();
+      const coverScopeCount = await page.locator(UPLOAD_SELECTORS.coverScope).count();
+      const coverBtnCount = await page.locator(UPLOAD_SELECTORS.coverSelectBtn).count();
+      logger.info(`[setCover] ${label} | url=${url.substring(0, 80)} | tabs=[${tabState}] | imageInputs=${hasCoverInput} | coverScope=${coverScopeCount} | coverBtn=${coverBtnCount}`);
+    } catch (e) {
+      logger.info(`[setCover] ${label} | state query failed: ${e}`);
+    }
+  };
 
   try {
     const rc = new PageRiskControl(page, {
@@ -1411,32 +1461,140 @@ async function setCover(page: Page, coverPath?: string): Promise<void> {
       clickDelayMs: { min: 150, max: 400 },
     });
 
-    const coverBtn = page.locator(UPLOAD_SELECTORS.coverSelectBtn).first();
-    if (!(await coverBtn.count())) {
-      logger.warn('未找到封面设置按钮');
+    await logPageState('step0:enter');
+
+    // Guard: ensure we're still on the video publish tab, not switched to 图文
+    const imageTabActive = await page
+      .getByText('图文', { exact: true })
+      .first()
+      .evaluate(el => {
+        const parent = el.closest('[class*="tab"], [class*="nav"], [role="tab"]');
+        const classes = parent?.className || '';
+        return classes.includes('active') || classes.includes('selected') || el.getAttribute('aria-selected') === 'true';
+      })
+      .catch(() => false);
+    logger.info(`[setCover] step0:guard imageTabActive=${imageTabActive}`);
+    if (imageTabActive) {
+      logger.warn('[setCover] 检测到页面已切换到图文模式，跳过封面设置以避免冲突');
       return;
     }
 
-    await rc.humanClick(UPLOAD_SELECTORS.coverSelectBtn);
-    logger.info('已打开封面设置');
+    // First, try to find a scoped cover element to restrict our search
+    let coverScope = page.locator(UPLOAD_SELECTORS.coverScope).first();
+    const scopeCount = await coverScope.count();
+    const root = scopeCount > 0 ? coverScope : page.locator('body');
+    logger.info(`[setCover] step1:scope scopeCount=${scopeCount} useRoot=${scopeCount === 0}`);
 
-    const coverModal = page.locator(UPLOAD_SELECTORS.coverModal).first();
-    if ((await coverModal.count())) {
-      await coverModal.waitFor({ state: 'visible', timeout: 5000 });
-    }
+    // Try clicking any cover-related element restricted to the cover section scope
+    const coverBtn = root.locator('button:has-text("设置封面"), button:has-text("修改封面"), span:has-text("设置封面"), [class*="cover-btn"], [class*="edit-cover"]').first();
+    let clicked = false;
 
-    const coverInput = page.locator(UPLOAD_SELECTORS.coverUploadInput).first();
-    if ((await coverInput.count())) {
-      await rc.humanUpload(UPLOAD_SELECTORS.coverUploadInput, coverPath);
-      logger.info(`封面已上传: ${coverPath}`);
-
-      const confirmBtn = page.locator(UPLOAD_SELECTORS.coverConfirmBtn).first();
-      if ((await confirmBtn.count())) {
-        await rc.humanClick(UPLOAD_SELECTORS.coverConfirmBtn);
-        logger.info('封面已确认');
+    const btnInScope = await coverBtn.count();
+    logger.info(`[setCover] step2:findBtn btnInScope=${btnInScope}`);
+    if (btnInScope > 0) {
+      const btnText = await coverBtn.textContent().catch(() => '?');
+      const btnClass = await coverBtn.getAttribute('class').catch(() => '?');
+      logger.info(`[setCover] step2:clickBtn text="${btnText?.trim()}" class="${btnClass}"`);
+      await coverBtn.click();
+      clicked = true;
+    } else {
+      const textBtn = page.getByText(/^(设置封面|修改封面|更换封面)$/).first();
+      const textBtnVisible = await textBtn.isVisible().catch(() => false);
+      logger.info(`[setCover] step2:fallbackGetByText visible=${textBtnVisible}`);
+      if (textBtnVisible) {
+        await textBtn.click();
+        clicked = true;
       }
     }
+
+    logger.info(`[setCover] step2:result clicked=${clicked}`);
+    if (clicked) {
+      await page.waitForTimeout(1000);
+      await logPageState('step2:afterClick');
+    } else {
+      logger.warn('[setCover] 未找到封面设置入口，跳过封面设置');
+      return;
+    }
+
+    // Look for a file input specifically within the cover section or a cover modal
+    let coverInput = root.locator('input[type="file"][accept*="image"]').first();
+    let inputSource = 'root';
+    const rootInputCount = await coverInput.count();
+    if (rootInputCount === 0) {
+      const coverModal = page.locator(UPLOAD_SELECTORS.coverModal).first();
+      const modalCount = await coverModal.count();
+      logger.info(`[setCover] step3:modalSearch modalCount=${modalCount}`);
+      if (modalCount > 0) {
+        coverInput = coverModal.locator('input[type="file"][accept*="image"]').first();
+        inputSource = 'modal';
+      }
+    }
+    const inputCount = await coverInput.count();
+    logger.info(`[setCover] step3:findInput source=${inputSource} count=${inputCount}`);
+
+    let uploadDone = false;
+
+    if (inputCount > 0) {
+      const inputClass = await coverInput.evaluate(el => (el as HTMLElement).className || '?').catch(() => '?');
+      const inputAccept = await coverInput.getAttribute('accept').catch(() => '?');
+      logger.info(`[setCover] step3:uploadInput class="${inputClass}" accept="${inputAccept}" file="${coverPath}"`);
+      await logPageState('step3:beforeSetInputFiles');
+      await coverInput.setInputFiles(coverPath);
+      logger.info(`[setCover] step3:setInputFiles done`);
+      await logPageState('step3:afterSetInputFiles');
+      uploadDone = true;
+    } else {
+      // Try clicking "上传封面" or "本地上传" first to reveal the input
+      const uploadBtn = page.getByText(/上传封面|本地上传/, { exact: false }).first();
+      const uploadBtnVisible = await uploadBtn.isVisible().catch(() => false);
+      logger.info(`[setCover] step3:fallbackUploadBtn visible=${uploadBtnVisible}`);
+      if (uploadBtnVisible) {
+        await uploadBtn.click();
+        await page.waitForTimeout(800);
+        await logPageState('step3:afterFallbackClick');
+
+        const fallbackInput = page.locator(UPLOAD_SELECTORS.coverUploadInput).first();
+        const fbCount = await fallbackInput.count();
+        logger.info(`[setCover] step3:fallbackInput count=${fbCount}`);
+        if (fbCount > 0) {
+          await fallbackInput.setInputFiles(coverPath);
+          logger.info(`[setCover] step3:fallbackSetInputFiles done`);
+          await logPageState('step3:afterFallbackSetInputFiles');
+          uploadDone = true;
+        }
+      }
+    }
+
+    if (!uploadDone) {
+      logger.warn('[setCover] 未找到封面上传控件，跳过封面设置');
+      await logPageState('step3:noUploadDone');
+      return;
+    }
+
+    await page.waitForTimeout(1000);
+    await logPageState('step4:beforeConfirm');
+
+    const confirmBtn = page.locator(UPLOAD_SELECTORS.coverConfirmBtn).first();
+    const confirmCount = await confirmBtn.count();
+    logger.info(`[setCover] step4:confirmBtn count=${confirmCount}`);
+    if (confirmCount > 0) {
+      const confirmText = await confirmBtn.textContent().catch(() => '?');
+      logger.info(`[setCover] step4:clickConfirm text="${confirmText?.trim()}"`);
+      await rc.humanClick(UPLOAD_SELECTORS.coverConfirmBtn);
+      logger.info('[setCover] 封面已确认');
+    } else {
+      const altConfirm = page.getByText(/^确定$|^完成$|^确认$/, { exact: true }).first();
+      const altVisible = await altConfirm.isVisible().catch(() => false);
+      logger.info(`[setCover] step4:altConfirm visible=${altVisible}`);
+      if (altVisible) {
+        await altConfirm.click();
+        logger.info('[setCover] 封面已确认(alt)');
+      }
+    }
+
+    await logPageState('step5:done');
   } catch (error) {
+    await logPageState('step:ERROR');
     throw toPlatformError(error, 'xiaohongshu', { step: 'set_cover' });
   }
 }
@@ -1490,17 +1648,17 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
     return { success: false, message: `视频文件不存在: ${videoPath}` };
   }
 
-  const cookiePath = getCookiePath(accountId);
-  if (!cookieExists(cookiePath)) {
-    return { success: false, message: `Cookie 文件不存在，请先登录: ${cookiePath}` };
-  }
-
   const browserMode = normalizeBrowserMode(ctx.browserMode);
   const headless = ctx.headless ?? false;
   const slowMo = ctx.slowMo ?? 200;
 
   if (browserMode === 'embedded' && !headless) {
     return uploadVideoInStandaloneBrowser(ctx);
+  }
+
+  const cookiePath = ctx.cookiePath || getCookiePath(accountId);
+  if (!cookieExists(cookiePath)) {
+    return { success: false, message: `Cookie 文件不存在，请先登录: ${cookiePath}` };
   }
 
   logger.info(`启动小红书自动化浏览器: mode=${browserMode} headless=${headless} slowMo=${slowMo}`);

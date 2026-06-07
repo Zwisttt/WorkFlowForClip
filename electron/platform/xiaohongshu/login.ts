@@ -128,11 +128,16 @@ async function extractQrCodeSrc(page: Page): Promise<string> {
   const loginBox = page.locator(LOGIN_SELECTORS.loginBox).first();
   await loginBox.waitFor({ state: 'visible', timeout: 30000 });
 
+  const loadingOverlay = page.locator('[data-testid="loading"]').first();
+  await loadingOverlay.waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {
+    logger.info('加载遮罩未出现或已消失，继续');
+  });
+
   const scanText = loginBox.locator('div:has-text("扫一扫")').first();
   if (!(await scanText.count()) || !(await scanText.isVisible().catch(() => false))) {
     const switchImg = loginBox.locator(LOGIN_SELECTORS.loginSwitchImg).first();
     await switchImg.waitFor({ state: 'visible', timeout: 10000 });
-    await switchImg.click();
+    await switchImg.click({ force: true });
     await loginBox.locator('div:has-text("扫一扫")').first().waitFor({ state: 'visible', timeout: 10000 });
   }
 
@@ -346,33 +351,67 @@ export async function qrCodeLogin(
 
     await page.waitForTimeout(3000);
 
-    const usernameEl = page.locator(LOGIN_SELECTORS.usernameText).first();
-    if ((await usernameEl.count()) && (await usernameEl.isVisible().catch(() => false))) {
-      const username = await usernameEl.textContent().catch(() => '');
-      if (username) {
-        logger.info(`登录账号: ${username}`);
-      }
-    }
-
     await saveCookie(context, cookiePath);
     logger.info(`Cookie 已保存: ${cookiePath}`);
 
     await syncCookiesToElectronSession(context, accountId);
 
+    // Navigate to publish page for better profile extraction context
+    try {
+      await page.goto(XHS_URLS.publish, { timeout: 15000, waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2000);
+      logger.info('已导航到发布页面以提取用户信息');
+    } catch {
+      logger.warn('导航到发布页面失败，尝试从当前页面提取');
+    }
+
     let nickname: string | undefined;
     let avatarUrl: string | undefined;
 
-    try {
-      const profile = await detectXhsProfileInPage(page);
-      if (profile) {
-        nickname = profile.nickname || undefined;
-        avatarUrl = profile.avatarUrl || undefined;
-        logger.info(`已提取用户信息: nickname=${nickname}, avatarUrl=${avatarUrl ? avatarUrl.substring(0, 60) : 'N/A'}`);
-      } else {
-        logger.info('未能从页面提取用户 profile，使用默认值');
+    // Try to extract via DOM selectors first (faster, more reliable for nickname)
+    const usernameEl = page.locator(LOGIN_SELECTORS.usernameText).first();
+    if ((await usernameEl.count().catch(() => 0)) && (await usernameEl.isVisible().catch(() => false))) {
+      const username = await usernameEl.textContent().catch(() => '');
+      if (username && username.trim().length < 40) {
+        nickname = username.trim();
+        logger.info(`从 DOM 提取到昵称: ${nickname}`);
       }
-    } catch (error) {
-      logger.warn('提取用户 profile 失败:', error);
+    }
+
+    // If no nickname from DOM, try avatar indicator element for nickname
+    if (!nickname) {
+      const avatarEl = page.locator(LOGIN_SELECTORS.avatarIndicator).first();
+      if ((await avatarEl.count().catch(() => 0)) && (await avatarEl.isVisible().catch(() => false))) {
+        const altText = await avatarEl.getAttribute('alt').catch(() => '') || '';
+        if (altText && altText.trim().length < 40) {
+          nickname = altText.trim();
+          logger.info(`从头像 alt 提取到昵称: ${nickname}`);
+        }
+      }
+    }
+
+    // Retry profile detection with JS probe
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const profile = await detectXhsProfileInPage(page);
+        if (profile) {
+          nickname = nickname || profile.nickname || undefined;
+          avatarUrl = avatarUrl || profile.avatarUrl || undefined;
+          logger.info(`已提取用户信息 (attempt ${attempt + 1}): nickname=${nickname}, avatarUrl=${avatarUrl ? avatarUrl.substring(0, 60) : 'N/A'}`);
+        }
+        if (nickname || avatarUrl) {
+          break;
+        }
+      } catch (error) {
+        logger.warn(`提取用户 profile 失败 (attempt ${attempt + 1}):`, error);
+      }
+      if (attempt < 2) {
+        await page.waitForTimeout(2000);
+      }
+    }
+
+    if (!nickname && !avatarUrl) {
+      logger.info('未能从页面提取用户 profile，使用默认值');
     }
 
     options.onLoginConfirmed?.();

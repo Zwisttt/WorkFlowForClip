@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { AccountLoginService, type UserProfile } from './account-login';
-import type { LoginStartPayload, Platform, BrowserConfig } from './types';
+import type { LoginResult, LoginStartPayload, Platform, BrowserConfig } from './types';
 import { getDatabase } from '../data/Database';
 import { normalizePlatformId } from './platform-normalizer';
 
@@ -126,15 +126,21 @@ function getLoginService(): AccountLoginService {
   return loginService;
 }
 
+export async function startAccountLogin(payload: LoginStartPayload): Promise<LoginResult> {
+  const service = getLoginService();
+  return service.startLogin({
+    ...payload,
+    platform: normalizePlatformId(String(payload.platform)),
+  });
+}
+
 export function registerAccountLoginHandlers(): void {
   ipcMain.handle('accounts:startLogin', async (_event, payload: LoginStartPayload) => {
     try {
-      const service = getLoginService();
-      const result = await service.startLogin({
-        ...payload,
-        platform: normalizePlatformId(String(payload.platform)),
-      });
-      return { success: true, data: result };
+      const result = await startAccountLogin(payload);
+      return result.success
+        ? { success: true, data: result }
+        : { success: false, data: result, message: result.error || '登录失败' };
     } catch (error) {
       return { success: false, message: String(error) };
     }

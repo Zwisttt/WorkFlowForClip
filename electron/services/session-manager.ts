@@ -2,13 +2,26 @@ import fs from 'fs';
 import path from 'path';
 import type { BrowserContext } from 'patchright';
 import type { ISessionManager, Platform, ConsistencyCheck, ConsistencyResult } from './types';
-import type { Cookie } from 'electron';
+import { app, type Cookie } from 'electron';
+
+interface StorageOrigin {
+  origin: string;
+  localStorage: Array<{ name: string; value: string }>;
+}
+
+function getDefaultBaseDir(): string {
+  try {
+    return path.join(app.getPath('userData'), 'storage');
+  } catch {
+    return path.join(process.cwd(), 'storage');
+  }
+}
 
 export class SessionManager implements ISessionManager {
   private baseDir: string;
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir || path.join(process.cwd(), 'storage');
+    this.baseDir = baseDir || getDefaultBaseDir();
     this.ensureDirectories();
   }
 
@@ -42,15 +55,31 @@ export class SessionManager implements ISessionManager {
     return this.writeStorageState(storageState, accountId, platform);
   }
 
-  async saveFromElectronCookies(cookies: Cookie[], accountId: string, platform: Platform): Promise<string> {
-    const cookieData = cookies.map(c => ({
-      name: c.name,
-      value: c.value,
-      domain: c.domain ?? '',
-      path: c.path ?? '/',
-    }));
+  async saveFromElectronCookies(
+    cookies: Cookie[],
+    accountId: string,
+    platform: Platform,
+    origins: StorageOrigin[] = []
+  ): Promise<string> {
+    const storageState = {
+      cookies: cookies.map(cookie => ({
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain ?? '',
+        path: cookie.path ?? '/',
+        expires: cookie.expirationDate ?? -1,
+        httpOnly: cookie.httpOnly,
+        secure: cookie.secure,
+        sameSite: cookie.sameSite === 'strict'
+          ? 'Strict'
+          : cookie.sameSite === 'no_restriction'
+            ? 'None'
+            : 'Lax',
+      })),
+      origins,
+    };
 
-    return this.saveFromCookies(cookieData, accountId, platform);
+    return this.writeStorageState(storageState, accountId, platform);
   }
 
   private async writeStorageState(

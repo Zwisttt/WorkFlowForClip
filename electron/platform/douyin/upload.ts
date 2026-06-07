@@ -1319,7 +1319,13 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
     };
   }
 
-  const cookiePath = getCookiePath(accountId);
+  const browserMode = normalizeBrowserMode(ctx.browserMode);
+
+  if (browserMode === 'embedded' && !headless) {
+    return uploadVideoInEmbeddedBrowser(ctx);
+  }
+
+  const cookiePath = ctx.cookiePath || getCookiePath(accountId);
   if (!fs.existsSync(cookiePath)) {
     return {
       success: false,
@@ -1327,13 +1333,7 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
     };
   }
 
-  const browserMode = normalizeBrowserMode(ctx.browserMode);
   const userDataDir = getUserDataDir(accountId);
-
-  // Embedded mode is primary when not headless
-  if (browserMode === 'embedded' && !headless) {
-    return uploadVideoInEmbeddedBrowser(ctx);
-  }
 
   logger.info(`启动抖音自动化浏览器: mode=${browserMode} headless=${headless} slowMo=${slowMo}`);
 

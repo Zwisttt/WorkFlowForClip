@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog } from 'electron';
+import { ipcMain, BrowserWindow, dialog, session as electronSession } from 'electron';
 import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -55,7 +55,9 @@ import type { PlatformConfig, PlatformCapabilities, CookieResult } from '../plat
 import type { PublishEvent } from '../core/types/eventbus';
 
 import { createBrowserLauncher } from '../services/browser-launcher';
-import type { IBrowserLauncher } from '../services/types';
+import { startAccountLogin } from '../services/ipc-handlers';
+import type { BrowserType, IBrowserLauncher } from '../services/types';
+import { PLATFORM_COOKIE_CONFIGS } from '../services/types';
 import type { BrowserContext } from 'patchright';
 
 const logger = new Logger('IPC');
@@ -554,13 +556,28 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.ACCOUNTS_LOGIN, async (_e, accountId: string) => {
     try {
-      const account = await accountService.getAccount(accountId);
-      if (!account) return { success: false, message: '账号不存在' };
-      const refreshed = await accountService.refreshCookie(accountId);
-      if (!refreshed) {
-        return { success: false, message: '重新登录失败' };
-      }
-      return { success: true };
+      const row = getDatabase().prepare(
+        'SELECT platform, browser_mode FROM accounts WHERE id = ?'
+      ).get(accountId) as { platform: string; browser_mode?: string | null } | undefined;
+      if (!row) return { success: false, message: '账号不存在' };
+
+      const rawBrowserMode = row.browser_mode || 'embedded';
+      const browserType: BrowserType = rawBrowserMode === 'external_chrome'
+        ? 'chrome'
+        : rawBrowserMode === 'external_fingerprint'
+          ? 'fingerprint'
+          : rawBrowserMode === 'chrome' || rawBrowserMode === 'fingerprint'
+            ? rawBrowserMode
+            : 'embedded';
+
+      const result = await startAccountLogin({
+        platform: normalizePlatformId(row.platform),
+        browserConfig: { type: browserType },
+        existingAccountId: accountId,
+      });
+      return result.success
+        ? { success: true }
+        : { success: false, message: result.error || '重新登录失败' };
     } catch (error) {
       return { success: false, message: `${error}` };
     }
@@ -1425,7 +1442,29 @@ export function registerIpcHandlers(): void {
           ? 'fingerprint'
           : rawBrowserMode;
 
+      const platform = normalizePlatformId(row.platform || 'kuaishou');
       if (browserMode === 'embedded') {
+        const cookieConfig = PLATFORM_COOKIE_CONFIGS[platform];
+        if (cookieConfig) {
+          const partition = `persist:${accountId}`;
+          const ses = electronSession.fromPartition(partition);
+          const nowSec = Date.now() / 1000;
+
+          let hasValidCookies = false;
+          for (const domain of cookieConfig.domains) {
+            const cookies = await ses.cookies.get({ domain });
+            const unexpired = cookies.filter(c => !c.expirationDate || c.expirationDate > nowSec);
+            if (cookieConfig.requiredCookies.every(name => unexpired.some(c => c.name === name))) {
+              hasValidCookies = true;
+              break;
+            }
+          }
+
+          if (!hasValidCookies) {
+            return { success: false, message: '账号登录态已过期，请重新登录' };
+          }
+        }
+
         const { browserManager } = await import('../services/embedded-browser/browser-manager');
         if (browserManager.hasTab(accountId) && !browserManager.hasStandaloneTab(accountId)) {
           await browserManager.closeTab(accountId);
@@ -1442,7 +1481,7 @@ export function registerIpcHandlers(): void {
           }
         }
 
-        await browserManager.createTab(accountId, normalizePlatformId(row.platform || 'kuaishou'), url);
+        await browserManager.createTab(accountId, platform, url);
         return { success: true };
       }
 

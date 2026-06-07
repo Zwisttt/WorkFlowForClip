@@ -8,12 +8,12 @@ export const XHS_URLS = {
 } as const;
 
 export const LOGIN_SELECTORS = {
-  scanLoginTab: 'get_by_text("扫码登录", exact=true).first',
+  scanLoginTab: 'text="扫码登录"',
   qrCodeImage: '.login-box-container img, [class*="qrcode"] img',
   qrCodeContainer: '[class*="login-box"], .login-box-container',
-  phoneLoginText: 'get_by_text("手机登录")',
-  scanLoginText: 'get_by_text("扫码登录")',
-  qrExpiredText: 'get_by_text("二维码已失效")',
+  phoneLoginText: 'text="手机登录"',
+  scanLoginText: 'text="扫码登录"',
+  qrExpiredText: 'text="二维码已失效"',
   qrRefreshBtn: '.qrcode-refresh, button:has-text("点击刷新")',
   avatarIndicator: '.user-avatar, .avatar, [class*="avatar"]',
   usernameText: '.user-name, .nickname, [class*="username"]',
@@ -24,12 +24,12 @@ export const LOGIN_SELECTORS = {
 } as const;
 
 export const UPLOAD_SELECTORS = {
-  videoUploadBtn: 'get_by_text("上传视频", exact=false).first',
+  videoUploadBtn: 'button:has-text("上传视频"), [class*="upload"] button, [class*="Upload"]',
   videoFileInput: 'input[type="file"][accept*="video"], input[type="file"]',
   imageFileInput: 'input[type="file"][accept*="image"]',
   uploadProgress: '.upload-progress, [class*="progress"]',
-  uploadSuccessText: 'get_by_text("上传成功", exact=false)',
-  uploadFailedText: 'get_by_text("上传失败", exact=false)',
+  uploadSuccessText: 'text="上传成功"',
+  uploadFailedText: 'text="上传失败"',
 
   titleInput: 'input[placeholder*="标题"], input[placeholder*="填写标题"], #title-textarea',
   titleInputFallback: '.title-input input, [class*="title"] input',
@@ -44,18 +44,19 @@ export const UPLOAD_SELECTORS = {
   mentionInput: 'input[placeholder*="@"], input[placeholder*="提及"]',
   mentionSuggestion: '.mention-item, [class*="user-list"] li',
 
-  coverSelectBtn: 'get_by_text("设置封面", exact=false), button:has-text("封面")',
-  coverModal: '.cover-modal, [class*="cover-modal"], [class*="cover-dialog"]',
+  coverSelectBtn: 'button:has-text("设置封面"), button:has-text("修改封面"), [class*="cover-setting"], [class*="edit-cover"]',
+  coverModal: '.cover-modal, [class*="cover-modal"], [class*="cover-dialog"], [class*="cover-section"]',
   coverUploadInput: 'input[type="file"][accept*="image"]',
-  coverConfirmBtn: 'button:has-text("确定"), button:has-text("完成")',
-  coverAutoSelect: '.cover-auto, [class*="auto-cover"]',
+  coverConfirmBtn: 'button:has-text("确定"), button:has-text("完成"), button:has-text("确认")',
+  coverAutoSelect: '.cover-auto, [class*="auto-cover"], [class*="recommend"]',
+  coverScope: '[class*="cover-section"], [class*="cover-area"], [class*="cover-setting"], [class*="cover-wrap"]',
 
   publishButton: 'button:has-text("发布"), button:has-text("发表")',
   publishButtonPrimary: 'button.publishBtn, [class*="publish-btn"], [class*="submit-btn"]',
 
-  publishSuccessToast: 'get_by_text("发布成功", exact=false)',
-  publishFailedToast: 'get_by_text("发布失败", exact=false)',
-  publishDraftToast: 'get_by_text("已保存草稿", exact=false)',
+  publishSuccessToast: 'text="发布成功"',
+  publishFailedToast: 'text="发布失败"',
+  publishDraftToast: 'text="已保存草稿"',
 
   scheduleOption: '[class*="schedule"], [class*="timer"]',
 } as const;
