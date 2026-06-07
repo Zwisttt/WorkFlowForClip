@@ -119,8 +119,8 @@ export class AccountService implements IAccountService {
       ).run(
         accountId,
         normalizedPlatform,
-        `账号-${accountId.slice(0, 8)}`,
-        null,
+        loginResult.nickname || `账号-${accountId.slice(0, 8)}`,
+        loginResult.avatarUrl || null,
         loginResult.cookiePath || '',
         now,
         groupId ?? null,
@@ -310,8 +310,8 @@ export class AccountService implements IAccountService {
     const db = this.requireDatabase();
     const now = new Date().toISOString();
     db.prepare(
-      `UPDATE accounts SET cookie_path = ?, cookie_valid = 1, status = 'active', last_login = ?, updated_at = ? WHERE id = ?`
-    ).run(loginResult.cookiePath || null, now, now, accountId);
+      `UPDATE accounts SET cookie_path = ?, cookie_valid = 1, status = 'active', last_login = ?, updated_at = ?, nickname = COALESCE(?, nickname), avatar_url = COALESCE(?, avatar_url) WHERE id = ?`
+    ).run(loginResult.cookiePath || null, now, now, loginResult.nickname || null, loginResult.avatarUrl || null, accountId);
 
     EventBus.getInstance().emit(AccountEvent.COOKIE_REFRESHED, { accountId });
     logger.info(`Cookie 刷新成功: accountId=${accountId}`);

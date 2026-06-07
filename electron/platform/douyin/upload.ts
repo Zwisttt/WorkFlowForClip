@@ -2,14 +2,18 @@ import fs from 'fs';
 import path from 'path';
 import type { Page, BrowserContext } from 'patchright';
 import { chromium } from 'patchright';
+import type { WebContents } from 'electron';
 import { Logger } from '../../core/Logger';
 import { UPLOAD_SELECTORS, DOUYIN_URLS } from './selectors';
-import { getCookiePath, cookieExists } from './cookie';
+import { getCookiePath, saveCookie } from './cookie';
 import type { UploadContext, UploadResult } from '../base/types';
 import { TopicSanitizer } from '../base/TopicSanitizer';
-import { PageRiskControl } from '../base/RiskControl';
+import { PageRiskControl, EmbeddedRiskControl } from '../base/RiskControl';
 import { toPlatformError, NetworkError, AuthError, SelectorError, ValidationError, ContentRejectedError } from '../base/PlatformError';
 import { getDebugRecorder } from '../base/DebugRecorder';
+import { browserManager } from '../../services/embedded-browser/browser-manager';
+import { createBrowserLauncher } from '../../services/browser-launcher';
+import type { IBrowserLauncher, BrowserConfig } from '../../services/types';
 
 const logger = new Logger('DouyinUpload');
 
@@ -22,20 +26,1392 @@ const CHROME_ARGS = [
   '--no-sandbox',
 ];
 
-const UPLOAD_TIMEOUT = 120000;
-const MAX_RETRIES = 3;
+type NormalizedBrowserMode = 'embedded' | 'chrome' | 'fingerprint';
+
+type TextPattern = string | RegExp;
+
+interface EmbeddedUploadStatus {
+  success: boolean;
+  message?: string;
+}
+
+type EmbeddedPublishState = 'success' | 'failed' | 'timeout';
+
+function normalizeBrowserMode(mode?: UploadContext['browserMode']): NormalizedBrowserMode {
+  if (mode === 'external_chrome' || mode === 'chrome') return 'chrome';
+  if (mode === 'external_fingerprint' || mode === 'fingerprint') return 'fingerprint';
+  return 'embedded';
+}
+
+function normalizeLocalFilePath(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  return value.replace(/^local-file:\/\//, '');
+}
+
+function formatScheduleDateTime(value?: string | Date | null): string | undefined {
+  if (!value) return undefined;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+}
+
+function shouldDebugSteps(ctx: UploadContext): boolean {
+  return ctx.debugSteps === true && process.env.NODE_ENV !== 'production';
+}
+
+function shouldKeepBrowserOnPublishFailure(): boolean {
+  return process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === '1'
+    || process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === 'true';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function escapeRegExpText(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function patternToSource(pattern: TextPattern): { source: string; flags: string } {
+  return typeof pattern === 'string'
+    ? { source: escapeRegExpText(pattern), flags: '' }
+    : { source: pattern.source, flags: pattern.flags };
+}
+
+async function runEmbeddedDebugStep<T>(
+  wc: WebContents,
+  ctx: UploadContext,
+  label: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  if (!shouldDebugSteps(ctx)) {
+    return action();
+  }
+
+  logger.info(`[DouyinDebug] 开始: ${label}`);
+  await showEmbeddedDebugStep(wc, label, 'running');
+  try {
+    const result = await action();
+    logger.info(`[DouyinDebug] 完成: ${label}`);
+    await showEmbeddedDebugStep(wc, label, 'done');
+    await sleep(500);
+    return result;
+  } catch (error) {
+    const message = errorMessage(error);
+    logger.error(`[DouyinDebug] 失败: ${label} - ${message}`);
+    await showEmbeddedDebugStep(wc, label, 'failed', message);
+    await sleep(800);
+    throw error;
+  }
+}
+
+async function showEmbeddedDebugStep(
+  wc: WebContents,
+  label: string,
+  status: 'running' | 'done' | 'failed',
+  detail = '',
+): Promise<void> {
+  if (wc.isDestroyed()) return;
+  await wc.executeJavaScript(`
+    (() => {
+      const payload = ${JSON.stringify({ label, status, detail })};
+      const color = payload.status === 'failed' ? '#d93025' : payload.status === 'done' ? '#188038' : '#1a73e8';
+      let box = document.getElementById('matrixflow-douyin-debug');
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'matrixflow-douyin-debug';
+        box.style.cssText = [
+          'position:fixed',
+          'right:16px',
+          'bottom:16px',
+          'z-index:2147483647',
+          'max-width:360px',
+          'padding:12px 14px',
+          'border-radius:8px',
+          'box-shadow:0 8px 24px rgba(0,0,0,.18)',
+          'font:13px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif',
+          'color:#202124',
+          'background:#fff',
+          'border:1px solid rgba(0,0,0,.12)'
+        ].join(';');
+        document.body.appendChild(box);
+      }
+      box.textContent = '';
+      const title = document.createElement('div');
+      title.textContent = 'MatrixFlow 抖音发布调试';
+      title.style.cssText = 'font-weight:600;color:' + color;
+      const step = document.createElement('div');
+      step.textContent = payload.label;
+      step.style.marginTop = '4px';
+      box.appendChild(title);
+      box.appendChild(step);
+      if (payload.detail) {
+        const detail = document.createElement('div');
+        detail.textContent = payload.detail;
+        detail.style.cssText = 'margin-top:4px;color:#5f6368;word-break:break-all';
+        box.appendChild(detail);
+      }
+    })()
+  `, true).catch(() => undefined);
+}
+
+async function runPageDebugStep<T>(
+  page: Page,
+  ctx: UploadContext,
+  label: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  if (!shouldDebugSteps(ctx)) {
+    return action();
+  }
+
+  logger.info(`[DouyinDebug] 开始: ${label}`);
+  await showPageDebugStep(page, label, 'running');
+  try {
+    const result = await action();
+    logger.info(`[DouyinDebug] 完成: ${label}`);
+    await showPageDebugStep(page, label, 'done');
+    await page.waitForTimeout(500).catch(() => undefined);
+    return result;
+  } catch (error) {
+    const message = errorMessage(error);
+    logger.error(`[DouyinDebug] 失败: ${label} - ${message}`);
+    await showPageDebugStep(page, label, 'failed', message);
+    await page.waitForTimeout(800).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function showPageDebugStep(
+  page: Page,
+  label: string,
+  status: 'running' | 'done' | 'failed',
+  detail = '',
+): Promise<void> {
+  await page.evaluate((payload: { label: string; status: string; detail: string }) => {
+    const doc = (globalThis as any).document;
+    const color = payload.status === 'failed' ? '#d93025' : payload.status === 'done' ? '#188038' : '#1a73e8';
+    let box = doc.getElementById('matrixflow-douyin-debug');
+    if (!box) {
+      box = doc.createElement('div');
+      box.id = 'matrixflow-douyin-debug';
+      box.style.cssText = [
+        'position:fixed',
+        'right:16px',
+        'bottom:16px',
+        'z-index:2147483647',
+        'max-width:360px',
+        'padding:12px 14px',
+        'border-radius:8px',
+        'box-shadow:0 8px 24px rgba(0,0,0,.18)',
+        'font:13px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif',
+        'color:#202124',
+        'background:#fff',
+        'border:1px solid rgba(0,0,0,.12)',
+      ].join(';');
+      doc.body.appendChild(box);
+    }
+    box.textContent = '';
+    const title = doc.createElement('div');
+    title.textContent = 'MatrixFlow 抖音发布调试';
+    title.style.cssText = 'font-weight:600;color:' + color;
+    const step = doc.createElement('div');
+    step.textContent = payload.label;
+    step.style.marginTop = '4px';
+    box.appendChild(title);
+    box.appendChild(step);
+    if (payload.detail) {
+      const detail = doc.createElement('div');
+      detail.textContent = payload.detail;
+      detail.style.cssText = 'margin-top:4px;color:#5f6368;word-break:break-all';
+      box.appendChild(detail);
+    }
+  }, { label, status, detail }).catch(() => undefined);
+}
+
+async function launchPatchrightContext(
+  ctx: UploadContext,
+  userDataDir: string,
+  browserMode: NormalizedBrowserMode,
+  headless: boolean,
+  slowMo: number,
+): Promise<{ context: BrowserContext; close: () => Promise<void> }> {
+  let launcher: IBrowserLauncher | null = null;
+
+  if (browserMode === 'fingerprint') {
+    if (!ctx.fingerprintId) {
+      throw new ValidationError('账号未绑定指纹浏览器配置', undefined, 'douyin');
+    }
+    const config: BrowserConfig = { type: 'fingerprint', fingerprintId: ctx.fingerprintId, headless };
+    launcher = createBrowserLauncher(config);
+    const context = await launcher.launch(config, ctx.accountId);
+    return { context, close: () => launcher!.close() };
+  }
+
+  if (browserMode === 'chrome') {
+    const config: BrowserConfig = {
+      type: 'chrome',
+      executablePath: ctx.chromePath || undefined,
+      headless,
+    };
+    launcher = createBrowserLauncher(config);
+    const context = await launcher.launch(config, ctx.accountId);
+    return { context, close: () => launcher!.close() };
+  }
+
+  const context = await chromium.launchPersistentContext(userDataDir, {
+    channel: 'chrome',
+    headless,
+    slowMo,
+    args: CHROME_ARGS,
+  });
+  return { context, close: () => context.close() };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ============================================================
+// EMBEDDED MODE (Primary)
+// ============================================================
+
+async function uploadVideoInEmbeddedBrowser(ctx: UploadContext): Promise<UploadResult> {
+  const { videoPath, title, description, tags, accountId } = ctx;
+  logger.info('使用内嵌浏览器执行抖音发布任务');
+  let publishSucceeded = false;
+  let failureMessage = '';
+  let debugWebContents: WebContents | undefined;
+
+  try {
+    if (browserManager.hasTab(accountId) && !browserManager.hasStandaloneTab(accountId)) {
+      await browserManager.closeTab(accountId);
+    }
+
+    const view = browserManager.hasStandaloneTab(accountId)
+      ? browserManager.getView(accountId)
+      : await browserManager.createTab(accountId, 'douyin', DOUYIN_URLS.upload);
+
+    if (!view) {
+      return { success: false, message: '账号浏览器弹窗不存在' };
+    }
+
+    browserManager.switchTab(accountId);
+
+    const wc = view.webContents;
+    debugWebContents = wc;
+    const recorder = getDebugRecorder();
+
+    await runEmbeddedDebugStep(wc, ctx, '加载抖音发布页', async () => {
+      if (!wc.getURL().includes('/content/upload') && !wc.getURL().includes('/content/post')) {
+        await wc.loadURL(DOUYIN_URLS.upload);
+      }
+      await waitForEmbeddedReady(wc, 30000);
+      await waitForEmbeddedUploadSurface(wc, 60000);
+    });
+
+    await recorder.recordStep('发布页加载完成', async () => {
+      return { url: wc.getURL() };
+    });
+
+    const isOnUploadPage = wc.getURL().includes('/content/upload') || wc.getURL().includes('/content/post');
+    if (!isOnUploadPage) {
+      failureMessage = '账号浏览器弹窗未进入抖音发布页，请先完成账号登录';
+      return { success: false, message: '账号浏览器弹窗未进入抖音发布页，请先完成账号登录' };
+    }
+
+    await runEmbeddedDebugStep(wc, ctx, '选择视频文件', async () => {
+      await setEmbeddedFileInput(wc, videoPath);
+      logger.info(`账号浏览器弹窗已选择视频文件: ${videoPath}`);
+      await sleep(2000);
+    });
+
+    await recorder.recordStep('账号浏览器文件选择完成', async () => {
+      return { videoPath };
+    });
+
+    const uploadComplete = await runEmbeddedDebugStep(wc, ctx, '等待视频上传完成', async () => (
+      waitForEmbeddedUploadComplete(wc, 180000)
+    ));
+    if (!uploadComplete.success) {
+      failureMessage = uploadComplete.message || '视频上传失败';
+      return { success: false, message: failureMessage };
+    }
+
+    await runEmbeddedDebugStep(wc, ctx, '填写标题、作品描述和话题', async () => {
+      await closeEmbeddedGuide(wc);
+      await fillEmbeddedDescriptionAndTags(wc, title, description, tags);
+    });
+
+    await recorder.recordStep('账号浏览器填写描述话题完成', async () => {
+      return true;
+    });
+
+    // Handle cover selection
+    await runEmbeddedDebugStep(wc, ctx, '处理封面设置', async () => {
+      await handleEmbeddedCover(wc, ctx.coverPath);
+    });
+
+    // Handle schedule if needed
+    const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
+    if (scheduleTime) {
+      await runEmbeddedDebugStep(wc, ctx, '设置定时发布', async () => {
+        const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
+        if (!mapped) throw new ValidationError('未映射抖音定时发布时间', undefined, 'douyin');
+      });
+    }
+
+    await recorder.recordStep('账号浏览器发布选项设置完成', async () => {
+      return true;
+    });
+
+    const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
+      logger.info('所有元素设置完成，等待10秒后发布...');
+      await sleep(10000);
+      return clickEmbeddedPublish(wc, 30000);
+    });
+
+    if (publishState === 'success') {
+      publishSucceeded = true;
+      logger.info('账号浏览器弹窗抖音发布成功');
+      return { success: true, message: '视频发布成功', videoId: extractVideoId(wc.getURL()) };
+    }
+
+    failureMessage = publishState === 'failed' ? '视频发布失败' : '视频发布超时';
+    return { success: false, message: failureMessage };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failureMessage = message;
+    logger.error(`账号浏览器弹窗发布过程出错: ${message}`);
+    return { success: false, message: `账号浏览器弹窗发布过程出错: ${message}` };
+  } finally {
+    if (!publishSucceeded && debugWebContents && !debugWebContents.isDestroyed()) {
+      await logEmbeddedPublishDiagnostics(debugWebContents, failureMessage || '未知失败原因');
+    }
+    if (!publishSucceeded && shouldKeepBrowserOnPublishFailure()) {
+      logger.warn(`已保留抖音发布失败浏览器现场: accountId=${accountId} reason=${failureMessage || '未知失败原因'}`);
+    } else if (browserManager.hasStandaloneTab(accountId)) {
+      await browserManager.closeTab(accountId).catch((closeError) => {
+        const reason = publishSucceeded ? '成功' : '失败';
+        logger.warn(`关闭抖音发布${reason}弹窗失败: ${closeError}`);
+      });
+    }
+  }
+}
+
+async function waitForEmbeddedReady(wc: WebContents, timeoutMs: number): Promise<void> {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    if (wc.isDestroyed()) {
+      throw new SelectorError('内嵌浏览器页面已关闭', undefined, 'douyin');
+    }
+
+    const ready = await wc.executeJavaScript('document.readyState !== "loading"').catch(() => false);
+    if (!wc.isLoadingMainFrame() && ready) {
+      return;
+    }
+
+    await sleep(500);
+  }
+
+  throw new SelectorError('等待内嵌浏览器页面加载超时', undefined, 'douyin');
+}
+
+async function waitForEmbeddedUploadSurface(wc: WebContents, timeoutMs: number): Promise<void> {
+  logger.info('等待抖音发布页上传控件渲染...');
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    if (wc.isDestroyed()) {
+      throw new SelectorError('账号浏览器弹窗页面已关闭', undefined, 'douyin');
+    }
+
+    const state = await wc.executeJavaScript(`
+      (() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const bodyText = document.body?.innerText || '';
+        const fileInputs = document.querySelectorAll('input[type="file"]');
+        const uploadButtons = Array.from(document.querySelectorAll('button, [role="button"], label, div'))
+          .filter((el) => isVisible(el) && /上传视频|选择视频|上传/.test((el.innerText || el.textContent || '').trim()));
+        return {
+          url: location.href,
+          fileInputCount: fileInputs.length,
+          uploadButtonCount: uploadButtons.length,
+          loginVisible: /扫码登录|登录后|请登录/.test(bodyText),
+          publishPageVisible: /上传视频|选择视频|发布作品|作品描述|封面设置|标题/.test(bodyText),
+        };
+      })()
+    `, true).catch(() => ({
+      url: wc.getURL(),
+      fileInputCount: 0,
+      uploadButtonCount: 0,
+      loginVisible: false,
+      publishPageVisible: false,
+    })) as {
+      url: string;
+      fileInputCount: number;
+      uploadButtonCount: number;
+      loginVisible: boolean;
+      publishPageVisible: boolean;
+    };
+
+    if (!state.url.includes('/content/upload') && !state.url.includes('/content/post') && Date.now() - start > 3000) {
+      await wc.loadURL(DOUYIN_URLS.upload).catch(() => undefined);
+      await waitForEmbeddedReady(wc, 30000).catch(() => undefined);
+    }
+
+    if (state.loginVisible) {
+      throw new AuthError('账号浏览器弹窗显示登录页，请先完成抖音账号登录', undefined, 'douyin');
+    }
+
+    if (state.fileInputCount > 0 || state.uploadButtonCount > 0 || state.publishPageVisible) {
+      logger.info(`抖音发布页上传区域已就绪: inputs=${state.fileInputCount} buttons=${state.uploadButtonCount}`);
+      return;
+    }
+
+    await sleep(1000);
+  }
+
+  throw new SelectorError(`等待抖音发布页上传控件超时: url=${wc.getURL()}`, undefined, 'douyin');
+}
+
+async function setEmbeddedFileInput(wc: WebContents, videoPath: string): Promise<void> {
+  const resolvedPath = path.resolve(videoPath);
+  if (!fs.existsSync(resolvedPath)) {
+    throw new ValidationError(`视频文件不存在: ${resolvedPath}`, undefined, 'douyin');
+  }
+
+  const shouldDetach = await attachDebuggerIfNeeded(wc);
+  try {
+    const start = Date.now();
+    let nodeId: number | null = null;
+
+    while (Date.now() - start < 30000) {
+      nodeId = await findEmbeddedFileInputNodeId(wc, 'video');
+      if (nodeId) break;
+      await sleep(1000);
+    }
+
+    if (nodeId) {
+      await wc.debugger.sendCommand('DOM.setFileInputFiles', {
+        nodeId,
+        files: [resolvedPath],
+      });
+      return;
+    }
+
+    const intercepted = await setFileThroughInterceptedChooser(wc, resolvedPath);
+    if (intercepted) return;
+
+    const diagnostics = await getEmbeddedUploadDiagnostics(wc);
+    throw new SelectorError(`未找到抖音视频上传控件: ${diagnostics}`, undefined, 'douyin');
+  } finally {
+    if (shouldDetach && wc.debugger.isAttached()) {
+      wc.debugger.detach();
+    }
+  }
+}
+
+async function attachDebuggerIfNeeded(wc: WebContents): Promise<boolean> {
+  if (wc.debugger.isAttached()) {
+    return false;
+  }
+  wc.debugger.attach('1.3');
+  return true;
+}
+
+async function findEmbeddedFileInputNodeId(wc: WebContents, kind: 'video' | 'image' | 'any' = 'any'): Promise<number | null> {
+  const documentResult = await wc.debugger.sendCommand('DOM.getDocument', {
+    depth: -1,
+    pierce: true,
+  }) as { root?: { nodeId?: number } };
+  const rootNodeId = documentResult.root?.nodeId;
+  if (!rootNodeId) return null;
+
+  const selectors = kind === 'image'
+    ? ['input[type="file"][accept*="image"]', 'input[type="file"]']
+    : kind === 'video'
+      ? [
+        "div[class^='container'] input[type='file']",
+        'input[type="file"][accept*="video"]',
+        'input[type="file"][accept*="mp4"]',
+        'input[type="file"][accept*=".mp4"]',
+        'input[type="file"]',
+      ]
+      : ['input[type="file"]'];
+
+  for (const selector of selectors) {
+    const result = await wc.debugger.sendCommand('DOM.querySelector', {
+      nodeId: rootNodeId,
+      selector,
+    }) as { nodeId?: number };
+
+    if (result.nodeId && result.nodeId > 0) {
+      return result.nodeId;
+    }
+  }
+
+  return null;
+}
+
+async function setFileThroughInterceptedChooser(wc: WebContents, resolvedPath: string): Promise<boolean> {
+  await wc.debugger.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true }).catch(() => undefined);
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    let timeout: NodeJS.Timeout | null = null;
+
+    const finish = (success: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      wc.debugger.off('message', onMessage);
+      wc.debugger.sendCommand('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);
+      resolve(success);
+    };
+
+    const trySetByExistingNode = async () => {
+      const nodeId = await findEmbeddedFileInputNodeId(wc, 'video').catch(() => null);
+      if (!nodeId) return false;
+      await wc.debugger.sendCommand('DOM.setFileInputFiles', {
+        nodeId,
+        files: [resolvedPath],
+      });
+      return true;
+    };
+
+    const onMessage = async (_event: unknown, method: string, params: { backendNodeId?: number } = {}) => {
+      if (method !== 'Page.fileChooserOpened') return;
+
+      try {
+        if (params.backendNodeId) {
+          await wc.debugger.sendCommand('DOM.setFileInputFiles', {
+            backendNodeId: params.backendNodeId,
+            files: [resolvedPath],
+          });
+          finish(true);
+          return;
+        }
+
+        finish(await trySetByExistingNode());
+      } catch (error) {
+        logger.warn(`抖音文件选择器拦截设置文件失败: ${error}`);
+        finish(false);
+      }
+    };
+
+    wc.debugger.on('message', onMessage);
+
+    clickEmbeddedUploadEntry(wc)
+      .then(async (clicked) => {
+        if (!clicked) {
+          finish(await trySetByExistingNode().catch(() => false));
+        }
+      })
+      .catch(() => finish(false));
+
+    timeout = setTimeout(async () => {
+      finish(await trySetByExistingNode().catch(() => false));
+    }, 10000);
+  });
+}
+
+async function clickEmbeddedUploadEntry(wc: WebContents): Promise<boolean> {
+  return await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const textOf = (el) => (el.innerText || el.textContent || '').trim();
+      const selectorCandidates = [
+        "div[class^='container']",
+        '[class*="upload"]',
+        '[class*="Upload"]',
+        'button',
+      ];
+
+      for (const selector of selectorCandidates) {
+        const els = Array.from(document.querySelectorAll(selector)).filter((el) => isVisible(el));
+        const uploadEl = els.find((el) => /上传视频|选择视频|上传/.test(textOf(el)));
+        if (uploadEl) {
+          const clickable = uploadEl.closest?.('button, [role="button"], label') || uploadEl;
+          if (clickable instanceof HTMLElement) {
+            clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
+            clickable.click();
+            return true;
+          }
+        }
+      }
+
+      const candidates = Array.from(document.querySelectorAll('button, [role="button"], label, div, span'))
+        .filter((el) => isVisible(el) && /上传视频|选择视频|上传/.test(textOf(el)));
+      const target = candidates.find((el) => /上传视频|选择视频/.test(textOf(el))) || candidates[0];
+      const clickable = target?.closest?.('button, [role="button"], label') || target;
+      if (clickable instanceof HTMLElement) {
+        clickable.click();
+        return true;
+      }
+      return false;
+    })()
+  `, true).catch(() => false);
+}
+
+async function getEmbeddedUploadDiagnostics(wc: WebContents): Promise<string> {
+  const diagnostic = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const buttons = Array.from(document.querySelectorAll('button, [role="button"], label, div, span'))
+        .filter(isVisible)
+        .slice(0, 8)
+        .map((el) => (el.innerText || el.textContent || el.className || '').trim().slice(0, 40))
+        .filter(Boolean);
+      return {
+        url: location.href,
+        title: document.title,
+        ready: document.readyState,
+        fileInputCount: document.querySelectorAll('input[type="file"]').length,
+        buttons,
+      };
+    })()
+  `, true).catch(() => null) as {
+    url?: string;
+    title?: string;
+    ready?: string;
+    fileInputCount?: number;
+    buttons?: string[];
+  } | null;
+
+  if (!diagnostic) return `url=${wc.getURL()}`;
+  return `url=${diagnostic.url || wc.getURL()}, title=${diagnostic.title || ''}, ready=${diagnostic.ready || ''}, fileInputs=${diagnostic.fileInputCount ?? 0}, buttons=${(diagnostic.buttons || []).join('|')}`;
+}
+
+async function logEmbeddedPublishDiagnostics(wc: WebContents, reason: string): Promise<void> {
+  const diagnostic = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const textOf = (el) => (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
+      const visibleTexts = Array.from(document.querySelectorAll('button, [role="button"], label, [class*="radio"], [class*="switch"], [class*="zone"]'))
+        .filter((el) => el instanceof HTMLElement && isVisible(el))
+        .map(textOf)
+        .filter(Boolean)
+        .slice(0, 40);
+      return {
+        url: location.href,
+        title: document.title,
+        ready: document.readyState,
+        bodyLength: document.body?.innerText?.length || 0,
+        visibleTexts,
+      };
+    })()
+  `, true).catch((error) => ({ error: error instanceof Error ? error.message : String(error), url: wc.getURL() })) as unknown;
+
+  logger.warn(`[DouyinDebug] 发布失败页面诊断: reason=${reason} data=${JSON.stringify(diagnostic)}`);
+}
+
+async function closeEmbeddedGuide(wc: WebContents): Promise<void> {
+  await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const clickByText = (patterns) => {
+        const candidates = Array.from(document.querySelectorAll('button, [role="button"], span, div'))
+          .filter((el) => isVisible(el));
+        for (const el of candidates) {
+          const text = (el.innerText || el.textContent || '').trim();
+          if (patterns.some((pattern) => pattern.test(text))) {
+            const clickable = el.closest('button, [role="button"]') || el;
+            if (clickable instanceof HTMLElement) {
+              clickable.click();
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+
+      if (clickByText([/^我知道了$/, /^知道了$/, /^跳过$/])) {
+        return true;
+      }
+      return false;
+    })()
+  `, true).catch(() => false);
+}
+
+async function setEmbeddedTextFieldByLabel(
+  wc: WebContents,
+  labelPatterns: TextPattern[],
+  placeholderPatterns: TextPattern[],
+  value: string,
+  options: { preferMultiline?: boolean; allowFallback?: boolean } = {},
+): Promise<boolean> {
+  const payload = {
+    labels: labelPatterns.map(patternToSource),
+    placeholders: placeholderPatterns.map(patternToSource),
+    value,
+    preferMultiline: options.preferMultiline === true,
+    allowFallback: options.allowFallback === true,
+  };
+
+  return await wc.executeJavaScript(`
+    (() => {
+      const payload = ${JSON.stringify(payload)};
+      const labelRegexes = payload.labels.map((p) => new RegExp(p.source, p.flags));
+      const placeholderRegexes = payload.placeholders.map((p) => new RegExp(p.source, p.flags));
+      const editableSelector = 'textarea, input[type="text"], input:not([type]), [contenteditable="true"], [role="textbox"]';
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const textOf = (el) => (el.innerText || el.textContent || '').trim();
+      const isMultiline = (el) => el instanceof HTMLTextAreaElement
+        || el.getAttribute('contenteditable') === 'true'
+        || el.getAttribute('role') === 'textbox';
+      const editables = Array.from(document.querySelectorAll(editableSelector))
+        .filter((el) => el instanceof HTMLElement && isVisible(el) && !el.matches('[disabled], [readonly], [type="hidden"]'));
+      const matchesEditable = (el) => {
+        if (payload.preferMultiline && !isMultiline(el)) return false;
+        const attrs = [
+          el.getAttribute('placeholder') || '',
+          el.getAttribute('aria-label') || '',
+          el.getAttribute('data-placeholder') || '',
+          el.getAttribute('name') || '',
+          el.getAttribute('class') || '',
+        ].join(' ');
+        return placeholderRegexes.some((pattern) => pattern.test(attrs));
+      };
+      const setText = (target) => {
+        if (!(target instanceof HTMLElement)) return false;
+        target.scrollIntoView({ block: 'center', inline: 'nearest' });
+        target.focus();
+
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          const prototype = target instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+          if (setter) {
+            setter.call(target, payload.value);
+          } else {
+            target.value = payload.value;
+          }
+          target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: payload.value }));
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        document.execCommand('delete');
+        target.innerText = payload.value;
+        target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: payload.value }));
+        target.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      };
+
+      const placeholderTarget = editables.find(matchesEditable);
+      if (placeholderTarget) return setText(placeholderTarget);
+
+      const labels = Array.from(document.querySelectorAll('label, span, div, p'))
+        .filter((el) => {
+          if (!(el instanceof HTMLElement) || !isVisible(el)) return false;
+          const text = textOf(el);
+          return text.length > 0 && text.length <= 80 && labelRegexes.some((pattern) => pattern.test(text));
+        })
+        .sort((a, b) => textOf(a).length - textOf(b).length);
+
+      for (const label of labels) {
+        let node = label;
+        for (let depth = 0; node && depth < 7; depth += 1) {
+          const candidates = Array.from(node.querySelectorAll(editableSelector))
+            .filter((el) => el instanceof HTMLElement && isVisible(el) && (!payload.preferMultiline || isMultiline(el)));
+          if (candidates.length > 0) {
+            return setText(candidates[0]);
+          }
+          node = node.parentElement;
+        }
+      }
+
+      if (payload.allowFallback) {
+        const fallback = editables.find((el) => !payload.preferMultiline || isMultiline(el));
+        if (fallback) return setText(fallback);
+      }
+      return false;
+    })()
+  `, true).catch(() => false) as boolean;
+}
+
+async function fillEmbeddedDescriptionAndTags(
+  wc: WebContents,
+  title: string,
+  description?: string,
+  tags?: string[],
+): Promise<void> {
+  logger.info('在内嵌浏览器中填写抖音视频标题、描述和话题...');
+
+  const titleText = (title || '未命名视频').trim();
+  const normalizedTags = TopicSanitizer.cleanTopics(tags ?? [], { maxTopics: 5, platform: 'douyin' });
+  const descriptionText = description?.trim() ?? '';
+  const riskControl = new EmbeddedRiskControl(wc);
+
+  // Fill title
+  const titleSet = await setEmbeddedTextFieldByLabel(
+    wc,
+    [/标题/, /^标题$/],
+    [/标题/, /填写标题/, /输入标题/],
+    titleText,
+  );
+  if (!titleSet) {
+    logger.warn('未找到抖音标题输入框，将标题合并到描述中');
+  }
+
+  // Fill description
+  const descContent = titleSet
+    ? descriptionText
+    : [titleText, descriptionText].filter(Boolean).join('\n');
+
+  if (descContent) {
+    const descSet = await riskControl.humanizedFillField({
+      labelPatterns: [/作品描述/, /^描述$/, /视频描述/, /文案/, /正文/, /说点什么/],
+      placeholderPatterns: [/作品描述/, /描述/, /视频描述/, /文案/, /正文/, /说点什么/],
+      preferMultiline: true,
+      allowFallback: true,
+    }, descContent);
+
+    if (!descSet) {
+      logger.warn('未找到抖音作品描述框');
+    }
+  }
+
+  // Add tags
+  if (normalizedTags.length > 0) {
+    await riskControl.humanizedAppendTags(normalizedTags, {
+      newlineBeforeFirst: descContent.length > 0,
+      maxTags: 5,
+    });
+    for (const tag of normalizedTags) {
+      logger.info(`抖音话题已回车确认: #${tag}`);
+    }
+  }
+}
+
+async function handleEmbeddedCover(wc: WebContents, coverPath?: string): Promise<void> {
+  const normalizedCoverPath = normalizeLocalFilePath(coverPath);
+
+  // Check if cover prompt is visible
+  const coverPromptVisible = await wc.executeJavaScript(`
+    (() => {
+      const text = document.body?.innerText || '';
+      return /请设置封面后再发布/.test(text);
+    })()
+  `, true).catch(() => false);
+
+  if (!coverPromptVisible) {
+    return;
+  }
+
+  logger.info('检测到封面提示，自动选择推荐封面');
+
+  // Click "选择封面" button
+  const coverBtnClicked = await clickEmbeddedText(wc, [/选择封面/]);
+  if (!coverBtnClicked) {
+    logger.warn('未找到封面选择按钮');
+    return;
+  }
+
+  await sleep(1000);
+
+  if (normalizedCoverPath && fs.existsSync(normalizedCoverPath)) {
+    // Upload custom cover
+    await clickEmbeddedText(wc, [/本地上传/, /上传封面/]);
+    await sleep(500);
+
+    const shouldDetach = await attachDebuggerIfNeeded(wc);
+    try {
+      const nodeId = await findEmbeddedFileInputNodeId(wc, 'image');
+      if (nodeId) {
+        await wc.debugger.sendCommand('DOM.setFileInputFiles', {
+          nodeId,
+          files: [normalizedCoverPath],
+        });
+      }
+    } finally {
+      if (shouldDetach && wc.debugger.isAttached()) {
+        wc.debugger.detach();
+      }
+    }
+
+    await sleep(1000);
+  }
+
+  // Confirm cover selection
+  await clickEmbeddedText(wc, [/^确定$/, /^完成$/]);
+  await sleep(500);
+}
+
+async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): Promise<boolean> {
+  logger.info(`设置内嵌抖音定时发布时间: ${scheduleTime}`);
+
+  // Click "定时发布" radio
+  const selected = await clickEmbeddedText(wc, [/定时发布/]);
+  if (!selected) {
+    logger.warn('未找到抖音定时发布入口');
+    return false;
+  }
+
+  await sleep(800);
+
+  // Find and fill the datetime input
+  const filled = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const input = Array.from(document.querySelectorAll('input'))
+        .find((el) => {
+          if (!isVisible(el)) return false;
+          const placeholder = el.getAttribute('placeholder') || '';
+          const type = el.getAttribute('type') || '';
+          return /日期和时间|日期|时间/.test(placeholder) || type === 'datetime-local';
+        });
+      if (!(input instanceof HTMLInputElement)) return false;
+      input.scrollIntoView({ block: 'center', inline: 'nearest' });
+      input.focus();
+      return true;
+    })()
+  `, true).catch(() => false);
+
+  if (!filled) {
+    logger.warn('未找到抖音定时发布时间输入框');
+    return false;
+  }
+
+  await wc.insertText(scheduleTime);
+  await sleep(800);
+
+  // Click confirm button
+  await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const confirmBtn = Array.from(document.querySelectorAll('button, [role="button"]'))
+        .find((el) => {
+          if (!isVisible(el)) return false;
+          const text = (el.innerText || el.textContent || '').trim();
+          return /^确定$|^确认$|^完成$/.test(text);
+        });
+      if (confirmBtn instanceof HTMLElement) {
+        confirmBtn.click();
+        return true;
+      }
+      return false;
+    })()
+  `, true).catch(() => {});
+
+  return true;
+}
+
+async function clickEmbeddedText(wc: WebContents, patterns: TextPattern[]): Promise<boolean> {
+  const serializedPatterns = patterns.map(patternToSource);
+  return await wc.executeJavaScript(`
+    (() => {
+      const patterns = ${JSON.stringify(serializedPatterns)}.map((p) => new RegExp(p.source, p.flags));
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const candidates = Array.from(document.querySelectorAll('button, [role="button"], label, span, div, li, p'))
+        .filter((el) => {
+          if (!isVisible(el)) return false;
+          const text = (el.innerText || el.textContent || '').trim();
+          return text.length > 0 && text.length <= 80;
+        })
+        .sort((a, b) => {
+          const at = (a.innerText || a.textContent || '').trim();
+          const bt = (b.innerText || b.textContent || '').trim();
+          return at.length - bt.length;
+        });
+      for (const el of candidates) {
+        const text = (el.innerText || el.textContent || '').trim();
+        if (!patterns.some((pattern) => pattern.test(text))) continue;
+        const clickable = el.closest('button, [role="button"], label, li') || el;
+        if (!(clickable instanceof HTMLElement)) continue;
+        if (clickable.hasAttribute('disabled') || clickable.getAttribute('aria-disabled') === 'true') continue;
+        clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
+        clickable.click();
+        return true;
+      }
+      return false;
+    })()
+  `, true).catch(() => false) as boolean;
+}
+
+async function waitForEmbeddedUploadComplete(
+  wc: WebContents,
+  timeoutMs: number,
+): Promise<EmbeddedUploadStatus> {
+  logger.info('等待内嵌浏览器视频上传完成...');
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const state = await wc.executeJavaScript(`
+      (() => {
+        const bodyText = document.body?.innerText || '';
+        return {
+          failed: /上传失败|上传出错|文件异常|格式不支持/.test(bodyText),
+          uploading: /上传中|正在上传|处理中|转码中/.test(bodyText),
+          hasPublishArea: /发布|发布时间|封面设置|标题|作品描述|添加标签/.test(bodyText),
+        };
+      })()
+    `).catch(() => ({ failed: false, uploading: true, hasPublishArea: false })) as {
+      failed: boolean;
+      uploading: boolean;
+      hasPublishArea: boolean;
+    };
+
+    if (state.failed) {
+      return { success: false, message: '视频上传失败' };
+    }
+
+    if (!state.uploading && Date.now() - start > 4000) {
+      logger.info('内嵌浏览器视频上传完成');
+      return { success: true };
+    }
+
+    await sleep(2000);
+  }
+
+  return { success: false, message: '视频上传超时' };
+}
+
+async function clickEmbeddedPublish(wc: WebContents, timeoutMs: number): Promise<EmbeddedPublishState> {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const currentState = await getEmbeddedPublishState(wc);
+    if (currentState !== 'timeout') {
+      return currentState;
+    }
+
+    // Click publish button
+    const clicked = await wc.executeJavaScript(`
+      (() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const candidates = Array.from(document.querySelectorAll('button, [role="button"]'))
+          .filter((el) => isVisible(el));
+        for (const el of candidates) {
+          const text = (el.innerText || el.textContent || '').trim();
+          if (text === '发布') {
+            const clickable = el.closest('button') || el;
+            if (clickable instanceof HTMLElement) {
+              clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
+              clickable.click();
+              return true;
+            }
+          }
+        }
+        return false;
+      })()
+    `, true).catch(() => false);
+
+    if (clicked) {
+      logger.info('已在内嵌浏览器点击抖音发布按钮');
+      await sleep(2000);
+    }
+
+    // Handle any confirm dialogs
+    await clickEmbeddedText(wc, [/确认发布|确定发布|确认/]);
+    await sleep(1000);
+
+    const stateAfterConfirm = await getEmbeddedPublishState(wc);
+    if (stateAfterConfirm !== 'timeout') {
+      return stateAfterConfirm;
+    }
+
+    await sleep(1000);
+  }
+
+  return 'timeout';
+}
+
+async function getEmbeddedPublishState(wc: WebContents): Promise<EmbeddedPublishState> {
+  if (wc.getURL().includes('/content/manage')) {
+    return 'success';
+  }
+
+  const state = await wc.executeJavaScript(`
+    (() => {
+      const bodyText = document.body?.innerText || '';
+      if (/发布成功|提交成功/.test(bodyText)) return 'success';
+      if (/发布失败|提交失败|发布出错|审核失败/.test(bodyText)) return 'failed';
+      return 'timeout';
+    })()
+  `).catch(() => 'timeout') as EmbeddedPublishState;
+
+  return state;
+}
+
+function extractVideoId(url: string): string | undefined {
+  const match = url.match(/\/content\/manage\?.*item_ids=([^&]+)/);
+  return match ? match[1] : undefined;
+}
+
+// ============================================================
+// PATCHRIGHT MODE (Fallback)
+// ============================================================
 
 function getUserDataDir(accountId: string): string {
-  const baseDir = path.join(process.cwd(), 'data', 'user_data', 'douyin');
-  if (!fs.existsSync(baseDir)) {
-    fs.mkdirSync(baseDir, { recursive: true });
+  const { app } = require('electron');
+  const userDataPath = app.getPath('userData');
+  const dir = path.join(userDataPath, 'browser_data', 'douyin', accountId);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
-  return path.join(baseDir, accountId);
+  const singletonLock = path.join(dir, 'SingletonLock');
+  if (fs.existsSync(singletonLock)) {
+    fs.unlinkSync(singletonLock);
+  }
+  return dir;
+}
+
+async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<UploadResult> {
+  const { videoPath, title, description, tags, accountId } = ctx;
+  logger.info('使用账号独立弹窗执行抖音发布任务');
+  let publishSucceeded = false;
+  let debugWebContents: WebContents | undefined;
+
+  try {
+    if (browserManager.hasTab(accountId) && !browserManager.hasStandaloneTab(accountId)) {
+      await browserManager.closeTab(accountId);
+    }
+
+    const view = browserManager.hasStandaloneTab(accountId)
+      ? browserManager.getView(accountId)
+      : await browserManager.createTab(accountId, 'douyin', DOUYIN_URLS.upload);
+
+    if (!view) {
+      return { success: false, message: '账号浏览器弹窗不存在' };
+    }
+
+    browserManager.switchTab(accountId);
+
+    const wc = view.webContents;
+    debugWebContents = wc;
+    const recorder = getDebugRecorder();
+
+    await runEmbeddedDebugStep(wc, ctx, '加载抖音发布页', async () => {
+      if (!wc.getURL().includes('/content/upload') && !wc.getURL().includes('/content/post')) {
+        await wc.loadURL(DOUYIN_URLS.upload);
+      }
+      await waitForEmbeddedReady(wc, 30000);
+      await waitForEmbeddedUploadSurface(wc, 60000);
+    });
+
+    await recorder.recordStep('发布页加载完成', async () => {
+      return { url: wc.getURL() };
+    });
+
+    const isOnUploadPage = wc.getURL().includes('/content/upload') || wc.getURL().includes('/content/post');
+    if (!isOnUploadPage) {
+      return { success: false, message: '账号浏览器弹窗未进入抖音发布页，请先完成账号登录' };
+    }
+
+    await runEmbeddedDebugStep(wc, ctx, '选择视频文件', async () => {
+      await setEmbeddedFileInput(wc, videoPath);
+      logger.info(`账号浏览器弹窗已选择视频文件: ${videoPath}`);
+      await sleep(2000);
+    });
+
+    const uploadComplete = await runEmbeddedDebugStep(wc, ctx, '等待视频上传完成', async () => (
+      waitForEmbeddedUploadComplete(wc, 180000)
+    ));
+    if (!uploadComplete.success) {
+      return { success: false, message: uploadComplete.message || '视频上传失败' };
+    }
+
+    await runEmbeddedDebugStep(wc, ctx, '填写标题、作品描述和话题', async () => {
+      await closeEmbeddedGuide(wc);
+      await fillEmbeddedDescriptionAndTags(wc, title, description, tags);
+    });
+
+    await runEmbeddedDebugStep(wc, ctx, '处理封面设置', async () => {
+      await handleEmbeddedCover(wc, ctx.coverPath);
+    });
+
+    const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
+    if (scheduleTime) {
+      await runEmbeddedDebugStep(wc, ctx, '设置定时发布', async () => {
+        const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
+        if (!mapped) throw new ValidationError('未映射抖音定时发布时间', undefined, 'douyin');
+      });
+    }
+
+    const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
+      logger.info('所有元素设置完成，等待10秒后发布...');
+      await sleep(10000);
+      return clickEmbeddedPublish(wc, 30000);
+    });
+
+    if (publishState === 'success') {
+      publishSucceeded = true;
+      logger.info('账号浏览器弹窗抖音发布成功');
+      return { success: true, message: '视频发布成功', videoId: extractVideoId(wc.getURL()) };
+    }
+
+    return { success: false, message: publishState === 'failed' ? '视频发布失败' : '视频发布超时' };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`账号浏览器弹窗发布过程出错: ${message}`);
+    return { success: false, message: `账号浏览器弹窗发布过程出错: ${message}` };
+  } finally {
+    if (!publishSucceeded && debugWebContents && !debugWebContents.isDestroyed()) {
+      await logEmbeddedPublishDiagnostics(debugWebContents, '未知失败原因');
+    }
+    if (!publishSucceeded && shouldKeepBrowserOnPublishFailure()) {
+      logger.warn(`已保留抖音发布失败浏览器现场: accountId=${accountId}`);
+    } else if (browserManager.hasStandaloneTab(accountId)) {
+      await browserManager.closeTab(accountId).catch(() => {});
+    }
+  }
+}
+
+// ============================================================
+// MAIN EXPORT
+// ============================================================
+
+export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
+  const { videoPath, title, description, tags, accountId, headless = false, slowMo = 200 } = ctx;
+
+  if (!fs.existsSync(videoPath)) {
+    return {
+      success: false,
+      message: `视频文件不存在: ${videoPath}`,
+    };
+  }
+
+  const cookiePath = getCookiePath(accountId);
+  if (!fs.existsSync(cookiePath)) {
+    return {
+      success: false,
+      message: `Cookie 文件不存在: ${cookiePath}`,
+    };
+  }
+
+  const browserMode = normalizeBrowserMode(ctx.browserMode);
+  const userDataDir = getUserDataDir(accountId);
+
+  // Embedded mode is primary when not headless
+  if (browserMode === 'embedded' && !headless) {
+    return uploadVideoInEmbeddedBrowser(ctx);
+  }
+
+  logger.info(`启动抖音自动化浏览器: mode=${browserMode} headless=${headless} slowMo=${slowMo}`);
+
+  const launched = await launchPatchrightContext(ctx, userDataDir, browserMode, headless, slowMo);
+  const { context } = launched;
+  context.setDefaultNavigationTimeout(120000);
+  let page: Page | undefined;
+  let uploadSucceeded = false;
+  let failureMessage = '';
+
+  try {
+    const allPages = context.pages();
+    page = allPages.length > 0 ? allPages[0] : await context.newPage();
+
+    logger.info('导航到抖音上传页...');
+    await page.goto(DOUYIN_URLS.upload, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(3000);
+
+    const loginCheck = await page.getByText('扫码登录').isVisible().catch(() => false);
+    if (loginCheck) {
+      throw new AuthError('Cookie 已失效，需要重新登录', undefined, 'douyin');
+    }
+
+    // Select video file
+    const fileInput = page.locator(UPLOAD_SELECTORS.videoFileInput);
+    await fileInput.setInputFiles(videoPath);
+    logger.info(`视频文件已选择: ${videoPath}`);
+
+    // Wait for upload complete
+    const uploadSuccess = await waitForUploadComplete(page);
+    if (!uploadSuccess) {
+      return {
+        success: false,
+        message: '视频上传超时或失败',
+      };
+    }
+
+    // Fill metadata
+    await fillVideoMetadata(page, title, description, tags);
+
+    // Handle cover prompt if visible
+    await handleCoverPrompt(page);
+
+    // Click publish
+    const publishSuccess = await clickPublish(page);
+
+    if (publishSuccess) {
+      await page.waitForTimeout(3000);
+      const currentUrl = page.url();
+      const videoId = extractVideoId(currentUrl);
+      logger.info(`视频发布成功, videoId: ${videoId}`);
+      return {
+        success: true,
+        message: '视频发布成功',
+        videoId,
+      };
+    } else {
+      return {
+        success: false,
+        message: '视频发布失败',
+      };
+    }
+  } catch (error) {
+    const pErr = toPlatformError(error, 'douyin');
+    logger.error('上传过程出错', { error: pErr });
+    return { success: false, message: pErr.userMessage };
+  } finally {
+    if (!uploadSucceeded && !headless && shouldKeepBrowserOnPublishFailure()) {
+      logger.warn(`已保留抖音发布失败浏览器现场: accountId=${accountId}`);
+    } else {
+      await launched.close().catch(() => {});
+    }
+  }
 }
 
 async function waitForUploadComplete(
   page: Page,
-  maxWaitMs: number = UPLOAD_TIMEOUT
+  maxWaitMs: number = 180000
 ): Promise<boolean> {
   const startTime = Date.now();
   const debugRecorder = getDebugRecorder();
@@ -169,7 +1545,7 @@ async function handleCoverPrompt(page: Page): Promise<boolean> {
   }
 }
 
-async function clickPublish(page: Page, maxRetries: number = MAX_RETRIES): Promise<boolean> {
+async function clickPublish(page: Page, maxRetries: number = 3): Promise<boolean> {
   const debugRecorder = getDebugRecorder();
   const rc = new PageRiskControl(page, {
     typingDelayMs: { min: 100, max: 300 },
@@ -215,112 +1591,6 @@ async function clickPublish(page: Page, maxRetries: number = MAX_RETRIES): Promi
     }, { page });
   } catch (error) {
     throw toPlatformError(error, 'douyin');
-  }
-}
-
-function extractVideoId(url: string): string | undefined {
-  const match = url.match(/\/content\/manage\?.*item_ids=([^&]+)/);
-  return match ? match[1] : undefined;
-}
-
-export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
-  const { videoPath, title, description, tags, accountId, headless = false, slowMo = 200 } = ctx;
-  const debugRecorder = getDebugRecorder();
-
-  if (!fs.existsSync(videoPath)) {
-    return {
-      success: false,
-      message: `视频文件不存在: ${videoPath}`,
-    };
-  }
-
-  const cookiePath = getCookiePath(accountId);
-  if (!cookieExists(cookiePath)) {
-    return {
-      success: false,
-      message: `Cookie 文件不存在: ${cookiePath}`,
-    };
-  }
-
-  const userDataDir = getUserDataDir(accountId);
-  const browser = await chromium.launchPersistentContext(userDataDir, {
-    channel: 'chrome',
-    headless,
-    slowMo,
-    args: CHROME_ARGS,
-  });
-
-  try {
-    const page = await browser.newPage();
-    const pageCtx = { page, accountId };
-
-    debugRecorder.setSessionId(`douyin_upload_${accountId}_${Date.now()}`);
-
-    await debugRecorder.recordStep('goto_upload_page', async () => {
-      logger.info('导航到抖音上传页...');
-      await page.goto(DOUYIN_URLS.upload, { waitUntil: 'domcontentloaded' });
-    }, pageCtx);
-
-    const loginCheck = await debugRecorder.recordStep('check_login_status', async () => {
-      const loginButtonVisible = await page.getByText('扫码登录').isVisible().catch(() => false);
-      if (loginButtonVisible) {
-        throw new AuthError('Cookie 已失效，需要重新登录', undefined, 'douyin');
-      }
-      return true;
-    }, pageCtx);
-
-    if (!loginCheck) {
-      return {
-        success: false,
-        message: '登录状态检查失败',
-      };
-    }
-
-    await debugRecorder.recordStep('select_video_file', async () => {
-      const fileInput = page.locator(UPLOAD_SELECTORS.videoFileInput);
-      await fileInput.setInputFiles(videoPath);
-      logger.info(`视频文件已选择: ${videoPath}`);
-    }, pageCtx);
-
-    const uploadSuccess = await waitForUploadComplete(page);
-    if (!uploadSuccess) {
-      return {
-        success: false,
-        message: '视频上传超时或失败',
-      };
-    }
-
-    await fillVideoMetadata(page, title, description, tags);
-
-    const publishSuccess = await clickPublish(page);
-
-    if (publishSuccess) {
-      await debugRecorder.recordStep('extract_video_id', async () => {
-        await page.waitForTimeout(3000);
-        const currentUrl = page.url();
-        const videoId = extractVideoId(currentUrl);
-        logger.info(`视频发布成功, videoId: ${videoId}`);
-        return videoId;
-      }, pageCtx);
-
-      const currentUrl = page.url();
-      return {
-        success: true,
-        message: '视频发布成功',
-        videoId: extractVideoId(currentUrl),
-      };
-    } else {
-      return {
-        success: false,
-        message: '视频发布失败',
-      };
-    }
-  } catch (error) {
-    const pErr = toPlatformError(error, 'douyin');
-    logger.error('上传过程出错', { error: pErr });
-    return { success: false, message: pErr.userMessage };
-  } finally {
-    await browser.close();
   }
 }
 

@@ -2,21 +2,25 @@ export const XHS_URLS = {
   creatorHome: 'https://creator.xiaohongshu.com/',
   publish: 'https://creator.xiaohongshu.com/publish/publish',
   contentManage: 'https://creator.xiaohongshu.com/content/manage',
-  loginPage: 'https://creator.xiaohongshu.com/',
+  loginPage: 'https://creator.xiaohongshu.com/login',
   statsOverview: 'https://creator.xiaohongshu.com/datacenter/overview',
   statsContent: 'https://creator.xiaohongshu.com/datacenter/content',
 } as const;
 
 export const LOGIN_SELECTORS = {
   scanLoginTab: 'get_by_text("扫码登录", exact=true).first',
-  qrCodeImage: '.qrcode-img img, .login-qrcode img, img[src*="qrcode"]',
-  qrCodeContainer: '.qrcode-img, .login-qrcode',
+  qrCodeImage: '.login-box-container img, [class*="qrcode"] img',
+  qrCodeContainer: '[class*="login-box"], .login-box-container',
   phoneLoginText: 'get_by_text("手机登录")',
   scanLoginText: 'get_by_text("扫码登录")',
   qrExpiredText: 'get_by_text("二维码已失效")',
   qrRefreshBtn: '.qrcode-refresh, button:has-text("点击刷新")',
   avatarIndicator: '.user-avatar, .avatar, [class*="avatar"]',
   usernameText: '.user-name, .nickname, [class*="username"]',
+  /** 登录框容器 — 竞品用 div[class*='login-box'] 检测登录状态 */
+  loginBox: 'div[class*="login-box"]',
+  /** 切换到扫码面板的图片按钮 — 竞品用 img.css-wemwzq */
+  loginSwitchImg: 'img.css-wemwzq',
 } as const;
 
 export const UPLOAD_SELECTORS = {

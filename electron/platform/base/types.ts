@@ -30,6 +30,8 @@ export interface CookieResult {
   success: boolean;
   cookiePath: string;
   message: string;
+  nickname?: string;
+  avatarUrl?: string;
 }
 
 export interface LoginOptions {

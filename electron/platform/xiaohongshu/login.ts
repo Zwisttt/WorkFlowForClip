@@ -1,14 +1,18 @@
 import path from 'path';
 import fs from 'fs';
-import type { Page } from 'patchright';
+import type { BrowserContext, Page } from 'patchright';
 import { chromium } from 'patchright';
 import { Logger } from '../../core/Logger';
 import { XHS_URLS, LOGIN_SELECTORS } from './selectors';
 import { getCookiePath, saveCookie, cookieExists } from './cookie';
-import type { CookieResult } from '../base/types';
+import type { CookieResult, LoginOptions } from '../base/types';
 import { PageRiskControl } from '../base/RiskControl';
-import { toPlatformError } from '../base/PlatformError';
 import { getDebugRecorder } from '../base/DebugRecorder';
+import {
+  detectXhsLoginInPage,
+  detectXhsProfileInPage,
+  hasRequiredXhsCookies,
+} from './login-detection';
 
 const logger = new Logger('XhsLogin');
 
@@ -21,6 +25,57 @@ const CHROME_ARGS = [
   '--no-sandbox',
 ];
 
+/** 扫码登录超时时间（5 分钟） */
+const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+/** 二维码轮询间隔 */
+const QR_POLL_INTERVAL_MS = 3000;
+/** 二维码最大轮询次数 */
+const QR_MAX_POLLS = Math.floor(LOGIN_TIMEOUT_MS / QR_POLL_INTERVAL_MS);
+
+async function clearPersistentElectronSession(accountId: string): Promise<void> {
+  try {
+    const { session } = await import('electron');
+    const ses = session.fromPartition(`persist:${accountId}`);
+    await ses.clearStorageData({ storages: ['cookies'] });
+    logger.info(`已清理旧的持久会话: accountId=${accountId}`);
+  } catch (error) {
+    logger.warn(`清理旧的持久会话失败: accountId=${accountId}`, error);
+  }
+}
+
+async function syncCookiesToElectronSession(context: BrowserContext, accountId: string): Promise<void> {
+  const cookies = await context.cookies();
+  if (!hasRequiredXhsCookies(cookies)) {
+    throw new Error('登录完成后缺少必要的 Cookie');
+  }
+
+  const { session } = await import('electron');
+  const ses = session.fromPartition(`persist:${accountId}`);
+  await ses.clearStorageData({ storages: ['cookies'] });
+
+  for (const cookie of cookies) {
+    const host = cookie.domain.replace(/^\./, '');
+    const cookiePath = cookie.path || '/';
+    await ses.cookies.set({
+      url: `${cookie.secure ? 'https' : 'http'}://${host}${cookiePath}`,
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookiePath,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+      expirationDate: cookie.expires > 0 ? cookie.expires : undefined,
+    });
+  }
+
+  logger.info(`已同步 Cookie 到持久会话: accountId=${accountId}, count=${cookies.length}`);
+}
+
+/**
+ * 小红书的登录验证逻辑：
+ * 与视频号不同，小红书登录成功后会停留在创作者中心，
+ * 页面不再出现扫码登录/手机登录 tab。
+ */
 export async function validateExistingCookie(cookiePath: string): Promise<boolean> {
   if (!fs.existsSync(cookiePath)) {
     return false;
@@ -34,32 +89,24 @@ export async function validateExistingCookie(cookiePath: string): Promise<boolea
 
   try {
     const context = await browser.newContext({ storageState: cookiePath });
+    const cookies = await context.cookies('https://creator.xiaohongshu.com');
+    if (!hasRequiredXhsCookies(cookies)) {
+      logger.info('Cookie 验证失败: 缺少必要的 Cookie');
+      return false;
+    }
+
     const page = await context.newPage();
 
-    await page.goto(XHS_URLS.publish, { timeout: 15000 });
+    await page.goto(XHS_URLS.publish, { timeout: 15000, waitUntil: 'domcontentloaded' });
 
-    try {
-      await page.waitForURL(/creator\.xiaohongshu\.com/, { timeout: 8000 });
-    } catch {
-      return false;
+    const detection = await detectXhsLoginInPage(page);
+    if (detection.loggedIn) {
+      logger.info(`Cookie 验证通过: ${detection.reason}`);
+      return true;
     }
 
-    const scanLoginVisible = await page
-      .getByText('扫码登录', { exact: true })
-      .isVisible()
-      .catch(() => false);
-    const phoneLoginVisible = await page
-      .getByText('手机登录', { exact: true })
-      .isVisible()
-      .catch(() => false);
-
-    if (scanLoginVisible || phoneLoginVisible) {
-      logger.info('Cookie 已失效，页面显示了登录界面');
-      return false;
-    }
-
-    logger.info('Cookie 验证通过');
-    return true;
+    logger.info(`Cookie 验证未取得登录态: reason=${detection.reason}, url=${detection.currentUrl ?? page.url()}`);
+    return false;
   } catch (error) {
     logger.error('Cookie 验证失败:', error);
     return false;
@@ -68,18 +115,36 @@ export async function validateExistingCookie(cookiePath: string): Promise<boolea
   }
 }
 
+/**
+ * 从小红书登录页提取二维码图片（参考 social-auto-upload）
+ *
+ * 流程：
+ * 1. 等待 div[class*='login-box'] 出现
+ * 2. 检查是否已有"扫一扫"文字 → 二维码已显示
+ * 3. 没有 → 点击 img.css-wemwzq 切换到扫码面板
+ * 4. 通过 .login-box-container 定位二维码图片
+ */
 async function extractQrCodeSrc(page: Page): Promise<string> {
-  const scanTab = page.getByText('扫码登录', { exact: true }).first();
-  await scanTab.waitFor({ timeout: 30000 });
+  const loginBox = page.locator(LOGIN_SELECTORS.loginBox).first();
+  await loginBox.waitFor({ state: 'visible', timeout: 30000 });
 
-  const qrcodeImg = page.locator(LOGIN_SELECTORS.qrCodeImage).first();
-  await qrcodeImg.waitFor({ state: 'visible', timeout: 30000 });
-  const src = await qrcodeImg.getAttribute('src');
+  const scanText = loginBox.locator('div:has-text("扫一扫")').first();
+  if (!(await scanText.count()) || !(await scanText.isVisible().catch(() => false))) {
+    const switchImg = loginBox.locator(LOGIN_SELECTORS.loginSwitchImg).first();
+    await switchImg.waitFor({ state: 'visible', timeout: 10000 });
+    await switchImg.click();
+    await loginBox.locator('div:has-text("扫一扫")').first().waitFor({ state: 'visible', timeout: 10000 });
+  }
 
+  const qrCodeImg = page.locator(LOGIN_SELECTORS.qrCodeImage).first();
+  await qrCodeImg.waitFor({ state: 'visible', timeout: 30000 });
+
+  const src = await qrCodeImg.getAttribute('src');
   if (!src) {
     throw new Error('未获取到小红书登录二维码地址');
   }
 
+  logger.info('已获取小红书二维码');
   return src;
 }
 
@@ -98,103 +163,154 @@ async function saveQrCodeImage(src: string, accountId: string): Promise<string> 
     const base64Data = src.split(',')[1];
     fs.writeFileSync(qrPath, Buffer.from(base64Data, 'base64'));
   } else if (src.startsWith('http')) {
+    // 小红书二维码可能是网络图片 URL
     const response = await fetch(src);
     const buffer = Buffer.from(await response.arrayBuffer());
     fs.writeFileSync(qrPath, buffer);
   } else {
-    throw new Error(`二维码 src 格式不支持: ${src.substring(0, 50)}`);
+    throw new Error(`不支持的二维码 src 格式: ${src.substring(0, 50)}`);
   }
 
-  logger.info(`二维码已保存: ${qrPath}`);
+  logger.info(`小红书二维码已保存: ${qrPath}`);
   return qrPath;
 }
 
+/**
+ * 检测小红书是否登录成功（参考 social-auto-upload 实现）
+ *
+ * 逻辑：
+ * 1. URL 仍在 /login → 未登录
+ * 2. div[class*='login-box'] 不存在 → 已登录
+ * 3. div[class*='login-box'] 存在但不可见 → 已登录
+ */
 async function isLoginCompleted(page: Page): Promise<boolean> {
-  if (!page.url().includes('creator.xiaohongshu.com')) {
+  const currentUrl = page.url();
+
+  if (currentUrl.startsWith(XHS_URLS.loginPage)) {
     return false;
   }
 
-  if (page.url().includes('/publish/publish') || page.url().includes('/content/manage')) {
-    return true;
-  }
-
-  const loginMarkers = [
-    page.getByText('扫码登录', { exact: true }).first(),
-    page.getByText('手机登录', { exact: true }).first(),
-  ];
-
-  for (const marker of loginMarkers) {
-    if (!(await marker.count())) continue;
-    try {
-      if (await marker.isVisible()) return false;
-    } catch {
-      continue;
-    }
-  }
-
-  return true;
-}
-
-async function waitForLogin(
-  page: Page,
-  accountId: string,
-  onQRRefresh?: (path: string) => void,
-  pollIntervalMs: number = 3000,
-  maxChecks: number = 100
-): Promise<boolean> {
-  const rc = new PageRiskControl(page, {
-    typingDelayMs: { min: 80, max: 250 },
-    clickDelayMs: { min: 150, max: 400 },
-    stepIntervalSec: { min: 1.5, max: 2.5 },
-  });
-  for (let i = 0; i < maxChecks; i++) {
-    if (await isLoginCompleted(page)) {
-      logger.info(`扫码成功，当前页面: ${page.url()}`);
+  const loginBox = page.locator(LOGIN_SELECTORS.loginBox).first();
+  try {
+    const boxCount = await loginBox.count();
+    if (!boxCount) {
       return true;
     }
+    return !(await loginBox.isVisible());
+  } catch {
+    return true;
+  }
+}
 
-    const expiredText = page.getByText('二维码已失效', { exact: true }).first();
-    if ((await expiredText.count()) && (await expiredText.isVisible().catch(() => false))) {
-      logger.info('二维码已过期，正在刷新...');
-      const refreshBtn = page.locator(LOGIN_SELECTORS.qrRefreshBtn).first();
-      if ((await refreshBtn.count())) {
-        await rc.humanClick(LOGIN_SELECTORS.qrRefreshBtn);
-      } else {
-        await rc.humanClick('text="二维码已失效"');
-      }
-      await page.waitForTimeout(1500);
+/**
+ * 处理二维码过期并自动刷新
+ * 小红书二维码有效期约 5 分钟，过期后需要刷新。
+ */
+async function handleExpiredQrCode(page: Page, accountId: string, onQRRefresh?: (path: string) => void): Promise<void> {
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 50, max: 200 },
+    clickDelayMs: { min: 100, max: 300 },
+  });
+  const expiredText = page.getByText('二维码已失效', { exact: true }).first();
+  const refreshBtn = page.locator(LOGIN_SELECTORS.qrRefreshBtn).first();
+
+  const isExpired = (await expiredText.count()) && (await expiredText.isVisible().catch(() => false));
+  const hasRefreshBtn = (await refreshBtn.count()) && (await refreshBtn.isVisible().catch(() => false));
+
+  if (isExpired || hasRefreshBtn) {
+    logger.info('小红书二维码已过期，正在刷新...');
+
+    if (hasRefreshBtn) {
+      await rc.humanClick(LOGIN_SELECTORS.qrRefreshBtn);
+    } else {
+      await rc.humanClick('text="二维码已失效"');
+    }
+
+    await page.waitForTimeout(1500);
+
+    try {
       const src = await extractQrCodeSrc(page);
       const qrPath = await saveQrCodeImage(src, accountId);
       onQRRefresh?.(qrPath);
+      logger.info('二维码已刷新');
+    } catch (error) {
+      logger.warn('刷新二维码失败:', error);
+    }
+  }
+}
+
+/**
+ * 轮询等待用户完成小红书扫码
+ * 小红书扫码流程：打开二维码 → 用户小红书 APP 扫码 → 手机确认 → 页面跳转
+ */
+async function waitForLogin(
+  page: Page,
+  accountId: string,
+  onQRRefresh?: (path: string) => void
+): Promise<boolean> {
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 50, max: 200 },
+    clickDelayMs: { min: 100, max: 300 },
+    stepIntervalSec: { min: 1.0, max: 2.0 },
+  });
+  for (let i = 0; i < QR_MAX_POLLS; i++) {
+    if (await isLoginCompleted(page)) {
+      logger.info(`小红书扫码成功，已跳转到: ${page.url()}`);
+      return true;
     }
 
-    await page.waitForTimeout(pollIntervalMs);
+    await handleExpiredQrCode(page, accountId, onQRRefresh);
+
+    if (i > 0 && i % 10 === 0) {
+      const elapsed = Math.floor((i * QR_POLL_INTERVAL_MS) / 1000);
+      logger.info(`等待小红书扫码中... 已等待 ${elapsed} 秒`);
+    }
+
+    await page.waitForTimeout(QR_POLL_INTERVAL_MS);
   }
 
+  logger.error(`扫码等待超时（${LOGIN_TIMEOUT_MS / 1000} 秒）`);
   return false;
 }
 
+/**
+ * 小红书扫码登录主入口
+ *
+ * 流程与视频号类似：
+ * 1. 打开 creator.xiaohongshu.com → 需要点击"扫码登录" tab
+ * 2. 用户用小红书 APP 扫描二维码
+ * 3. 在手机小红书上确认登录
+ * 4. 页面跳转到创作者中心
+ */
 export async function qrCodeLogin(
   accountId: string,
   headless: boolean = false,
   onQRReady?: (path: string) => void,
-  onQRRefresh?: (path: string) => void
+  onQRRefresh?: (path: string) => void,
+  options: LoginOptions = {}
 ): Promise<CookieResult> {
   const cookiePath = getCookiePath(accountId);
   const debugRecorder = getDebugRecorder();
   debugRecorder.setSessionId(`xiaohongshu_login_${accountId}_${Date.now()}`);
   const pageCtx = { accountId };
 
-  if (cookieExists(cookiePath)) {
-    logger.info('检查现有 cookie...');
+  if (options.force) {
+    logger.info('用户发起重新登录，跳过现有 Cookie 检查');
+    await clearPersistentElectronSession(accountId);
+  } else if (cookieExists(cookiePath)) {
+    logger.info('检查现有 Cookie...');
     const valid = await debugRecorder.recordStep('validate_existing_cookie', async () => {
       return await validateExistingCookie(cookiePath);
     }, pageCtx);
     if (valid) {
       logger.info('Cookie 有效，无需重新登录');
-      return { success: true, cookiePath, message: 'Cookie 有效' };
+      return {
+        success: true,
+        cookiePath,
+        message: 'Cookie 有效',
+      };
     }
-    logger.info('Cookie 已失效，准备扫码登录');
+    logger.info('Cookie 已失效，准备小红书扫码登录');
   }
 
   const browser = await chromium.launch({
@@ -210,7 +326,7 @@ export async function qrCodeLogin(
 
     logger.info('打开小红书创作者中心...');
     await debugRecorder.recordStep('goto_login_page', async () => {
-      await page.goto(XHS_URLS.loginPage);
+      await page.goto(XHS_URLS.loginPage, { timeout: 30000 });
     }, pageCtxWithPage);
 
     await debugRecorder.recordStep('extract_qr_code', async () => {
@@ -224,24 +340,63 @@ export async function qrCodeLogin(
     await debugRecorder.recordStep('wait_scan_login', async () => {
       const loginSuccess = await waitForLogin(page, accountId, onQRRefresh);
       if (!loginSuccess) {
-        throw new Error('等待扫码超时');
+        throw new Error(`等待小红书扫码超时（${LOGIN_TIMEOUT_MS / 1000} 秒）`);
       }
     }, pageCtxWithPage);
 
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
+
+    const usernameEl = page.locator(LOGIN_SELECTORS.usernameText).first();
+    if ((await usernameEl.count()) && (await usernameEl.isVisible().catch(() => false))) {
+      const username = await usernameEl.textContent().catch(() => '');
+      if (username) {
+        logger.info(`登录账号: ${username}`);
+      }
+    }
+
     await saveCookie(context, cookiePath);
     logger.info(`Cookie 已保存: ${cookiePath}`);
+
+    await syncCookiesToElectronSession(context, accountId);
+
+    let nickname: string | undefined;
+    let avatarUrl: string | undefined;
+
+    try {
+      const profile = await detectXhsProfileInPage(page);
+      if (profile) {
+        nickname = profile.nickname || undefined;
+        avatarUrl = profile.avatarUrl || undefined;
+        logger.info(`已提取用户信息: nickname=${nickname}, avatarUrl=${avatarUrl ? avatarUrl.substring(0, 60) : 'N/A'}`);
+      } else {
+        logger.info('未能从页面提取用户 profile，使用默认值');
+      }
+    } catch (error) {
+      logger.warn('提取用户 profile 失败:', error);
+    }
+
+    options.onLoginConfirmed?.();
 
     const verifySuccess = await debugRecorder.recordStep('verify_cookie', async () => {
       return await validateExistingCookie(cookiePath);
     }, pageCtx);
-
     if (!verifySuccess) {
-      return { success: false, cookiePath, message: 'Cookie 保存后验证失败' };
+      return {
+        success: false,
+        cookiePath,
+        message: 'Cookie 保存后验证失败',
+      };
     }
 
-    return { success: true, cookiePath, message: '扫码登录成功' };
+    return {
+      success: true,
+      cookiePath,
+      message: '小红书扫码登录成功',
+      nickname,
+      avatarUrl,
+    };
   } catch (error) {
+    logger.error('登录过程出错:', error);
     return {
       success: false,
       cookiePath,
@@ -253,6 +408,7 @@ export async function qrCodeLogin(
   }
 }
 
+/** 获取二维码图片路径（不等待扫码完成） */
 export async function getQRCode(accountId: string): Promise<string> {
   const browser = await chromium.launch({
     channel: 'chrome',
@@ -264,7 +420,7 @@ export async function getQRCode(accountId: string): Promise<string> {
     const context = await browser.newContext();
     const page = await context.newPage();
 
-    await page.goto(XHS_URLS.loginPage);
+    await page.goto(XHS_URLS.loginPage, { timeout: 30000 });
     const src = await extractQrCodeSrc(page);
     const qrPath = await saveQrCodeImage(src, accountId);
 
@@ -278,7 +434,7 @@ export async function getQRCode(accountId: string): Promise<string> {
   }
 }
 
-export async function checkCookie(accountId: string): Promise<boolean> {
-  const cookiePath = getCookiePath(accountId);
-  return validateExistingCookie(cookiePath);
+/** 检查指定账号的 Cookie 是否有效 */
+export async function checkCookie(accountId: string, cookiePath?: string): Promise<boolean> {
+  return validateExistingCookie(cookiePath || getCookiePath(accountId));
 }
