@@ -53,12 +53,26 @@ export const UPLOAD_SELECTORS = {
 
   publishButton: 'button:has-text("发布"), button:has-text("发表")',
   publishButtonPrimary: 'button.publishBtn, [class*="publish-btn"], [class*="submit-btn"]',
+  publishScheduledBtn: 'button:has-text("定时发布"), button:has-text("确认发布"), [class*="schedule-submit"]',
 
   publishSuccessToast: 'text="发布成功"',
   publishFailedToast: 'text="发布失败"',
   publishDraftToast: 'text="已保存草稿"',
 
   scheduleOption: '[class*="schedule"], [class*="timer"]',
+  scheduleToggle: 'button:has-text("定时发布"), [class*="schedule-toggle"], [class*="timer-switch"]',
+  scheduleDateInput: 'input[type="date"], [class*="date-picker"] input, input[placeholder*="日期"]',
+  scheduleTimeInput: 'input[type="time"], [class*="time-picker"] input, input[placeholder*="时间"]',
+
+  visibilityMoreSettings: 'text="更多设置", button:has-text("更多设置"), [class*="more-setting"]',
+  visibilityPrivate: 'text="仅自己可见", text="私密", [class*="private"]',
+  visibilityPublic: 'text="公开可见", text="公开", [class*="public"]',
+  visibilityFriends: 'text="仅互关好友可见", text="好友可见", [class*="friends"]',
+
+  declarationBtn: 'text="添加内容类型声明", button:has-text("内容类型"), [class*="declaration"], [class*="content-type"]',
+  declarationOptionFictional: 'text="虚构演绎，仅供娱乐"',
+  declarationOptionAI: 'text="笔记含AI合成内容"',
+  declarationOptionAd: 'text="内容包含营销广告"',
 } as const;
 
 export const STATS_SELECTORS = {

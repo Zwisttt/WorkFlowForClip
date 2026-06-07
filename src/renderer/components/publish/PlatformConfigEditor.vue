@@ -119,14 +119,12 @@
 
     <div v-if="platform === 'xiaohongshu'" class="config-section">
       <div class="form-group">
-        <label class="form-label">自主声明</label>
+        <label class="form-label">添加内容类型声明</label>
         <select v-model="localConfig.declaration" class="form-select" @change="emitUpdate">
-          <option value="">无需声明</option>
-          <option value="ai_content">笔记含AI合成内容</option>
-          <option value="self_labeled">已在正文中自主标注</option>
-          <option value="fictional">虚构演绎，仅供娱乐</option>
-          <option value="original">自主拍摄</option>
-          <option value="repost">来源转载</option>
+          <option value="0">无需声明</option>
+          <option value="1">虚构演绎，仅供娱乐</option>
+          <option value="2">笔记含AI合成内容</option>
+          <option value="3">内容包含营销广告</option>
         </select>
       </div>
       <div class="form-group">
@@ -339,7 +337,7 @@ const emit = defineEmits<{
 }>();
 
 const localConfig = reactive<PlatformConfig>({
-  declaration: '',
+  declaration: '0',
   visibility: 'public',
   scheduleMode: 'immediate',
   allowComment: true,
@@ -350,6 +348,7 @@ const localConfig = reactive<PlatformConfig>({
   isOriginal: false,
   location: '',
   ...props.platformConfig,
+  declaration: props.platformConfig.declaration || '0',
 });
 const tagInput = ref('');
 const tagInputRef = ref<HTMLInputElement | null>(null);

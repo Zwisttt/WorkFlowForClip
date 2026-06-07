@@ -172,6 +172,102 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * realClick: 通过 JS 获取元素坐标 → Electron sendInputEvent 发送真实鼠标事件。
+ * 解决 executeJavaScript 中 click()/dispatchEvent() 无法触发 Vue/React 组件的问题。
+ */
+async function realClick(wc: WebContents, selector: string): Promise<{ ok: boolean; x: number; y: number; msg: string }> {
+  try {
+    const coords = await wc.executeJavaScript(`
+      (() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) return null;
+        el.scrollIntoView({ block: 'center', inline: 'nearest' });
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return null;
+        return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+      })()
+    `, true).catch(() => null) as { x: number; y: number } | null;
+
+    if (!coords) {
+      return { ok: false, x: 0, y: 0, msg: `element not found: ${selector}` };
+    }
+
+    const { x, y } = coords;
+    wc.sendInputEvent({ type: 'mouseMove', x, y } as Electron.MouseInputEvent);
+    await sleep(50);
+    wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+    await sleep(30);
+    wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+
+    return { ok: true, x, y, msg: 'clicked' };
+  } catch (e) {
+    return { ok: false, x: 0, y: 0, msg: `error: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+async function realClickAndGetOptions(wc: WebContents, selector: string, filterRegex: RegExp): Promise<{ clicked: boolean; options: string[] }> {
+  const clickResult = await realClick(wc, selector);
+  if (!clickResult.ok) {
+    return { clicked: false, options: [] };
+  }
+  await sleep(800);
+  const options = await wc.executeJavaScript(`
+    (() => {
+      const filterRegex = new RegExp(${JSON.stringify(filterRegex.source)}, ${JSON.stringify(filterRegex.flags)});
+      const results = [];
+      const seen = new Set();
+      const allEls = document.querySelectorAll('div, span, li, [role="option"], [class*="option"], [class*="item"]');
+      for (const el of Array.from(allEls)) {
+        const rect = el.getBoundingClientRect();
+        const text = (el.innerText || el.textContent || '').trim();
+        if (rect.width > 0 && rect.height > 0 && text.length > 0 && text.length <= 30 && filterRegex.test(text) && !seen.has(text)) {
+          seen.add(text);
+          results.push(text);
+        }
+      }
+      return results.slice(0, 15);
+    })()
+  `, true).catch(() => []) as string[];
+  return { clicked: true, options };
+}
+
+async function realClickByText(wc: WebContents, targetText: string, scopeSelector?: string): Promise<{ ok: boolean; msg: string }> {
+  const escapedText = targetText.replace(/'/g, "\\'");
+  const scope = scopeSelector ? `document.querySelector(${JSON.stringify(scopeSelector)}) || document` : 'document';
+  const coords = await wc.executeJavaScript(`
+    (() => {
+      const root = ${scope};
+      if (!root) return null;
+      const candidates = Array.from(root.querySelectorAll('div, span, li, [role="option"], button, a, p'));
+      candidates.sort((a, b) => (a.innerText || '').trim().length - (b.innerText || '').trim().length);
+      for (const el of candidates) {
+        const text = (el.innerText || el.textContent || '').trim();
+        if (text === '${escapedText}') {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            el.scrollIntoView({ block: 'center', inline: 'nearest' });
+            return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+          }
+        }
+      }
+      return null;
+    })()
+  `, true).catch(() => null) as { x: number; y: number } | null;
+
+  if (!coords) {
+    return { ok: false, msg: `text not found: ${targetText}` };
+  }
+
+  wc.sendInputEvent({ type: 'mouseMove', x: coords.x, y: coords.y } as Electron.MouseInputEvent);
+  await sleep(50);
+  wc.sendInputEvent({ type: 'mouseDown', x: coords.x, y: coords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+  await sleep(30);
+  wc.sendInputEvent({ type: 'mouseUp', x: coords.x, y: coords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+
+  return { ok: true, msg: `clicked "${targetText}" at (${coords.x},${coords.y})` };
+}
+
 async function runEmbeddedDebugStep<T>(
   wc: WebContents,
   ctx: UploadContext,
@@ -441,10 +537,23 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
       return true;
     });
 
+    await runEmbeddedDebugStep(wc, ctx, '设置内容类型声明', async () => {
+      await setEmbeddedDeclaration(wc, ctx.declaration);
+    });
+
+    await runEmbeddedDebugStep(wc, ctx, '设置可见范围', async () => {
+      await setEmbeddedVisibility(wc, ctx.visibility);
+    });
+
+    await runEmbeddedDebugStep(wc, ctx, '设置定时发布', async () => {
+      await setEmbeddedSchedule(wc, ctx.scheduledAt);
+    });
+
     const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
       logger.info('所有元素设置完成，等待10秒后发布...');
       await sleep(10000);
-      return clickEmbeddedPublish(wc, 30000);
+      const hasSchedule = !!(ctx.scheduledAt && new Date(ctx.scheduledAt).getTime() > Date.now());
+      return clickEmbeddedPublish(wc, 30000, hasSchedule);
     });
     if (publishState === 'success') {
       publishSucceeded = true;
@@ -1206,7 +1315,255 @@ async function waitForEmbeddedUploadComplete(
   return { success: false, message: '视频上传超时' };
 }
 
-async function clickEmbeddedPublish(wc: WebContents, timeoutMs: number): Promise<EmbeddedPublishState> {
+async function setEmbeddedDeclaration(wc: WebContents, declaration?: string): Promise<void> {
+  const declNum = parseInt(declaration || '0', 10);
+  if (declNum === 0) {
+    logger.info('[setEmbeddedDeclaration] 无需声明，跳过');
+    return;
+  }
+
+  const declMap: Record<number, string> = {
+    1: '虚构演绎，仅供娱乐',
+    2: '笔记含AI合成内容',
+    3: '内容包含营销广告',
+  };
+  const declText = declMap[declNum];
+  if (!declText) {
+    logger.warn(`[setEmbeddedDeclaration] 未知声明类型: ${declaration}`);
+    return;
+  }
+
+  logger.info(`[setEmbeddedDeclaration] 设置声明: ${declText} (value=${declaration})`);
+
+  const settingsExpanded = await wc.executeJavaScript(`
+    (() => {
+      const content = document.querySelector('.publish-page-content-settings-content');
+      if (!content) return 'no_settings';
+      const style = window.getComputedStyle(content);
+      if (style.display === 'none') return 'collapsed';
+      return 'expanded';
+    })()
+  `, true).catch(() => 'error') as string;
+
+  logger.info(`[setEmbeddedDeclaration] settings: ${settingsExpanded}`);
+
+  if (settingsExpanded === 'collapsed') {
+    const r = await realClick(wc, '.publish-page-content-settings-header, .collapse-toggle');
+    logger.info(`[setEmbeddedDeclaration] expand settings: ${r.msg}`);
+    await sleep(500);
+  }
+
+  const selectSelectors = ['.wrapper .d-select-wrapper .d-select-main', '.d-select-wrapper .d-select-main'];
+  let dropdownOpened = false;
+  for (const sel of selectSelectors) {
+    const { clicked, options } = await realClickAndGetOptions(wc, sel, /声明|虚构|AI|营销/);
+    if (clicked && options.length > 0) {
+      logger.info(`[setEmbeddedDeclaration] dropdown opened via "${sel}", options: ${JSON.stringify(options)}`);
+      dropdownOpened = true;
+      break;
+    }
+    if (clicked) {
+      logger.info(`[setEmbeddedDeclaration] clicked "${sel}" but no matching options found`);
+    }
+  }
+
+  if (!dropdownOpened) {
+    logger.warn('[setEmbeddedDeclaration] could not open declaration dropdown');
+    return;
+  }
+
+  await sleep(500);
+
+  const optionResult = await realClickByText(wc, declText);
+  logger.info(`[setEmbeddedDeclaration] select "${declText}": ${optionResult.msg}`);
+}
+
+async function setEmbeddedVisibility(wc: WebContents, visibility?: string): Promise<void> {
+  logger.info(`[setEmbeddedVisibility] enter, visibility=${visibility}`);
+  if (!visibility || visibility === 'public') {
+    logger.info(`[setEmbeddedVisibility] visibility=${visibility || '默认公开'}，无需修改`);
+    return;
+  }
+
+  const targetText = visibility === 'private' ? '仅自己可见' : '仅互关好友可见';
+  logger.info(`[setEmbeddedVisibility] 目标: ${targetText}`);
+
+  // Expand settings section if collapsed
+  const settingsCollapsed = await wc.executeJavaScript(`
+    (() => {
+      const content = document.querySelector('.publish-page-content-settings-content');
+      if (!content) return 'no_settings';
+      return window.getComputedStyle(content).display === 'none';
+    })()
+  `, true).catch(() => 'error') as string | boolean;
+
+  if (settingsCollapsed === true) {
+    const expandResult = await realClick(wc, '.publish-page-content-settings-header, .collapse-toggle');
+    logger.info(`[setEmbeddedVisibility] expand settings: ${expandResult.msg}`);
+    await sleep(500);
+  }
+
+  // Click the select dropdown trigger using real mouse event
+  const selectSelectors = [
+    '.permission-card-select .d-select-main',
+    '.permission-card-wrapper .d-select-main',
+    '.permission-card-select',
+    '.permission-card-wrapper',
+  ];
+
+  let dropdownOpened = false;
+  for (const sel of selectSelectors) {
+    const { clicked, options } = await realClickAndGetOptions(wc, sel, /可见|私密|好友|公开/);
+    if (clicked && options.length > 0) {
+      logger.info(`[setEmbeddedVisibility] dropdown opened via "${sel}", options: ${JSON.stringify(options)}`);
+      dropdownOpened = true;
+
+      // Now click the target option using real mouse
+      const optionResult = await realClickByText(wc, targetText);
+      logger.info(`[setEmbeddedVisibility] click option "${targetText}": ${optionResult.msg}`);
+      return;
+    }
+  }
+
+  if (!dropdownOpened) {
+    // Diagnostic: dump all visible text containing visibility keywords
+    const diag = await wc.executeJavaScript(`
+      (() => {
+        const keywords = ['可见', '私密', '好友', '公开', 'permission', 'select'];
+        const results = [];
+        for (const el of document.querySelectorAll('div, span, [class*="select"], [class*="permission"]')) {
+          const rect = el.getBoundingClientRect();
+          const text = (el.innerText || '').trim();
+          const cls = (el.className || '').toString().substring(0, 60);
+          if (rect.width > 0 && rect.height > 0 && text.length > 0 && text.length <= 50) {
+            if (keywords.some(k => text.includes(k) || cls.includes(k))) {
+              results.push({ text: text.substring(0, 30), cls });
+            }
+          }
+        }
+        return results.slice(0, 15);
+      })()
+    `, true).catch(() => []) as Array<{ text: string; cls: string }>;
+    logger.warn(`[setEmbeddedVisibility] dropdown not opened. Diagnostic: ${JSON.stringify(diag)}`);
+  }
+}
+
+async function setEmbeddedSchedule(wc: WebContents, scheduledAt?: string | Date | null): Promise<void> {
+  logger.info(`[setEmbeddedSchedule] enter, scheduledAt=${String(scheduledAt)}, type=${typeof scheduledAt}`);
+  if (!scheduledAt) {
+    logger.info('[setEmbeddedSchedule] 无定时发布，跳过');
+    return;
+  }
+
+  const scheduleDate = typeof scheduledAt === 'string' ? new Date(scheduledAt) : scheduledAt;
+  if (isNaN(scheduleDate.getTime())) {
+    logger.warn(`[setEmbeddedSchedule] 无效的定时时间: ${scheduledAt}`);
+    return;
+  }
+
+  const dateStr = scheduleDate.toISOString().split('T')[0];
+  const timeStr = scheduleDate.toTimeString().slice(0, 5);
+  logger.info(`[setEmbeddedSchedule] 设置定时发布: ${dateStr} ${timeStr}`);
+
+  // Toggle the checkbox via JS — Vue v-model listens to 'change' event on checkbox
+  const toggleResult = await wc.executeJavaScript(`
+    (() => {
+      const cb = document.querySelector('.post-time-wrapper input[type="checkbox"]')
+              || document.querySelector('.custom-switch-wrapper input[type="checkbox"]');
+      if (!cb) return 'no_checkbox';
+
+      const wasChecked = cb.checked;
+      if (wasChecked) return 'already_on';
+
+      // Simulate full user interaction chain that Vue expects
+      cb.focus();
+      cb.click();
+
+      // Verify toggle happened
+      return 'clicked wasChecked=' + wasChecked + ' nowChecked=' + cb.checked;
+    })()
+  `, true).catch((e: Error) => `error: ${e.message}`) as string;
+
+  logger.info(`[setEmbeddedSchedule] toggle: ${toggleResult}`);
+
+  if (toggleResult.startsWith('error') || toggleResult === 'no_checkbox') {
+    logger.warn(`[setEmbeddedSchedule] cannot toggle switch: ${toggleResult}`);
+    return;
+  }
+
+  // If click() didn't toggle, try setting checked + dispatching events manually
+  const verifyResult = await wc.executeJavaScript(`
+    (() => {
+      const cb = document.querySelector('.post-time-wrapper input[type="checkbox"]')
+              || document.querySelector('.custom-switch-wrapper input[type="checkbox"]');
+      if (!cb) return 'no_cb';
+      if (cb.checked) return 'already_checked';
+
+      // Force set and dispatch the exact events Vue v-model uses
+      cb.checked = true;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+      cb.dispatchEvent(new Event('input', { bubbles: true }));
+
+      // Also try clicking the parent wrapper
+      const card = document.querySelector('.custom-switch-card');
+      if (card) card.click();
+
+      return 'forced checked=' + cb.checked;
+    })()
+  `, true).catch((e: Error) => `error: ${e.message}`) as string;
+
+  logger.info(`[setEmbeddedSchedule] verify: ${verifyResult}`);
+
+  await sleep(1500);
+
+  const targetDateTime = `${dateStr} ${timeStr}`;
+  logger.info(`[setEmbeddedSchedule] setting datetime: ${targetDateTime}`);
+
+  const setDateResult = await wc.executeJavaScript(`
+    (() => {
+      const input = document.querySelector('.d-datepicker-input-filter input.d-text')
+              || document.querySelector('.date-picker-container input')
+              || document.querySelector('.custom-date-picker input');
+      if (!input) return 'no_input';
+
+      input.scrollIntoView({ block: 'center', inline: 'nearest' });
+      input.focus();
+      input.click();
+
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+      if (nativeSetter) {
+        nativeSetter.call(input, ${JSON.stringify(targetDateTime)});
+      } else {
+        input.value = ${JSON.stringify(targetDateTime)};
+      }
+
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.dispatchEvent(new FocusEvent('blur'));
+
+      const shadowEl = document.querySelector('.d-datepicker-input-filter-shadow');
+      if (shadowEl) shadowEl.textContent = ${JSON.stringify(targetDateTime)};
+
+      return 'set value=' + input.value;
+    })()
+  `, true).catch((e: Error) => `error: ${e.message}`) as string;
+
+  logger.info(`[setEmbeddedSchedule] setDate: ${setDateResult}`);
+
+  await sleep(500);
+
+  const header = await wc.executeJavaScript(`
+    (() => {
+      const el = document.querySelector('.publish-page-content-header, .publish-page-title, h1');
+      if (el) { el.click(); return 'clicked'; }
+      return 'no_header';
+    })()
+  `, true).catch(() => 'error') as string;
+
+  logger.info(`[setEmbeddedSchedule] dismiss popup: ${header}`);
+}
+
+async function clickEmbeddedPublish(wc: WebContents, timeoutMs: number, hasSchedule = false): Promise<EmbeddedPublishState> {
   const start = Date.now();
   let clicked = false;
 
@@ -1217,7 +1574,64 @@ async function clickEmbeddedPublish(wc: WebContents, timeoutMs: number): Promise
     }
 
     if (!clicked) {
-      clicked = await clickEmbeddedButtonByText(wc, /^发布$/) || await clickEmbeddedButtonByText(wc, /^发表$/);
+      if (hasSchedule) {
+        // xhs-publish-btn has closed shadow DOM — compute coords of the right-side red button via layout math
+        const schedBtnCoords = await wc.executeJavaScript(`
+          (() => {
+            const el = document.querySelector('xhs-publish-btn[submit-text="定时发布"]') || document.querySelector('xhs-publish-btn');
+            if (!el) return null;
+            el.scrollIntoView({ block: 'end', inline: 'nearest' });
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0) return null;
+            // Layout: two 120px buttons centered with 24px gap
+            // Right button center = totalCenter + 72 (half button + half gap)
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            return { x: Math.round(centerX + 72), y: Math.round(centerY) };
+          })()
+        `, true).catch(() => null) as { x: number; y: number } | null;
+
+        if (schedBtnCoords) {
+          wc.sendInputEvent({ type: 'mouseMove', x: schedBtnCoords.x, y: schedBtnCoords.y } as Electron.MouseInputEvent);
+          await sleep(50);
+          wc.sendInputEvent({ type: 'mouseDown', x: schedBtnCoords.x, y: schedBtnCoords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+          await sleep(30);
+          wc.sendInputEvent({ type: 'mouseUp', x: schedBtnCoords.x, y: schedBtnCoords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+          clicked = true;
+          logger.info(`[clickEmbeddedPublish] sendInputEvent at (${schedBtnCoords.x},${schedBtnCoords.y}) for "定时发布"`);
+        }
+
+        if (!clicked) {
+          clicked = await clickEmbeddedButtonByText(wc, /^定时发布$/) || await clickEmbeddedButtonByText(wc, /确认发布/);
+        }
+      } else {
+        const pubBtnCoords = await wc.executeJavaScript(`
+          (() => {
+            const el = document.querySelector('xhs-publish-btn') || document.querySelector('xhs-publish-btn[submit-text="发布"]');
+            if (!el) return null;
+            el.scrollIntoView({ block: 'end', inline: 'nearest' });
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0) return null;
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            return { x: Math.round(centerX + 72), y: Math.round(centerY) };
+          })()
+        `, true).catch(() => null) as { x: number; y: number } | null;
+
+        if (pubBtnCoords) {
+          wc.sendInputEvent({ type: 'mouseMove', x: pubBtnCoords.x, y: pubBtnCoords.y } as Electron.MouseInputEvent);
+          await sleep(50);
+          wc.sendInputEvent({ type: 'mouseDown', x: pubBtnCoords.x, y: pubBtnCoords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+          await sleep(30);
+          wc.sendInputEvent({ type: 'mouseUp', x: pubBtnCoords.x, y: pubBtnCoords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+          clicked = true;
+          logger.info(`[clickEmbeddedPublish] sendInputEvent at (${pubBtnCoords.x},${pubBtnCoords.y}) for "发布"`);
+        }
+
+        if (!clicked) {
+          clicked = await clickEmbeddedButtonByText(wc, /^发布$/) || await clickEmbeddedButtonByText(wc, /^发表$/);
+        }
+      }
       if (clicked) {
         logger.info('已在内嵌浏览器点击小红书发布按钮');
         await sleep(1000);
@@ -1247,17 +1661,36 @@ async function clickEmbeddedButtonByText(wc: WebContents, pattern: RegExp): Prom
         const style = window.getComputedStyle(el);
         return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
       };
-      const candidates = Array.from(document.querySelectorAll('button, [role="button"], span, div')).filter(isVisible);
-      for (const el of candidates) {
-        const text = (el.innerText || el.textContent || '').trim();
-        if (!pattern.test(text)) continue;
-        const clickable = el.closest('button, [role="button"]') || el;
-        if (!(clickable instanceof HTMLElement)) continue;
-        if (clickable.hasAttribute('disabled') || clickable.getAttribute('aria-disabled') === 'true') continue;
-        clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
-        clickable.click();
-        return true;
+
+      const roots = [document];
+      for (const el of document.querySelectorAll('xhs-publish-btn')) {
+        if (el.shadowRoot) roots.push(el.shadowRoot);
       }
+
+      for (const root of roots) {
+        const candidates = Array.from(root.querySelectorAll('button, [role="button"], span, div, a')).filter(isVisible);
+        for (const el of candidates) {
+          const text = (el.innerText || el.textContent || '').trim();
+          if (!pattern.test(text)) continue;
+          const clickable = el.closest('button, [role="button"]') || el;
+          if (!(clickable instanceof HTMLElement)) continue;
+          if (clickable.hasAttribute('disabled') || clickable.getAttribute('aria-disabled') === 'true') continue;
+          clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
+          clickable.click();
+          return true;
+        }
+      }
+
+      // Fallback: search xhs-publish-btn itself
+      for (const el of document.querySelectorAll('xhs-publish-btn')) {
+        const text = (el.innerText || el.textContent || el.getAttribute('submit-text') || '').trim();
+        if (pattern.test(text) && isVisible(el)) {
+          el.scrollIntoView({ block: 'center', inline: 'nearest' });
+          el.click();
+          return true;
+        }
+      }
+
       return false;
     })()
   `, true).catch(() => false) as boolean;
@@ -1599,12 +2032,123 @@ async function setCover(page: Page, coverPath?: string): Promise<void> {
   }
 }
 
-async function clickPublish(page: Page): Promise<boolean> {
+async function setDeclaration(page: Page, declaration?: string): Promise<void> {
+  const declNum = parseInt(declaration || '0', 10);
+  if (declNum === 0) return;
+
+  const declMap: Record<number, string> = {
+    1: '虚构演绎，仅供娱乐',
+    2: '笔记含AI合成内容',
+    3: '内容包含营销广告',
+  };
+  const declText = declMap[declNum];
+  if (!declText) {
+    logger.warn(`[setDeclaration] 未知声明类型: ${declaration}`);
+    return;
+  }
+
+  logger.info(`[setDeclaration] 设置声明: ${declText}`);
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 80, max: 250 },
+    clickDelayMs: { min: 150, max: 400 },
+  });
+
+  const declBtn = page.getByText(/添加内容类型声明|内容类型声明|声明/, { exact: false }).first();
+  if (await declBtn.isVisible().catch(() => false)) {
+    await declBtn.click();
+    await page.waitForTimeout(800);
+    const option = page.getByText(declText, { exact: true }).first();
+    if (await option.isVisible().catch(() => false)) {
+      await option.click();
+      logger.info(`[setDeclaration] 已选择: ${declText}`);
+    }
+  } else {
+    logger.warn('[setDeclaration] 未找到声明入口');
+  }
+}
+
+async function setVisibility(page: Page, visibility?: string): Promise<void> {
+  if (!visibility || visibility === 'public') return;
+
+  const visMap: Record<string, RegExp> = {
+    private: /仅自己可见|私密/,
+    friends: /仅互关好友可见|好友可见|朋友可见/,
+  };
+  const visPattern = visMap[visibility];
+  if (!visPattern) return;
+
+  logger.info(`[setVisibility] 设置可见范围: ${visibility}`);
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 80, max: 250 },
+    clickDelayMs: { min: 150, max: 400 },
+  });
+
+  const moreBtn = page.getByText('更多设置', { exact: false }).first();
+  if (await moreBtn.isVisible().catch(() => false)) {
+    await moreBtn.click();
+    await page.waitForTimeout(800);
+    const visBtn = page.getByText(visPattern).first();
+    if (await visBtn.isVisible().catch(() => false)) {
+      await visBtn.click();
+      logger.info(`[setVisibility] 已设置: ${visibility}`);
+    }
+  }
+}
+
+async function setSchedule(page: Page, scheduledAt?: string | Date | null): Promise<boolean> {
+  if (!scheduledAt) return false;
+
+  const scheduleDate = typeof scheduledAt === 'string' ? new Date(scheduledAt) : scheduledAt;
+  if (isNaN(scheduleDate.getTime())) return false;
+
+  logger.info(`[setSchedule] 设置定时发布: ${scheduleDate.toISOString()}`);
+  const rc = new PageRiskControl(page, {
+    typingDelayMs: { min: 80, max: 250 },
+    clickDelayMs: { min: 150, max: 400 },
+  });
+
+  const timerBtn = page.getByText('定时发布', { exact: false }).first();
+  if (await timerBtn.isVisible().catch(() => false)) {
+    await timerBtn.click();
+    await page.waitForTimeout(1000);
+
+    const dateStr = scheduleDate.toISOString().split('T')[0];
+    const timeStr = scheduleDate.toTimeString().slice(0, 5);
+
+    const dateInput = page.locator('input[type="date"], input[type="datetime-local"]').first();
+    if (await dateInput.count()) {
+      await dateInput.fill(dateStr);
+    }
+
+    const timeInput = page.locator('input[type="time"]').first();
+    if (await timeInput.count()) {
+      await timeInput.fill(timeStr);
+    }
+
+    logger.info(`[setSchedule] 定时时间已设置: ${dateStr} ${timeStr}`);
+    return true;
+  }
+
+  return false;
+}
+
+async function clickPublish(page: Page, hasSchedule = false): Promise<boolean> {
   try {
     const rc = new PageRiskControl(page, {
       typingDelayMs: { min: 80, max: 250 },
       clickDelayMs: { min: 150, max: 400 },
     });
+
+    if (hasSchedule) {
+      const scheduleBtn = page.locator(UPLOAD_SELECTORS.publishScheduledBtn).first();
+      if (await scheduleBtn.count()) {
+        await rc.humanClick(UPLOAD_SELECTORS.publishScheduledBtn);
+        logger.info('已点击定时发布按钮');
+        await page.waitForTimeout(3000);
+        const successToast = page.getByText('发布成功', { exact: false });
+        return await successToast.isVisible().catch(() => false);
+      }
+    }
 
     const publishBtn = page.locator(UPLOAD_SELECTORS.publishButton).first();
     if (!(await publishBtn.count())) {
@@ -1714,10 +2258,16 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
         await fillDescription(page, description);
         await addTopics(page, tags);
         await setCover(page, coverPath);
+        await setDeclaration(page, ctx.declaration);
+        await setVisibility(page, ctx.visibility);
+      }, { page });
+
+      const hasSchedule = await debugRecorder.recordStep('setup_schedule', async () => {
+        return await setSchedule(page, ctx.scheduledAt);
       }, { page });
 
       const publishSuccess = await debugRecorder.recordStep('execute_publish', async () => {
-        return await clickPublish(page);
+        return await clickPublish(page, hasSchedule);
       }, { page });
 
       if (publishSuccess) {

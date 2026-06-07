@@ -8,15 +8,15 @@ import { getDebugRecorder } from '../base/DebugRecorder';
 const logger = new Logger('XiaohongshuSchedule');
 
 export const XIAOHONGSHU_CONFIG = {
-  maxScheduleDays: 0,
-  supportsScheduledPublish: false,
+  maxScheduleDays: 30,
+  supportsScheduledPublish: true,
 } as const;
 
 export function validateScheduleDate(scheduledTime?: Date): void {
-  if (scheduledTime) {
+  if (scheduledTime && scheduledTime.getTime() <= Date.now()) {
     throw new ValidationError(
-      '小红书不支持定时发布',
-      { platform: 'xiaohongshu', maxScheduleDays: 0 },
+      '定时发布时间必须晚于当前时间',
+      { platform: 'xiaohongshu' },
       'xiaohongshu'
     );
   }
@@ -30,7 +30,9 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
 
   try {
     await debugRecorder.recordStep('validate_schedule_capability', async () => {
-      validateScheduleDate(scheduledTime);
+      if (scheduledTime) {
+        validateScheduleDate(scheduledTime);
+      }
     }, { accountId });
 
     if (!page) {
@@ -39,18 +41,24 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
 
     await fillVideoMetadata(page, title, description, tags);
 
-    logger.info('小红书不支持服务端定时发布，将立即发布');
+    if (scheduledTime) {
+      logger.info(`小红书定时发布已配置: ${scheduledTime.toISOString()}`);
+      return {
+        success: true,
+        message: `定时发布已设置: ${scheduledTime.toISOString()}`,
+      };
+    }
 
     return {
-      success: false,
-      message: '小红书不支持定时发布，内容将立即发布',
+      success: true,
+      message: '小红书内容已准备，等待发布',
     };
   } catch (error) {
     const pErr = toPlatformError(error, 'xiaohongshu');
     logger.error(`定时发布验证失败: ${pErr.message}`);
     return {
       success: false,
-      message: `小红书不支持定时发布: ${pErr.message}`,
+      message: `定时发布配置失败: ${pErr.message}`,
     };
   }
 }
