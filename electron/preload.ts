@@ -218,6 +218,10 @@ const api = {
       ipcRenderer.invoke('panel:focus', { panelId }),
     list: () =>
       ipcRenderer.invoke('panel:list'),
+    hideAll: () =>
+      ipcRenderer.invoke('panel:hideAll'),
+    showAll: () =>
+      ipcRenderer.invoke('panel:showAll'),
     navigate: (panelId: string, action: string, url?: string) => {
       if (action === 'url' && url) {
         ipcRenderer.send('panel-address:navigate', { panelId, url });

@@ -273,6 +273,35 @@ class MultiPanelService {
     return Array.from(this.sessions.values());
   }
 
+  hideAllPanels(): void {
+    if (!this.activePanelId) {
+      logger.info(`hideAllPanels: 没有活动面板`);
+      return;
+    }
+    const session = this.sessions.get(this.activePanelId);
+    if (session) {
+      browserManager.detachFromMainWindow(session.accountId);
+      logger.info(`hideAllPanels: 已分离面板 ${session.nickname} (${session.accountId})，剩余 ${this.sessions.size} 个会话`);
+    } else {
+      logger.warn(`hideAllPanels: 找不到活动会话 ${this.activePanelId}`);
+    }
+  }
+
+  showAllPanels(): void {
+    if (!this.activePanelId) {
+      logger.info(`showAllPanels: 没有活动面板`);
+      return;
+    }
+    const session = this.sessions.get(this.activePanelId);
+    if (session) {
+      browserManager.attachToMainWindow(session.accountId);
+      this.layoutActivePanel();
+      logger.info(`showAllPanels: 已挂载面板 ${session.nickname} (${session.accountId})`);
+    } else {
+      logger.warn(`showAllPanels: 找不到活动会话 ${this.activePanelId}`);
+    }
+  }
+
   private layoutActivePanel(): void {
     if (!this.mainWindow || !this.activePanelId) return;
 

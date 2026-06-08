@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
+import { useRouter, onBeforeRouteLeave } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { usePanelStore } from '@/stores/panel';
 import PanelSidebar from '@/renderer/components/panel/PanelSidebar.vue';
 import BrowserTabs from '@/renderer/components/panel/BrowserTabs.vue';
 import BrowserContent from '@/renderer/components/panel/BrowserContent.vue';
 
+const router = useRouter();
 const panelStore = usePanelStore();
 
 const activePanels = computed(() => panelStore.panels);
@@ -17,6 +19,12 @@ const activePanel = computed(() =>
 onMounted(async () => {
   await panelStore.loadAvailableAccounts();
   await panelStore.loadPanels();
+  await panelStore.showAllPanels();
+});
+
+onBeforeRouteLeave(async (_to, _from, next) => {
+  await panelStore.hideAllPanels();
+  next();
 });
 
 async function handleSelectAccount(accountId: string) {
@@ -54,7 +62,7 @@ function handleRefresh() {
 }
 
 function handleAddAccount() {
-  ElMessage.info('请在账号管理页面添加账号');
+  router.push({ name: 'Accounts', query: { action: 'add' } });
 }
 </script>
 

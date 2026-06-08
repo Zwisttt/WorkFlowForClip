@@ -143,6 +143,8 @@ const CHANNEL = {
   PANEL_CLOSE: 'panel:close',
   PANEL_FOCUS: 'panel:focus',
   PANEL_LIST: 'panel:list',
+  PANEL_HIDE_ALL: 'panel:hideAll',
+  PANEL_SHOW_ALL: 'panel:showAll',
   COMMENT_TEMPLATE_CREATE: 'comment:template:create',
   COMMENT_TEMPLATE_UPDATE: 'comment:template:update',
   COMMENT_TEMPLATE_DELETE: 'comment:template:delete',
@@ -967,6 +969,16 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.PANEL_LIST, () => {
     return ok(multiPanelService.getActivePanels());
+  });
+
+  ipcMain.handle(CHANNEL.PANEL_HIDE_ALL, () => {
+    multiPanelService.hideAllPanels();
+    return ok(null);
+  });
+
+  ipcMain.handle(CHANNEL.PANEL_SHOW_ALL, () => {
+    multiPanelService.showAllPanels();
+    return ok(null);
   });
 
   ipcMain.handle(CHANNEL.COMMENT_TEMPLATE_CREATE, async (_, data) => {

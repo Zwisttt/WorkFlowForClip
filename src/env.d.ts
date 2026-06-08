@@ -136,6 +136,8 @@ interface MatrixFlowAPI {
     close: (panelId: string) => Promise<IpcResult<void>>;
     focus: (panelId: string) => Promise<IpcResult<void>>;
     list: () => Promise<IpcResult<any[]>>;
+    hideAll: () => Promise<IpcResult<void>>;
+    showAll: () => Promise<IpcResult<void>>;
   };
 
   draft: {

@@ -175,6 +175,8 @@ function isItemActive(item: NavItem): boolean {
   transition: width var(--transition-base);
   overflow: hidden;
   border-right: 1px solid var(--color-border-light);
+  position: relative;
+  z-index: var(--z-sidebar);
 }
 
 .sidebar.sidebar--collapsed {

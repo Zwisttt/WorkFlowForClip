@@ -47,6 +47,8 @@ const currentTitle = computed(() => {
   background: var(--color-bg-header);
   border-bottom: 1px solid var(--color-border-light);
   flex-shrink: 0;
+  position: relative;
+  z-index: var(--z-header);
 }
 
 .header__left {

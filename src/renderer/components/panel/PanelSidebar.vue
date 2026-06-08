@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import {
   Refresh,
   Plus,
   Search,
   ArrowDown,
   Monitor,
-  Grid,
   Position,
 } from '@element-plus/icons-vue';
+import { useGroupStore } from '@/renderer/stores/group';
 
 interface Account {
   id: string;
@@ -18,6 +18,16 @@ interface Account {
   status?: 'online' | 'offline' | 'expired';
   browser_mode?: 'embedded' | 'external_chrome' | 'external_fingerprint';
   cookieValid?: boolean;
+  groupId?: string;
+  groupIds?: string[];
+  groupInfos?: Array<{ id: string; name: string; color: string }>;
+}
+
+interface GroupEntry {
+  groupId: string;
+  groupName: string;
+  groupColor: string;
+  accounts: Account[];
 }
 
 interface Props {
@@ -36,6 +46,8 @@ const emit = defineEmits<{
   selectAccount: [accountId: string];
 }>();
 
+const groupStore = useGroupStore();
+
 // 视图模式：按平台 / 按分组
 const viewMode = ref<'platform' | 'group'>('platform');
 
@@ -44,6 +56,7 @@ const searchQuery = ref('');
 
 // 展开状态
 const expandedPlatforms = ref<Set<string>>(new Set(['douyin', 'xiaohongshu', 'channels', 'kuaishou', 'bilibili']));
+const expandedGroups = ref<Set<string>>(new Set());
 
 // 平台配置
 const platformConfig: Record<string, { label: string; color: string }> = {
@@ -53,6 +66,10 @@ const platformConfig: Record<string, { label: string; color: string }> = {
   kuaishou: { label: '快手', color: 'var(--color-plat-kuaishou)' },
   bilibili: { label: 'B站', color: 'var(--color-plat-bilibili, #00a1d6)' },
 };
+
+onMounted(() => {
+  groupStore.fetchGroups();
+});
 
 // 按平台分组
 const groupedByPlatform = computed(() => {
@@ -83,6 +100,79 @@ const groupedByPlatform = computed(() => {
   return groups;
 });
 
+// 按分组分组（以 groupStore.groups 为分组来源，同时检查 groupId 和 groupIds）
+const groupedByGroup = computed(() => {
+  const result: GroupEntry[] = [];
+
+  // 辅助：判断账号是否属于指定分组
+  function accountInGroup(account: Account, groupId: string): boolean {
+    // 1. 单字段 groupId（可能是逗号分隔的多 ID）
+    if (account.groupId) {
+      const ids = account.groupId.split(',').map((id) => id.trim());
+      if (ids.includes(groupId)) return true;
+    }
+    // 2. 数组 groupIds（来自 account_groups 多对多表）
+    if (account.groupIds?.includes(groupId)) return true;
+    return false;
+  }
+
+  // 辅助：判断账号是否有任何分组
+  function accountHasAnyGroup(account: Account): boolean {
+    return !!(account.groupId) || (account.groupIds != null && account.groupIds.length > 0);
+  }
+
+  // 遍历数据库中的真实分组
+  for (const group of groupStore.groups) {
+    const accounts = props.accounts.filter((a) => {
+      if (!accountInGroup(a, group.id)) return false;
+      // 应用搜索过滤
+      if (searchQuery.value) {
+        const query = searchQuery.value.toLowerCase();
+        if (!a.nickname?.toLowerCase().includes(query) && !a.id.toLowerCase().includes(query)) return false;
+      }
+      return true;
+    });
+
+    if (accounts.length > 0) {
+      result.push({
+        groupId: group.id,
+        groupName: group.name,
+        groupColor: group.color,
+        accounts,
+      });
+    }
+  }
+
+  // 未分组的账号
+  const ungrouped = props.accounts.filter((a) => {
+    if (accountHasAnyGroup(a)) return false;
+    if (searchQuery.value) {
+      const query = searchQuery.value.toLowerCase();
+      if (!a.nickname?.toLowerCase().includes(query) && !a.id.toLowerCase().includes(query)) return false;
+    }
+    return true;
+  });
+
+  if (ungrouped.length > 0) {
+    result.push({
+      groupId: '__ungrouped__',
+      groupName: '未分组',
+      groupColor: '#909399',
+      accounts: ungrouped,
+    });
+  }
+
+  return result;
+});
+
+// 切换到分组视图时自动展开所有分组
+watch(viewMode, (mode) => {
+  if (mode === 'group' && groupedByGroup.value.length > 0) {
+    const ids = groupedByGroup.value.map((g) => g.groupId);
+    expandedGroups.value = new Set(ids);
+  }
+});
+
 // 获取平台配置
 function getPlatformConfig(platform: string) {
   return platformConfig[platform as keyof typeof platformConfig] || { label: platform, color: 'var(--color-primary)' };
@@ -94,6 +184,15 @@ function togglePlatform(platform: string) {
     expandedPlatforms.value.delete(platform);
   } else {
     expandedPlatforms.value.add(platform);
+  }
+}
+
+// 切换分组展开状态
+function toggleGroup(groupId: string) {
+  if (expandedGroups.value.has(groupId)) {
+    expandedGroups.value.delete(groupId);
+  } else {
+    expandedGroups.value.add(groupId);
   }
 }
 
@@ -288,11 +387,113 @@ function handleAccountClick(account: Account) {
           </div>
         </template>
 
-        <!-- 按分组（暂未实现） -->
-        <div v-else class="group-view-placeholder">
-          <el-icon :size="32"><Grid /></el-icon>
-          <p>分组视图开发中</p>
-        </div>
+        <!-- 按分组 -->
+        <template v-else>
+          <div
+            v-for="group in groupedByGroup"
+            :key="group.groupId"
+            class="platform-group"
+          >
+            <!-- 分组标题 -->
+            <div
+              class="platform-group__header"
+              @click="toggleGroup(group.groupId)"
+            >
+              <div class="platform-group__left">
+                <span
+                  class="platform-dot"
+                  :style="{ background: group.groupColor }"
+                />
+                <span class="platform-name">{{ group.groupName }}</span>
+                <span class="platform-count">({{ group.accounts.length }})</span>
+              </div>
+              <el-icon
+                class="platform-arrow"
+                :class="{ 'platform-arrow--expanded': expandedGroups.has(group.groupId) }"
+              >
+                <ArrowDown />
+              </el-icon>
+            </div>
+
+            <!-- 账号列表 -->
+            <Transition name="collapse">
+              <div
+                v-if="expandedGroups.has(group.groupId) && group.accounts.length > 0"
+                class="platform-group__accounts"
+              >
+                <div
+                  v-for="account in group.accounts"
+                  :key="account.id"
+                  class="account-item"
+                  :class="{
+                    'account-item--active': isOpened(account.id),
+                    'account-item--external': account.browser_mode !== 'embedded',
+                  }"
+                  @click="handleAccountClick(account)"
+                >
+                  <!-- 头像 -->
+                  <div class="account-item__avatar">
+                    <img
+                      v-if="account.avatar"
+                      :src="account.avatar"
+                      class="account-item__avatar-img"
+                      @error="(e) => { (e.target as HTMLImageElement).style.display = 'none'; }"
+                    />
+                    <span v-if="!account.avatar" class="account-item__avatar-fallback">
+                      {{ account.nickname?.charAt(0) || '?' }}
+                    </span>
+                    <!-- 平台色边框 -->
+                    <span
+                      class="avatar-border"
+                      :style="{ borderColor: getPlatformConfig(account.platform).color }"
+                    />
+                  </div>
+
+                  <!-- 账号信息 -->
+                  <div class="account-item__info">
+                    <div class="account-item__name">
+                      {{ account.nickname || '未命名' }}
+                    </div>
+                    <div class="account-item__meta">
+                      <!-- 平台标签 -->
+                      <span
+                        class="account-item__platform-tag"
+                        :style="{ color: getPlatformConfig(account.platform).color }"
+                      >
+                        {{ getPlatformConfig(account.platform).label }}
+                      </span>
+                      <!-- 状态点 -->
+                      <span
+                        class="status-dot"
+                        :style="{ background: getStatusColor(account.status) }"
+                      />
+                      <span class="status-text">
+                        {{ account.status === 'online' ? '在线' : account.status === 'expired' ? '已过期' : '离线' }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- 浏览器类型图标 -->
+                  <div class="account-item__browser">
+                    <el-icon v-if="account.browser_mode !== 'embedded'" :size="14">
+                      <component :is="getBrowserIcon(account.browser_mode)" />
+                    </el-icon>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+
+            <!-- 空状态提示 -->
+            <Transition name="collapse">
+              <div
+                v-if="expandedGroups.has(group.groupId) && group.accounts.length === 0"
+                class="platform-group__empty"
+              >
+                暂无账号
+              </div>
+            </Transition>
+          </div>
+        </template>
       </template>
     </div>
   </aside>
@@ -319,6 +520,8 @@ export default {
   flex-direction: column;
   background: var(--color-bg-card);
   border-right: 1px solid var(--color-border);
+  position: relative;
+  z-index: var(--z-sidebar);
 }
 
 /* ── 顶部标题栏 ── */

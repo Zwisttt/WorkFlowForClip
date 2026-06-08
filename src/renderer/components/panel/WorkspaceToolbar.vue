@@ -193,6 +193,8 @@ function handleKeydown(e: KeyboardEvent) {
   background: var(--color-workspace-surface);
   border-bottom: 1px solid var(--color-workspace-border);
   padding: 0 12px;
+  position: relative;
+  z-index: var(--z-tabbar);
 }
 
 .workspace-toolbar__nav {

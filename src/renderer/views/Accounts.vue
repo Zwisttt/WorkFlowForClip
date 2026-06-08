@@ -194,6 +194,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { User, Grid, List, Plus } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { useAccountStore } from '@/renderer/stores/account';
@@ -209,6 +210,7 @@ import GroupsTab from '@/renderer/components/group/GroupsTab.vue';
 
 const accountStore = useAccountStore();
 const groupStore = useGroupStore();
+const route = useRoute();
 
 // Tab 状态
 const activeTab = ref('accounts');
@@ -285,6 +287,9 @@ function getGroupName(groupId?: string) {
 onMounted(() => {
   accountStore.fetchAccounts();
   groupStore.fetchGroups();
+  if (route.query.action === 'add') {
+    bindDialogVisible.value = true;
+  }
 });
 
 function handleRefresh() {

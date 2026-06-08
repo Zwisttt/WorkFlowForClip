@@ -57,6 +57,8 @@ const subItems = computed<NavItem[]>(() => {
   justify-content: center;
   background: var(--color-bg-card);
   border-bottom: 1px solid var(--color-border-light);
+  position: relative;
+  z-index: var(--z-header);
 }
 
 .main-layout__titlebar-text {

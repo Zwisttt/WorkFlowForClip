@@ -20,6 +20,9 @@ interface Account {
   status?: 'online' | 'offline' | 'expired';
   browser_mode?: BrowserMode;
   cookieValid?: boolean;
+  groupId?: string;
+  groupIds?: string[];
+  groupInfos?: Array<{ id: string; name: string; color: string }>;
 }
 
 export const usePanelStore = defineStore('panel', () => {
@@ -163,6 +166,24 @@ export const usePanelStore = defineStore('panel', () => {
     }
   }
 
+  async function hideAllPanels() {
+    if (!window.matrixflow) return;
+    try {
+      await window.matrixflow.panel.hideAll();
+    } catch (error) {
+      console.error('隐藏面板失败:', error);
+    }
+  }
+
+  async function showAllPanels() {
+    if (!window.matrixflow) return;
+    try {
+      await window.matrixflow.panel.showAll();
+    } catch (error) {
+      console.error('显示面板失败:', error);
+    }
+  }
+
   return {
     panels,
     availableAccounts,
@@ -179,5 +200,7 @@ export const usePanelStore = defineStore('panel', () => {
     closeAllPanels,
     focusPanel,
     loadPanels,
+    hideAllPanels,
+    showAllPanels,
   };
 });

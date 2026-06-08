@@ -181,6 +181,8 @@ function handleDragEnd() {
   background: var(--color-workspace-surface);
   padding: 0 8px;
   gap: 8px;
+  position: relative;
+  z-index: var(--z-tabbar);
 }
 
 /* ── macOS 窗口控制灯 ── */
