@@ -1,6 +1,6 @@
 {
   "name": "matrixflow",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "MatrixFlow — 多平台内容分发桌面应用",
   "main": "dist/electron/main.js",
   "scripts": {

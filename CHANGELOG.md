@@ -1,12 +1,33 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.1] - 2026-06-08
+
+### Added
+- **B站（bilibili）平台适配器**：publish.ts + login.ts，5 平台全部就绪
+- **10 态状态机**：queued → pending → uploading → publishing → audit → success/failed/cancelled（+ retry/skipped 辅助态）
+- **Watchdog 卡死任务复活**：4 种非终态分级超时处理（1min/5min/15min/30min）
+- **base/ 工具层**：PlatformError（9 类错误）、TopicSanitizer（话题清洗）、DebugRecorder（步骤录制）、RiskControl（拟人化增强）
+- **FailureCoordinator**：失败协调器 + 指数退避重试
+- **嵌入式浏览器 stealth-engine**：browser-manager / fingerprint-adapter / proxy-binder / stealth-scripts
+- **开源合规文档**：LICENSE (MIT)、SECURITY.md、CONTRIBUTING.md、CODE_OF_CONDUCT.md
+- **GitHub 社区模板**：Issue 模板（bug_report.yml / feature_request.yml）+ PR 模板
+- **.env.example**：环境变量配置模板
+
+### Changed
+- **5 平台内嵌浏览器对齐**：抖音/小红书/视频号/快手/B站 publish + login 全部跑通
+- **抖音 upload.ts** 重写至 1773 行（原 197 行）
+- **小红书 upload.ts** 重写至 2298 行（原 286 行）
+- **视频号 upload.ts** 扩展至 2665 行（原 258 行）
+- **发布模块**扩至 23 个组件（原计划 11 个）
+- **IPC 通道** 146 个（`ipcMain.handle`）
+- **单元测试** 114 文件（原 96）
 
 ### Security
 - Sentry DSN 改为环境变量注入（`SENTRY_DSN` / `VITE_SENTRY_DSN`）
-- 清理 Git 历史中的浏览器 Cookie 和会话数据
+- Git 历史清理：移除 16MB 浏览器会话数据 + 真实 Cookie + IP 邮箱
+- 内部安全审计文件移入 `docs/internal/`（.gitignore 排除）
 
-## [0.3.0] - 2026-06-08
+## [0.3.0] - 2026-06-03
 
 ### Added
 
