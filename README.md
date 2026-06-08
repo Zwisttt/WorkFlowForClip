@@ -209,15 +209,54 @@ MatrixFlow/
 
 ## 📈 项目状态
 
-MatrixFlow 正在**积极开发中**。核心功能已完整实现：
+MatrixFlow 正在**积极开发中**。
 
-- ✅ 四平台适配器（发布/登录/Cookie/评论/选择器）
-- ✅ 完整的 IPC 通信层（152 个通道）
-- ✅ AI 驱动的发布优化和数据分析
-- ✅ MCP Server for AI Agent 集成
-- ✅ 安全加固（Ed25519 签名验证、Cookie 加密、沙箱模式）
-- ✅ 单元测试 + 集成测试
+### 当前版本：v0.3.1（2026-06-08）
+
+- ✅ 5 平台适配器（抖音/小红书/视频号/快手/**B站**）— publish + login 全部跑通
+- ✅ 10 态状态机（queued → pending → uploading → publishing → audit → success/failed/cancelled）
+- ✅ Watchdog 卡死任务复活 + FailureCoordinator 失败协调
+- ✅ base/ 工具层（PlatformError / TopicSanitizer / DebugRecorder / RiskControl）
+- ✅ 嵌入式浏览器 stealth-engine（browser-manager + fingerprint + proxy + stealth-scripts）
+- ✅ 完整的 IPC 通信层（146 个通道）、22 张数据库表、17 个 Service
+- ✅ 发布模块（23 组件 + 3 视图）+ AI 驱动的发布优化和数据分析
+- ✅ MCP Server（18 Tool）for AI Agent 集成
+- ✅ 安全加固（Ed25519 签名验证、AES-256-GCM Cookie 加密、沙箱模式）
+- ✅ 单元测试 114 文件 + E2E 测试 7 文件（1094 行）
 - ✅ macOS / Windows 打包
+
+### 🗺 开发路线图
+
+| 版本 | 主题 | 预计 | 状态 |
+|------|------|------|------|
+| **v0.3.2** | 稳定性补全 | 1 周 | 📋 规划中 |
+| **v0.4.x** | 平台扩展 + MCP 增强 | 3-4 周 | 📋 规划中 |
+| **v0.5.x** | 批量发布 + AI 智能排期 | 4-6 周 | 💡 探索中 |
+
+#### v0.3.2 — 稳定性补全
+
+- 🔧 状态机迁移回归测试（8 test case 骨架已就绪）
+- 🔧 废弃目录清理（`electron/browser/` + `electron/scheduler/`）
+- 🔧 快手 + B站 E2E 测试补齐
+- 🔧 config.yaml 完整化（选择器 TS → YAML）
+- 🔧 外置 Chrome + 指纹浏览器路径打磨
+
+#### v0.4.x — 平台扩展 + MCP 增强
+
+- 🆕 **微信公众平台适配**（长文 + 图文发布）
+- 🆕 **知乎适配**（问答 + 专栏）
+- 🆕 **B站完善**（分区选择 + 双封面 + 分片上传 + 六维统计）
+- 🆕 **MCP Tool 扩展**（互动评论 + 数据查询 + 调度控制）
+- 🔧 风险配置中心（`PLATFORM_RISK` 按风控等级映射）
+
+#### v0.5.x — 批量发布 + AI 智能排期
+
+- 🆕 **PublishPlan 批量发布**（多平台 × 多账号矩阵计划）
+- 🆕 **AI 智能排期**（基于历史数据 + 平台策略自动推荐）
+- 🆕 **矩阵号管理**（跨账号内容策略 + 分组规则引擎）
+- 🆕 AI Agent 深度集成（OpenClaw / Relay 评估）
+
+> 完整迭代计划见 [Obsidian](https://obsidian.md) 知识库：`16_内容分发/03_迭代计划/`
 
 ## 🤝 贡献指南
 
