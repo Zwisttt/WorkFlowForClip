@@ -41,6 +41,15 @@
           <span class="filter-panel__label">{{ group.name }}</span>
           <span class="filter-panel__count">{{ getGroupAccountCount(group.id) }}</span>
         </li>
+        <li
+          class="filter-panel__item"
+          :class="{ 'filter-panel__item--active': selectedGroup === '__ungrouped__' }"
+          @click="handleGroupSelect('__ungrouped__')"
+        >
+          <span class="filter-panel__dot filter-panel__dot--ungrouped" />
+          <span class="filter-panel__label">未分组</span>
+          <span class="filter-panel__count">{{ getGroupAccountCount('__ungrouped__') }}</span>
+        </li>
       </ul>
     </div>
   </aside>
@@ -91,6 +100,9 @@ function handleGroupSelect(value: string) {
 }
 
 function getGroupAccountCount(groupId: string): number {
+  if (groupId === '__ungrouped__') {
+    return props.accounts.filter(a => !a.groupId).length;
+  }
   return props.accounts.filter(a => a.groupId === groupId).length;
 }
 </script>
@@ -197,6 +209,13 @@ function getGroupAccountCount(groupId: string): number {
 
 .filter-panel__dot--all {
   background: var(--color-text-placeholder);
+}
+
+.filter-panel__dot--ungrouped {
+  background: transparent;
+  border: 2px dashed var(--color-text-placeholder);
+  width: 8px;
+  height: 8px;
 }
 
 .filter-panel__label {

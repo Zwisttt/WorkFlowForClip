@@ -98,6 +98,10 @@ interface MatrixFlowAPI {
     getTrend: (metric?: string, range?: string) => Promise<any>;
   };
 
+  dashboard: {
+    getOverview: () => Promise<IpcResult<any>>;
+  };
+
   settings: {
     get: (key: string) => Promise<any>;
     set: (key: string, value: any) => Promise<any>;

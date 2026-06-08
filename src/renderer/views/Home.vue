@@ -3,10 +3,10 @@
     <!-- Quick Actions Bar -->
     <div class="home__quick-actions">
       <div class="home__actions-left">
-        <el-button type="primary" :icon="Upload" @click="$router.push('/publish')">
+        <el-button type="primary" :icon="Upload" @click="$router.push('/publish/video')">
           快速发布
         </el-button>
-        <el-button :icon="User" @click="$router.push('/accounts')">
+        <el-button :icon="User" @click="$router.push('/accounts?action=add')">
           授权账号
         </el-button>
       </div>
@@ -24,10 +24,11 @@
         </div>
         <div class="home__metric-info">
           <span class="home__metric-value">{{ accountCount }}</span>
-          <span class="home__metric-label">账号状态</span>
+          <span class="home__metric-label">账号总数</span>
         </div>
         <div class="home__metric-badge">
           <span class="home__metric-online">{{ onlineCount }} 在线</span>
+          <span class="home__metric-offline">{{ accountCount - onlineCount }} 离线</span>
         </div>
       </div>
 
@@ -37,7 +38,7 @@
         </div>
         <div class="home__metric-info">
           <span class="home__metric-value">{{ contentCount }}</span>
-          <span class="home__metric-label">内容总数</span>
+          <span class="home__metric-label">发布中</span>
         </div>
       </div>
 
@@ -78,23 +79,24 @@
           <h3>最近发布</h3>
           <el-button text size="small" @click="$router.push('/tasks')">查看全部</el-button>
         </div>
-        <el-table :data="recentTasks" size="small" :show-header="true" style="width: 100%">
+        <el-table :data="recentTasks" size="small" style="width: 100%" v-loading="loading">
           <el-table-column label="平台" width="64" align="center">
             <template #default="{ row }">
               <span class="home__platform-dot" :style="{ background: platformColor(row.platform) }"></span>
             </template>
           </el-table-column>
-          <el-table-column prop="title" label="标题" min-width="120" show-overflow-tooltip />
-          <el-table-column label="状态" width="80" align="center">
+          <el-table-column prop="accountName" label="账号" width="80" show-overflow-tooltip />
+          <el-table-column prop="title" label="标题" min-width="100" show-overflow-tooltip />
+          <el-table-column label="状态" width="72" align="center">
             <template #default="{ row }">
               <el-tag :type="statusType(row.status)" size="small" effect="light">
                 {{ statusLabel(row.status) }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="时间" width="100" align="right">
+          <el-table-column label="时间" width="80" align="right">
             <template #default="{ row }">
-              <span class="home__time-text">{{ formatTime(row.time) }}</span>
+              <span class="home__time-text">{{ row.time }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -123,19 +125,13 @@
         </div>
       </div>
     </div>
-
-    <!-- 开发中遮罩 -->
-    <div class="dev-overlay">
-      <span class="dev-overlay__text">开发中</span>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { useAccountStore } from '@/renderer/stores/account';
-import { usePublishStore } from '@/renderer/stores/publish';
+import { useDashboardStore } from '@/renderer/stores/dashboard';
 import TrendChart from '@/renderer/components/charts/TrendChart.vue';
 import type { TrendSeries } from '@/renderer/components/charts/TrendChart.vue';
 import {
@@ -149,65 +145,29 @@ import {
 } from '@element-plus/icons-vue';
 
 const router = useRouter();
-const accountStore = useAccountStore();
-const publishStore = usePublishStore();
+const dashboardStore = useDashboardStore();
 
-// ── Mock data (Phase 1: IPC channels not yet wired) ──
-const accountCount = ref(12);
-const onlineCount = ref(8);
-const contentCount = ref(48);
-const weekTrend = ref<number[]>([10, 15, 8, 22, 18, 25, 30]);
-const aiScore = ref(85);
-const aiInsightCount = ref(3);
+// ── Computed (from store) ──
+const accountCount = computed(() => dashboardStore.accountCount);
+const onlineCount = computed(() => dashboardStore.onlineCount);
+const contentCount = computed(() => dashboardStore.contentCount);
+const aiScore = computed(() => dashboardStore.aiScore);
+const aiInsightCount = computed(() => dashboardStore.aiInsightCount);
+const weekTotal = computed(() => dashboardStore.weekTotal);
+const weekTrendDir = computed(() => dashboardStore.weekTrendDir);
+const weekTrendPct = computed(() => dashboardStore.weekTrendPct);
+const recentTasks = computed(() => dashboardStore.recentTasks);
+const activities = computed(() => dashboardStore.activities);
+const loading = computed(() => dashboardStore.loading);
 
-interface RecentTask {
-  platform: string;
-  title: string;
-  status: 'completed' | 'running' | 'failed' | 'pending';
-  time: string;
-}
-
-const recentTasks = ref<RecentTask[]>([
-  { platform: 'douyin', title: '春季新品穿搭指南', status: 'completed', time: '10:30' },
-  { platform: 'xiaohongshu', title: '护肤心得分享', status: 'completed', time: '09:15' },
-  { platform: 'channels', title: '美食探店Vlog', status: 'running', time: '08:00' },
-  { platform: 'kuaishou', title: '生活小技巧合集', status: 'pending', time: '昨天' },
-  { platform: 'douyin', title: '周末旅行记录', status: 'failed', time: '昨天' },
-]);
-
-interface Activity {
-  desc: string;
-  time: string;
-  color: string;
-}
-
-const activities = ref<Activity[]>([
-  { desc: '抖音账号「生活达人」发布成功', time: '5 分钟前', color: 'var(--color-success)' },
-  { desc: '小红书「美食博主」Cookie 已过期，请重新授权', time: '30 分钟前', color: 'var(--color-warning)' },
-  { desc: 'AI 建议：抖音最佳发布时间为 18:00-20:00', time: '1 小时前', color: '#8b5cf6' },
-  { desc: '快手账号「旅行日记」登录成功', time: '2 小时前', color: 'var(--color-primary)' },
-  { desc: '内容「春季新品」已加入发布队列', time: '3 小时前', color: 'var(--color-accent)' },
-]);
-
-// ── Computed ──
-const trendDates = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+const trendDates = computed(() => dashboardStore.trendDates);
 const trendSeries = computed<TrendSeries[]>(() => [
-  { name: '发布量', data: weekTrend.value },
+  { name: '发布量', data: dashboardStore.weekTrend },
 ]);
 
-const weekTotal = computed(() => weekTrend.value.reduce((a, b) => a + b, 0));
-
-const weekTrendDir = computed(() => {
-  const first = weekTrend.value[0];
-  const last = weekTrend.value[weekTrend.value.length - 1];
-  return last >= first ? 'up' : 'down';
-});
-
-const weekTrendPct = computed(() => {
-  const first = weekTrend.value[0];
-  const last = weekTrend.value[weekTrend.value.length - 1];
-  if (first === 0) return 0;
-  return Math.abs(Math.round(((last - first) / first) * 100));
+// ── Lifecycle ──
+onMounted(async () => {
+  await dashboardStore.fetchOverview();
 });
 
 // ── Helpers ──
@@ -227,6 +187,8 @@ const statusMap: Record<string, { type: 'success' | 'warning' | 'danger' | 'info
   running: { type: 'warning', label: '进行中' },
   failed: { type: 'danger', label: '失败' },
   pending: { type: 'info', label: '待发布' },
+  scheduled: { type: 'info', label: '已排期' },
+  cancelled: { type: 'info', label: '已取消' },
 };
 
 function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' {
@@ -236,24 +198,6 @@ function statusType(status: string): 'success' | 'warning' | 'danger' | 'info' {
 function statusLabel(status: string): string {
   return statusMap[status]?.label ?? status;
 }
-
-function formatTime(time: string): string {
-  return time;
-}
-
-// ── Lifecycle ──
-onMounted(async () => {
-  // Try to hydrate from real stores if data is available
-  try {
-    if (window.matrixflow) {
-      await accountStore.fetchAccounts();
-      accountCount.value = accountStore.totalCount;
-      onlineCount.value = accountStore.onlineCount;
-    }
-  } catch {
-    // Fallback to mock data already set
-  }
-});
 </script>
 
 <style scoped>
@@ -263,26 +207,6 @@ onMounted(async () => {
   flex-direction: column;
   gap: var(--space-6);
   position: relative;
-}
-
-/* ── Development Overlay ── */
-.dev-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(255, 255, 255, 0.78);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  pointer-events: auto;
-}
-
-.dev-overlay__text {
-  font-size: 48px;
-  font-weight: 700;
-  color: rgba(0, 0, 0, 0.12);
-  letter-spacing: 12px;
-  user-select: none;
 }
 
 /* ── Quick Actions ── */
@@ -377,6 +301,15 @@ onMounted(async () => {
   background: var(--color-success-light);
   padding: 2px 8px;
   border-radius: var(--radius-full);
+}
+
+.home__metric-offline {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-placeholder);
+  background: var(--color-bg-page);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  margin-left: 4px;
 }
 
 .home__metric-trend {
@@ -517,6 +450,12 @@ onMounted(async () => {
 }
 
 /* ── Responsive ── */
+@media (max-width: 1200px) {
+  .home__metrics {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
 @media (max-width: 900px) {
   .home__metrics {
     grid-template-columns: repeat(2, 1fr);
@@ -524,6 +463,98 @@ onMounted(async () => {
 
   .home__data-area {
     grid-template-columns: 1fr;
+  }
+
+  .home__quick-actions {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .home__actions-left {
+    width: 100%;
+  }
+
+  .home__actions-left .el-button {
+    flex: 1;
+  }
+
+  .home__ai-badge {
+    align-self: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .home {
+    padding: var(--space-4);
+    gap: var(--space-4);
+  }
+
+  .home__metrics {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+
+  .home__metric-card {
+    padding: var(--space-4);
+    gap: var(--space-3);
+  }
+
+  .home__metric-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .home__metric-value {
+    font-size: var(--font-size-xl);
+  }
+
+  .home__metric-badge {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .home__metric-offline {
+    margin-left: 0;
+  }
+
+  .home__data-area {
+    gap: var(--space-3);
+  }
+
+  .home__quick-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+  }
+
+  .home__actions-left {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .home__actions-left .el-button {
+    width: 100%;
+  }
+
+  .home__ai-badge {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .home__recent-list,
+  .home__timeline {
+    padding: var(--space-4);
+  }
+
+  .home__chart {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .home__section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
   }
 }
 </style>

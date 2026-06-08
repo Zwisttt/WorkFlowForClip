@@ -235,7 +235,11 @@ const filteredAccounts = computed(() => {
     list = list.filter((a) => a.platform === platformFilter.value);
   }
   if (groupFilter.value) {
-    list = list.filter((a) => a.groupId === groupFilter.value);
+    if (groupFilter.value === '__ungrouped__') {
+      list = list.filter((a) => !a.groupId);
+    } else {
+      list = list.filter((a) => a.groupId === groupFilter.value);
+    }
   }
   if (statusFilter.value) {
     list = list.filter((a) => a.status === statusFilter.value);

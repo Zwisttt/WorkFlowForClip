@@ -168,6 +168,11 @@ const api = {
     getBuildDate: (): Promise<string> => ipcRenderer.invoke('app:getBuildDate'),
   },
 
+  dashboard: {
+    getOverview: () =>
+      ipcRenderer.invoke('dashboard:overview'),
+  },
+
   stats: {
     getOverview: (range?: string) => ipcRenderer.invoke('stats:overview', { range }),
     getPlatformStats: (platform: string, range?: string) =>

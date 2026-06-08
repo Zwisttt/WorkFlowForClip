@@ -227,6 +227,8 @@ const CHANNEL = {
   DIALOG_OPEN_FILE: 'dialog:openFile',
   BROWSER_OPEN_URL: 'browser:openUrl',
   ACCOUNT_OPEN_BROWSER: 'account:openBrowser',
+
+  DASHBOARD_OVERVIEW: 'dashboard:overview',
 } as const;
 
 export interface IpcResult<T = unknown> {
@@ -1546,6 +1548,205 @@ export function registerIpcHandlers(): void {
     } catch (e) {
       return { success: false, message: `打开浏览器失败: ${e}` };
     }
+  });
+
+  // ─── 仪表盘总览 ──────────────────────────────────────────
+
+  function formatRelativeTime(dateStr: string): string {
+    if (!dateStr) return '未知';
+    const createdDate = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
+    const diffMs = Date.now() - createdDate.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMins < 1) return '刚刚';
+    if (diffMins < 60) return `${diffMins} 分钟前`;
+    if (diffHours < 24) return `${diffHours} 小时前`;
+    if (diffDays < 7) return `${diffDays} 天前`;
+    return dateStr.slice(0, 10);
+  }
+
+  function platformLabel(platform: string): string {
+    const labels: Record<string, string> = {
+      douyin: '抖音', xiaohongshu: '小红书', channels: '视频号', kuaishou: '快手',
+      weixin: '视频号', weixin_video: '视频号',
+    };
+    return labels[platform] || platform;
+  }
+
+  ipcMain.handle(CHANNEL.DASHBOARD_OVERVIEW, async (): Promise<IpcResult<{
+    accountCount: number;
+    onlineCount: number;
+    contentCount: number;
+    aiScore: number;
+    aiInsightCount: number;
+    weekTrend: number[];
+    trendDates: string[];
+    recentTasks: Array<{
+      id: string;
+      platform: string;
+      accountName: string;
+      title: string;
+      status: string;
+      time: string;
+    }>;
+    activities: Array<{
+      desc: string;
+      time: string;
+      color: string;
+      type: string;
+    }>;
+  }>> => {
+    return wrap(async () => {
+      const db = getDatabase();
+
+      const accRow = db.prepare(
+        'SELECT COUNT(*) as total, SUM(CASE WHEN cookie_valid = 1 THEN 1 ELSE 0 END) as online FROM accounts'
+      ).get() as { total: number; online: number };
+
+      const contentRow = db.prepare(
+        `SELECT COUNT(DISTINCT content_id) as total FROM publish_tasks
+         WHERE status IN ('pending', 'scheduled', 'running')`
+      ).get() as { total: number };
+
+      let aiScore = 100;
+      try {
+        const alerts = await anomalyService.getActiveAlerts();
+        aiScore = Math.max(50, 100 - alerts.length * 5);
+      } catch { /* use default */ }
+
+      let aiInsightCount = 0;
+      try {
+        const insights = await anomalyService.getActiveAlerts();
+        aiInsightCount = insights.length;
+      } catch { /* use default */ }
+
+      const trendDates: string[] = [];
+      const weekTrend: number[] = [];
+      const now = new Date();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+        const dateStr = d.toISOString().split('T')[0];
+        const dayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        trendDates.push(`${dateStr.slice(5)} (${dayNames[d.getDay()]})`);
+
+        const row = db.prepare(
+          `SELECT COUNT(*) as cnt FROM publish_tasks WHERE date(created_at) = ?`
+        ).get(dateStr) as { cnt: number };
+        weekTrend.push(row?.cnt ?? 0);
+      }
+
+      const taskRows = db.prepare(
+        `SELECT pt.id, pt.platform, pt.account_id, pt.title, pt.status, pt.created_at,
+                acc.nickname
+         FROM publish_tasks pt
+         LEFT JOIN accounts acc ON pt.account_id = acc.id
+         ORDER BY pt.created_at DESC
+         LIMIT 8`
+      ).all() as Array<{
+        id: string; platform: string; account_id: string | null;
+        title: string; status: string; created_at: string;
+        nickname: string | null;
+      }>;
+
+      const recentTasks = taskRows.map((row) => ({
+        id: row.id,
+        platform: row.platform,
+        accountName: row.nickname || row.account_id || '未知账号',
+        title: row.title || '(无标题)',
+        status: row.status,
+        time: formatRelativeTime(row.created_at),
+      }));
+
+      const activities: Array<{ desc: string; time: string; color: string; type: string }> = [];
+
+      const successRows = db.prepare(
+        `SELECT pt.platform, pt.title, acc.nickname, pt.completed_at
+         FROM publish_tasks pt
+         LEFT JOIN accounts acc ON pt.account_id = acc.id
+         WHERE pt.status = 'completed'
+         ORDER BY pt.completed_at DESC
+         LIMIT 5`
+      ).all() as Array<{ platform: string; title: string; nickname: string | null; completed_at: string }>;
+
+      for (const row of successRows) {
+        activities.push({
+          desc: `${platformLabel(row.platform)}账号「${row.nickname || '未知'}」发布「${row.title || '(无标题)'}」成功`,
+          time: formatRelativeTime(row.completed_at),
+          color: 'var(--color-success)',
+          type: 'publish_success',
+        });
+      }
+
+      const expiredRows = db.prepare(
+        `SELECT id, platform, nickname, updated_at
+         FROM accounts
+         WHERE cookie_valid = 0 AND status = 'expired'
+         ORDER BY updated_at DESC
+         LIMIT 3`
+      ).all() as Array<{ id: string; platform: string; nickname: string; updated_at: string }>;
+
+      for (const row of expiredRows) {
+        activities.push({
+          desc: `${platformLabel(row.platform)}账号「${row.nickname || row.id}」Cookie 已过期，请重新授权`,
+          time: formatRelativeTime(row.updated_at),
+          color: 'var(--color-warning)',
+          type: 'cookie_expired',
+        });
+      }
+
+      const newAccountRows = db.prepare(
+        `SELECT id, platform, nickname, created_at
+         FROM accounts
+         ORDER BY created_at DESC
+         LIMIT 3`
+      ).all() as Array<{ id: string; platform: string; nickname: string; created_at: string }>;
+
+      const sevenDayAgo = Date.now() - 7 * 86400000;
+      for (const row of newAccountRows) {
+        const createdMs = new Date(row.created_at + 'Z').getTime();
+        if (createdMs > sevenDayAgo) {
+          activities.push({
+            desc: `${platformLabel(row.platform)}账号「${row.nickname || row.id}」已添加成功`,
+            time: formatRelativeTime(row.created_at),
+            color: 'var(--color-primary)',
+            type: 'account_added',
+          });
+        }
+      }
+
+      const queuedRows = db.prepare(
+        `SELECT pt.platform, pt.title, acc.nickname, pt.created_at
+         FROM publish_tasks pt
+         LEFT JOIN accounts acc ON pt.account_id = acc.id
+         WHERE pt.status IN ('pending', 'scheduled')
+         ORDER BY pt.created_at DESC
+         LIMIT 3`
+      ).all() as Array<{ platform: string; title: string; nickname: string | null; created_at: string }>;
+
+      for (const row of queuedRows) {
+        activities.push({
+          desc: `内容「${row.title || '(无标题)'}」已加入 ${platformLabel(row.platform)} 发布队列`,
+          time: formatRelativeTime(row.created_at),
+          color: 'var(--color-accent)',
+          type: 'queue_added',
+        });
+      }
+
+      activities.sort((a, b) => a.time.localeCompare(b.time));
+
+      return {
+        accountCount: accRow?.total ?? 0,
+        onlineCount: accRow?.online ?? 0,
+        contentCount: contentRow?.total ?? 0,
+        aiScore,
+        aiInsightCount,
+        weekTrend,
+        trendDates,
+        recentTasks,
+        activities: activities.slice(0, 20),
+      };
+    });
   });
 
   logger.info('IPC 处理器已注册');
