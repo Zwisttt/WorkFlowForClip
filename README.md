@@ -102,7 +102,7 @@ AI 不是插件，是核心引擎。贯穿发布全流程的智能辅助。
 ### 安装
 
 ```bash
-git clone https://github.com/fullbearded/MatrixFlow.git
+git clone https://github.com/your-username/MatrixFlow.git
 cd MatrixFlow
 npm install
 npx patchright install chrome
@@ -194,11 +194,11 @@ MatrixFlow/
 │   ├── ai/                   # AI 服务 (LLM Multi-Provider, Anomaly, Cache)
 │   ├── data/                 # SQLite 数据库 + 迁移
 │   ├── config/               # 配置 (限流, AI, Ed25519 公钥)
-│   └── ipc/                  # IPC 处理器 (97 个通道)
+│   └── ipc/                  # IPC 处理器 (152 个通道)
 ├── src/renderer/             # 渲染进程 (Vue 3)
-│   ├── views/                # 页面组件 (12 个视图)
+│   ├── views/                # 页面组件 (11 个视图)
 │   ├── components/           # UI 组件 (10 个组件域)
-│   ├── stores/               # Pinia 状态管理 (11 个 Store)
+│   ├── stores/               # Pinia 状态管理 (12 个 Store)
 │   └── router/               # 路由配置
 ├── mcp-server/               # MCP Server (独立 npm 包, 18 个 Tool)
 ├── tests/                    # 测试
@@ -212,7 +212,7 @@ MatrixFlow/
 MatrixFlow 正在**积极开发中**。核心功能已完整实现：
 
 - ✅ 四平台适配器（发布/登录/Cookie/评论/选择器）
-- ✅ 完整的 IPC 通信层（97 个通道）
+- ✅ 完整的 IPC 通信层（152 个通道）
 - ✅ AI 驱动的发布优化和数据分析
 - ✅ MCP Server for AI Agent 集成
 - ✅ 安全加固（Ed25519 签名验证、Cookie 加密、沙箱模式）

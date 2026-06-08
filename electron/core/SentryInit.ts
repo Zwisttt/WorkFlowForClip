@@ -1,7 +1,5 @@
 import * as Sentry from '@sentry/electron/main';
 
-const SENTRY_DSN = '__SENTRY_DSN_REDACTED__';
-
 const SENSITIVE_KEYS = [
   /cookie/i,
   /token/i,
@@ -50,7 +48,7 @@ export function initSentryMain(): void {
   const { app } = require('electron') as typeof import('electron');
 
   Sentry.init({
-    dsn: SENTRY_DSN,
+    dsn: process.env.SENTRY_DSN!,
     release: `matrixflow@${app.getVersion()}`,
     environment: process.env.NODE_ENV === 'development' ? 'development' : 'production',
     transportOptions: {

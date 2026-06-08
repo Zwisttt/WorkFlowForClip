@@ -70,3 +70,6 @@ storage/
 screenshots/
 data/cookies/
 data/*.json
+
+# Internal docs (security audit, design drafts)
+docs/internal/

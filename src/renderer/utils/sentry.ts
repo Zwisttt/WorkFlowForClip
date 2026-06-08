@@ -1,7 +1,5 @@
 import * as Sentry from '@sentry/electron/renderer';
 
-const SENTRY_DSN = '__SENTRY_DSN_REDACTED__';
-
 const SENSITIVE_KEYS = [
   /cookie/i,
   /token/i,
@@ -48,7 +46,7 @@ function scrubEvent(event: Sentry.Event): Sentry.Event {
 
 export function initSentryRenderer(): void {
   Sentry.init({
-    dsn: SENTRY_DSN,
+    dsn: import.meta.env.VITE_SENTRY_DSN,
     release: 'matrixflow@0.1.0',
     environment: import.meta.env.DEV ? 'development' : 'production',
     maxBreadcrumbs: 50,
