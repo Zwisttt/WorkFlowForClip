@@ -272,7 +272,7 @@ export function buildChannelsLoginProbeScript(): string {
   }
 
   var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  var timer = controller ? window.setTimeout(function () { controller.abort(); }, 2500) : null;
+  var timer = controller ? window.setTimeout(function () { controller.abort(); }, 8000) : null;
 
   try {
     var response = await fetch('/cgi-bin/mmfinderassistant-bin/auth/auth_data', {
@@ -313,7 +313,9 @@ export function buildChannelsLoginProbeScript(): string {
       errCode: errCode
     };
   } catch (error) {
-    return { loggedIn: false, reason: 'no_positive_marker' };
+    var errName = error && error.name ? error.name : 'UnknownError';
+    var reason = errName === 'AbortError' ? 'no_positive_marker:timeout' : 'no_positive_marker:' + errName;
+    return { loggedIn: false, reason: reason };
   } finally {
     if (timer) window.clearTimeout(timer);
   }

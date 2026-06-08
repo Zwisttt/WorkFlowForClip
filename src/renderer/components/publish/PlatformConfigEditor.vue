@@ -169,16 +169,73 @@
     <div v-if="platform === 'douyin'" class="config-section">
       <h4>抖音专属</h4>
       <div class="form-group">
+        <label class="form-label">添加内容类型声明</label>
+        <select v-model="localConfig.declaration" class="form-select" @change="emitUpdate">
+          <option value="none">无需添加自主声明</option>
+          <option value="ai_generated">内容由AI生成</option>
+          <option value="personal_opinion">内容为个人观点或见解</option>
+          <option value="repost">内容为转载信息</option>
+          <option value="marketing">内容含营销推广信息</option>
+          <option value="fictional">虚构演绎，仅供娱乐</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">谁可以看</label>
+        <div class="radio-group">
+          <label class="radio-item">
+            <input type="radio" v-model="localConfig.visibility" value="public" @change="emitUpdate" />
+            <span>公开</span>
+          </label>
+          <label class="radio-item">
+            <input type="radio" v-model="localConfig.visibility" value="friends" @change="emitUpdate" />
+            <span>好友可看</span>
+          </label>
+          <label class="radio-item">
+            <input type="radio" v-model="localConfig.visibility" value="private" @change="emitUpdate" />
+            <span>仅自己可见</span>
+          </label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">保存权限</label>
+        <div class="radio-group">
+          <label class="radio-item">
+            <input type="radio" v-model="localConfig.allowDownload" :value="true" @change="emitUpdate" />
+            <span>允许保存</span>
+          </label>
+          <label class="radio-item">
+            <input type="radio" v-model="localConfig.allowDownload" :value="false" @change="emitUpdate" />
+            <span>不允许保存</span>
+          </label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">发布时间</label>
+        <div class="radio-group">
+          <label class="radio-item">
+            <input type="radio" v-model="localConfig.scheduleMode" value="immediate" @change="emitUpdate" />
+            <span>立即发布</span>
+          </label>
+          <label class="radio-item">
+            <input type="radio" v-model="localConfig.scheduleMode" value="scheduled" @change="emitUpdate" />
+            <span>定时发布</span>
+          </label>
+          <input
+            v-if="localConfig.scheduleMode === 'scheduled'"
+            v-model="localConfig.scheduledAt"
+            type="datetime-local"
+            class="schedule-inline"
+            @input="emitUpdate"
+          />
+        </div>
+        <span class="form-hint">定时发布最多 30 天</span>
+      </div>
+      <div class="form-group">
         <label class="form-label">互动设置</label>
         <div class="checkbox-group">
-          <!-- 视频号不支持自动评论功能，这里只显示抖音 -->
           <label class="checkbox-item">
             <input v-model="localConfig.allowComment" type="checkbox" @change="emitUpdate" />
             <span>允许评论</span>
-          </label>
-          <label class="checkbox-item">
-            <input v-model="localConfig.allowShare" type="checkbox" @change="emitUpdate" />
-            <span>允许下载</span>
           </label>
         </div>
       </div>
@@ -342,8 +399,8 @@ const localConfig = reactive<PlatformConfig>({
   scheduleMode: 'immediate',
   allowComment: true,
   allowShare: true,
+  allowDownload: true,
   allowSameFrame: false,
-  allowDownload: false,
   showInCity: true,
   isOriginal: false,
   location: '',
@@ -457,6 +514,14 @@ watch(
       if (localConfig.allowSameFrame === undefined) localConfig.allowSameFrame = false;
       if (localConfig.allowDownload === undefined) localConfig.allowDownload = false;
       if (localConfig.showInCity === undefined) localConfig.showInCity = true;
+    }
+    // 抖音默认值
+    if (props.account.platform === 'douyin') {
+      if (!localConfig.declaration) localConfig.declaration = 'none';
+      if (!localConfig.visibility) localConfig.visibility = 'public';
+      if (localConfig.allowDownload === undefined) localConfig.allowDownload = true;
+      if (localConfig.allowComment === undefined) localConfig.allowComment = true;
+      if (!localConfig.scheduleMode) localConfig.scheduleMode = 'immediate';
     }
   },
   { deep: true, immediate: true }

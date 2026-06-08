@@ -1,6 +1,6 @@
 export interface E2EConfig {
   mockAccountLogin: boolean;
-  mockPlatform: 'douyin' | 'xiaohongshu' | 'channels' | 'kuaishou';
+  mockPlatform: 'douyin' | 'xiaohongshu' | 'channels' | 'kuaishou' | 'bilibili';
   headless: boolean;
   viewport: { width: number; height: number };
   devServerUrl: string;

@@ -56,7 +56,7 @@ const mockAdapter = {
 vi.mock('@electron/platform/base/PlatformRegistry', () => ({
   PlatformRegistry: {
     getAdapter: (platform: string) => ['douyin', 'channels'].includes(platform) ? mockAdapter : undefined,
-    getSupportedPlatforms: () => ['douyin', 'xiaohongshu', 'channels', 'kuaishou'],
+    getSupportedPlatforms: () => ['douyin', 'xiaohongshu', 'channels', 'kuaishou', 'bilibili'],
     getAllAdapters: () => [],
   },
 }));

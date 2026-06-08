@@ -340,7 +340,7 @@ async function clearAllGroups() {
 }
 
 const PLATFORM_HOMEPAGE: Record<string, string> = {
-  douyin: 'https://creator.douyin.com/creator-micro/content',
+  douyin: 'https://creator.douyin.com/creator-micro/home',
   xiaohongshu: 'https://creator.xiaohongshu.com/publish/publish',
   kuaishou: 'https://cp.kuaishou.com/article/publish/video',
   bilibili: 'https://member.bilibili.com/platform/home',

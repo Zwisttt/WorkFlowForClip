@@ -17,6 +17,13 @@
     <!-- 工具栏：筛选 + 操作 -->
     <div class="page-tasks__toolbar">
       <TaskFilterBar :plans="plans" @change="onFilterChange" />
+      <el-switch
+        v-model="showGrouped"
+        active-text="按内容分组"
+        inactive-text="按任务"
+        size="small"
+        @change="onGroupToggle"
+      />
     </div>
 
     <!-- 批量操作栏 -->
@@ -53,10 +60,11 @@
     <!-- 列表区域 -->
     <div class="page-tasks__list">
       <TaskTable
+        :mode="showGrouped ? 'group' : 'task'"
         :group-total="taskStore.total"
         @detail="onShowDetail"
-        @execute="onExecuteGroup"
-        @delete="onDeleteGroup"
+        @execute="onExecuteTask"
+        @delete="onDeleteTask"
       />
 
       <!-- 空状态 -->
@@ -71,7 +79,7 @@
       <!-- 分页 -->
       <div v-if="taskStore.total > 0" class="page-tasks__pagination">
         <span class="page-tasks__pagination-info">
-          共 {{ taskStore.total }} 个发布内容
+          共 {{ taskStore.total }} 个{{ showGrouped ? '发布内容' : '发布任务' }}
         </span>
         <el-pagination
           :current-page="currentPage"
@@ -87,7 +95,7 @@
       </div>
     </div>
 
-    <TaskDetailDrawer v-model="drawerVisible" :group="selectedGroup" />
+    <TaskDetailDrawer v-model="drawerVisible" :task="selectedTask" />
   </div>
 </template>
 
@@ -99,7 +107,7 @@ import {
   List, Calendar, Document, VideoCamera,
 } from '@element-plus/icons-vue';
 import { useTaskStore } from '@/renderer/stores/task';
-import type { GroupedTask } from '@/renderer/stores/task';
+import type { GroupedTask, Task } from '@/renderer/stores/task';
 import TaskFilterBar from '@/renderer/components/publish/TaskFilterBar.vue';
 import TaskTable from '@/renderer/components/publish/TaskTable.vue';
 import TaskDetailDrawer from '@/renderer/components/publish/TaskDetailDrawer.vue';
@@ -119,7 +127,8 @@ function isActive(path: string) {
 }
 
 const drawerVisible = ref(false);
-const selectedGroup = ref<GroupedTask | null>(null);
+const showGrouped = ref(false);
+const selectedTask = ref<Task | null>(null);
 const PAGE_SIZE_KEY = 'matrixflow.publishTasks.pageSize';
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -144,7 +153,7 @@ const plans = ref<{ id: string; name: string }[]>([]);
 let unlisten: (() => void) | null = null;
 
 onMounted(async () => {
-  taskStore.filter.groupByContent = true;
+  taskStore.filter.groupByContent = showGrouped.value;
   await fetchCurrentPage();
   unlisten = taskStore.listenIpcEvents();
   await loadPlans();
@@ -170,7 +179,7 @@ async function loadPlans() {
 async function fetchCurrentPage() {
   taskStore.filter.limit = pageSize.value;
   taskStore.filter.offset = (currentPage.value - 1) * pageSize.value;
-  taskStore.filter.groupByContent = true;
+  taskStore.filter.groupByContent = showGrouped.value;
   await taskStore.fetchTasks();
 
   const lastPage = Math.max(1, Math.ceil(taskStore.total / pageSize.value));
@@ -205,21 +214,19 @@ async function onFilterChange() {
   await fetchCurrentPage();
 }
 
-function onShowDetail(group: GroupedTask) {
-  selectedGroup.value = group;
+function onShowDetail(task: Task) {
+  selectedTask.value = task;
   drawerVisible.value = true;
 }
 
-async function onExecuteGroup(group: GroupedTask) {
-  const next = group.subTasks.find(t => t.status === 'pending' || t.status === 'failed');
-  if (!next) {
-    ElMessage.info('没有待执行的任务');
+async function onExecuteTask(task: Task) {
+  if (task.status !== 'pending' && task.status !== 'failed') {
+    ElMessage.info('当前状态不允许执行');
     return;
   }
-
   try {
-    await taskStore.retryTask(next.id);
-    ElMessage.success(`发布成功: ${next.accountName || next.platform}`);
+    await taskStore.retryTask(task.id);
+    ElMessage.success(`发布成功: ${task.accountName || task.platform}`);
   } catch (error) {
     console.error('执行发布任务失败:', error);
     const message = error instanceof Error ? error.message : '执行发布任务失败';
@@ -227,63 +234,20 @@ async function onExecuteGroup(group: GroupedTask) {
   }
 }
 
-async function onRetry(id: string) {
+async function onDeleteTask(task: Task) {
   try {
-    await taskStore.retryTask(id);
-    ElMessage.success('重试已提交');
-  } catch {
-    ElMessage.error('重试失败');
-  }
-}
-
-async function onCancel(id: string) {
-  try {
-    await ElMessageBox.confirm('确定取消该任务？', '取消确认', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning',
-    });
-    await taskStore.cancelTask(id);
-    ElMessage.success('任务已取消');
-  } catch {}
-}
-
-async function onSkip(id: string) {
-  try {
-    await taskStore.cancelTask(id);
-    ElMessage.success('已跳过');
-  } catch {
-    ElMessage.error('操作失败');
-  }
-}
-
-async function onDeleteGroup(group: GroupedTask) {
-  try {
-    let failedCount = 0;
-    for (const sub of group.subTasks) {
-      try {
-        await taskStore.deleteTask(sub.id);
-      } catch {
-        failedCount++;
-      }
-    }
-    if (failedCount === 0) {
-      ElMessage.success('删除成功');
-    } else if (failedCount < group.subTasks.length) {
-      ElMessage.warning(`${failedCount} 条任务删除失败（可能正在执行中）`);
-    } else {
-      ElMessage.error('删除失败');
-    }
+    await taskStore.deleteTask(task.id);
+    ElMessage.success('删除成功');
     await fetchCurrentPage();
   } catch {
-    ElMessage.error('删除失败');
+    ElMessage.error('删除失败（可能正在执行中）');
   }
 }
 
-function onPlanClick(planId: string | null) {
-  if (planId) {
-    // Navigate to plan detail
-  }
+async function onGroupToggle(val: boolean) {
+  taskStore.filter.groupByContent = val;
+  currentPage.value = 1;
+  await fetchCurrentPage();
 }
 
 </script>

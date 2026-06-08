@@ -112,7 +112,7 @@ describe('channels/login', () => {
       expect(browser.newContext).toHaveBeenCalledWith({ storageState: '/tmp/valid.json' });
       expect(page.goto).toHaveBeenCalledWith('https://channels.weixin.qq.com/platform/post/create', {
         timeout: 15000,
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'load',
       });
       expect(browser.close).toHaveBeenCalled();
     });

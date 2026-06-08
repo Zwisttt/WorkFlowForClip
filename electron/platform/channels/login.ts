@@ -96,7 +96,7 @@ export async function validateExistingCookie(cookiePath: string): Promise<boolea
 
     const page = await context.newPage();
 
-    await page.goto(CHANNELS_URLS.upload, { timeout: 15000, waitUntil: 'domcontentloaded' });
+    await page.goto(CHANNELS_URLS.upload, { timeout: 15000, waitUntil: 'load' });
 
     const detection = await detectChannelsLoginInPage(page);
     if (detection.loggedIn) {

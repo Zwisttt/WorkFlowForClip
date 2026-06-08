@@ -53,6 +53,7 @@ export interface UploadContext {
   location?: string;
   visibility?: 'public' | 'private' | 'friends' | 'followers' | string;
   declaration?: string;
+  scheduleMode?: 'immediate' | 'scheduled';
   scheduledAt?: string | Date | null;
   allowComment?: boolean;
   allowShare?: boolean;

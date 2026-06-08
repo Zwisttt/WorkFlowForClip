@@ -3,7 +3,7 @@
  * 8 种错误子类，覆盖所有平台操作失败场景
  */
 
-export type PlatformId = 'douyin' | 'xiaohongshu' | 'channels' | 'kuaishou';
+export type PlatformId = 'douyin' | 'xiaohongshu' | 'channels' | 'kuaishou' | 'bilibili';
 
 export type ErrorCategory =
   | 'NetworkError'         // 网络错误

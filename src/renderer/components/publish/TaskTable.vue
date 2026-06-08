@@ -1,123 +1,172 @@
 <template>
   <div class="task-table">
-    <div class="task-table__header">
-      <span class="task-table__count">
-        本页 {{ taskStore.groupedTasks.length }} 个发布内容 / 共 {{ groupTotal }} 个发布内容
-      </span>
-    </div>
-    <el-table :data="taskStore.groupedTasks" v-loading="taskStore.loading" stripe border
-      @row-click="onRowClick"
-      @selection-change="onSelectionChange"
-      ref="tableRef">
-      <el-table-column type="selection" width="45" :selectable="() => true" />
-      <el-table-column label="内容预览" min-width="240">
-        <template #default="{ row }">
-          <div class="task-table__content-cell">
-            <div class="task-table__cover">
-              <img
-                v-show="row.coverUrl"
-                :src="normalizeCoverUrl(row.coverUrl)"
-                class="task-table__cover-img"
-                @error="onImgError"
-              />
-              <el-icon v-show="!row.coverUrl" :size="20"><VideoCameraFilled /></el-icon>
+    <!-- Group Mode -->
+    <template v-if="mode === 'group'">
+      <div class="task-table__header">
+        <span class="task-table__count">
+          本页 {{ taskStore.groupedTasks.length }} 个发布内容 / 共 {{ groupTotal }} 个发布内容
+        </span>
+      </div>
+      <el-table :data="taskStore.groupedTasks" v-loading="taskStore.loading" stripe border
+        @row-click="onGroupRowClick"
+        @selection-change="onGroupSelectionChange"
+        ref="tableRef">
+        <el-table-column type="selection" width="45" />
+        <el-table-column label="内容预览" min-width="240">
+          <template #default="{ row }">
+            <div class="task-table__content-cell">
+              <div class="task-table__cover">
+                <img
+                  v-show="row.coverUrl"
+                  :src="normalizeCoverUrl(row.coverUrl)"
+                  class="task-table__cover-img"
+                  @error="onImgError"
+                />
+                <el-icon v-show="!row.coverUrl" :size="20"><VideoCameraFilled /></el-icon>
+              </div>
+              <div class="task-table__content-info">
+                <span class="task-table__title">{{ row.title }}</span>
+              </div>
             </div>
-            <div class="task-table__content-info">
-              <span class="task-table__title">{{ row.title }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="发布账号" min-width="200">
+          <template #default="{ row }">
+            <div class="task-table__accounts">
+              <span v-for="(acc, i) in row.accounts" :key="i" class="task-table__account-tag">
+                <span class="task-table__platform-dot" :class="acc.platform"></span>
+                <span class="task-table__platform-name">{{ platformLabel(acc.platform) }}</span>
+                <span class="task-table__account-name">{{ acc.accountName || '-' }}</span>
+              </span>
             </div>
-          </div>
-        </template>
-      </el-table-column>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="140">
+          <template #default="{ row }">
+            <span class="task-table__time">{{ formatTime(row.createdAt) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.status === 'pending' || row.status === 'failed'"
+              size="small" type="primary" link
+              @click.stop="onGroupExecute(row)"
+            >{{ row.status === 'failed' ? '重新执行' : '执行发布' }}</el-button>
+            <el-button size="small" link @click.stop="onGroupRowClick(row)">详情</el-button>
+            <el-button size="small" type="danger" link @click.stop="onGroupDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </template>
 
-      <el-table-column label="发布账号" min-width="200">
-        <template #default="{ row }">
-          <div class="task-table__accounts">
-            <span
-              v-for="(acc, i) in row.accounts"
-              :key="i"
-              class="task-table__account-tag"
-            >
-              <span class="task-table__platform-dot" :class="acc.platform"></span>
-              <span class="task-table__platform-name">{{ platformLabel(acc.platform) }}</span>
-              <span class="task-table__account-name">{{ acc.accountName || '-' }}</span>
-              <el-tooltip
-                v-if="acc.platform === 'kuaishou' && row.tags && row.tags.length > 4"
-                :content="`快手话题上限4个，当前${row.tags.length}个，请修改后发布`"
-                placement="top"
-              >
-                <el-icon class="task-table__warn-icon" :size="14"><WarningFilled /></el-icon>
-              </el-tooltip>
-            </span>
-          </div>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag size="small" :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="创建时间" width="140">
-        <template #default="{ row }">
-          <span class="task-table__time">{{ formatTime(row.createdAt) }}</span>
-        </template>
-      </el-table-column>
-
-      <el-table-column label="操作" width="180" fixed="right">
-        <template #default="{ row }">
-          <el-button
-            v-if="row.status === 'pending' || row.status === 'failed'"
-            size="small"
-            type="primary"
-            link
-            @click.stop="onExecute(row)"
-          >{{ row.status === 'failed' ? '重新执行' : '执行发布' }}</el-button>
-          <el-button size="small" link @click.stop="onRowClick(row)">详情</el-button>
-          <el-button size="small" type="danger" link @click.stop="onDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- Task Mode (default) -->
+    <template v-else>
+      <div class="task-table__header">
+        <span class="task-table__count">
+          本页 {{ taskStore.tasks.length }} 个发布任务 / 共 {{ groupTotal }} 个发布任务
+        </span>
+      </div>
+      <el-table :data="taskStore.tasks" v-loading="taskStore.loading" stripe border
+        @row-click="onTaskRowClick"
+        @selection-change="onTaskSelectionChange"
+        ref="tableRef">
+        <el-table-column type="selection" width="45" />
+        <el-table-column label="平台" width="90">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.status === 'failed' ? 'danger' : ''">
+              {{ platformLabel(row.platform) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="accountName" label="账号" width="110" show-overflow-tooltip />
+        <el-table-column label="内容" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="task-table__content-title">{{ row.contentTitle || row.title || '无标题' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="错误信息" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.message" class="task-table__error">{{ row.message }}</span>
+            <span v-else class="task-table__none">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="145">
+          <template #default="{ row }">
+            <span class="task-table__time">{{ formatTime(row.createdAt) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="160" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.status === 'pending' || row.status === 'scheduled' || row.status === 'failed'"
+              size="small" type="primary" link
+              @click.stop="onTaskExecute(row)"
+            >{{ row.status === 'failed' ? '重试' : '执行' }}</el-button>
+            <el-button size="small" link @click.stop="onTaskRowClick(row)">详情</el-button>
+            <el-button
+              v-if="row.status !== 'running'"
+              size="small" type="danger" link
+              @click.stop="onTaskDelete(row)"
+            >删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useTaskStore } from '@/renderer/stores/task';
-import type { TaskStatus, GroupedTask } from '@/renderer/stores/task';
+import type { TaskStatus, GroupedTask, Task } from '@/renderer/stores/task';
 import { ElMessageBox } from 'element-plus';
-import { VideoCameraFilled, WarningFilled } from '@element-plus/icons-vue';
+import { VideoCameraFilled } from '@element-plus/icons-vue';
 
 const taskStore = useTaskStore();
 
-defineProps<{ groupTotal: number }>();
-
-const emit = defineEmits<{
-  (e: 'detail', task: GroupedTask): void;
-  (e: 'execute', task: GroupedTask): void;
-  (e: 'delete', task: GroupedTask): void;
+const props = defineProps<{
+  mode?: 'task' | 'group';
+  groupTotal: number;
 }>();
 
-function onRowClick(row: GroupedTask) {
+const emit = defineEmits<{
+  (e: 'detail', task: Task): void;
+  (e: 'execute', task: Task): void;
+  (e: 'delete', task: Task): void;
+}>();
+
+const mode = props.mode ?? 'task';
+
+// ── Task Mode ──
+function onTaskRowClick(row: Task) {
   emit('detail', row);
 }
 
-function onExecute(row: GroupedTask) {
+function onTaskExecute(row: Task) {
   emit('execute', row);
 }
 
-function onSelectionChange(rows: GroupedTask[]) {
+function onTaskSelectionChange(rows: Task[]) {
   taskStore.clearSelection();
   for (const row of rows) {
-    for (const sub of row.subTasks) {
-      taskStore.toggleSelect(sub.id);
-    }
+    taskStore.toggleSelect(row.id);
   }
 }
 
-async function onDelete(row: GroupedTask) {
+async function onTaskDelete(row: Task) {
   try {
     await ElMessageBox.confirm(
-      `确定删除「${row.title}」的所有发布任务？此操作不可恢复。`,
+      `确定删除「${row.contentTitle || row.title || '无标题'}」在「${row.accountName || row.platform}」的发布任务？`,
       '删除确认',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning', confirmButtonClass: 'el-button--danger' },
     );
@@ -127,6 +176,41 @@ async function onDelete(row: GroupedTask) {
   }
 }
 
+// ── Group Mode ──
+function onGroupRowClick(row: GroupedTask) {
+  emit('detail', row as unknown as Task);
+}
+
+function onGroupExecute(row: GroupedTask) {
+  const next = row.subTasks.find(t => t.status === 'pending' || t.status === 'failed');
+  if (next) emit('execute', next);
+}
+
+function onGroupSelectionChange(rows: GroupedTask[]) {
+  taskStore.clearSelection();
+  for (const row of rows) {
+    for (const sub of row.subTasks) {
+      taskStore.toggleSelect(sub.id);
+    }
+  }
+}
+
+async function onGroupDelete(row: GroupedTask) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${row.title}」的所有发布任务？此操作不可恢复。`,
+      '删除确认',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning', confirmButtonClass: 'el-button--danger' },
+    );
+    for (const sub of row.subTasks) {
+      emit('delete', sub);
+    }
+  } catch {
+    // cancelled
+  }
+}
+
+// ── Helpers ──
 function onImgError(e: Event) {
   (e.target as HTMLImageElement).style.display = 'none';
 }
@@ -248,6 +332,11 @@ function formatTime(iso?: string): string {
   text-overflow: ellipsis;
 }
 
+.task-table__content-title {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
 .task-table__accounts {
   display: flex;
   flex-wrap: wrap;
@@ -287,18 +376,21 @@ function formatTime(iso?: string): string {
   font-weight: var(--font-weight-medium);
 }
 
-.task-table__warn-icon {
-  color: var(--el-color-danger, #f56c6c);
-  margin-left: 2px;
-  vertical-align: middle;
-  cursor: pointer;
-}
-
 .task-table__time {
   font-family: var(--font-family-mono);
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   white-space: nowrap;
+}
+
+.task-table__error {
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+}
+
+.task-table__none {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-placeholder);
 }
 
 .task-table :deep(.el-table) {

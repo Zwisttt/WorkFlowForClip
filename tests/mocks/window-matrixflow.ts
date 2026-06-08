@@ -247,7 +247,7 @@ export function createMatrixflowMock(): MatrixflowMock {
     },
 
     platforms: {
-      list: fn(['douyin', 'xiaohongshu', 'channels', 'kuaishou']),
+      list: fn(['douyin', 'xiaohongshu', 'channels', 'kuaishou', 'bilibili']),
       getConfig: fn(null),
       getCapabilities: fn(null),
     },

@@ -484,8 +484,21 @@ export class AccountLoginService {
             this.log('downloadAvatar error', { error: String(err), platform });
           }
         }
+
+        let nickname = result.nickname || channelsProfile?.nickname || '';
+        if (!nickname && platform === 'douyin') {
+          try {
+            nickname = await this.fetchDouyinNicknameViaApi(webContents);
+            if (nickname) {
+              this.log('douyin nickname from api', { nickname });
+            }
+          } catch (err) {
+            this.log('douyin api nickname error', { error: String(err) });
+          }
+        }
+
         return {
-          nickname: result.nickname || channelsProfile?.nickname || '',
+          nickname,
           avatarUrl: avatarPath || channelsProfile?.avatarUrl || result.avatarUrl || '',
           homepageUrl: result.homepageUrl || channelsProfile?.homepageUrl || undefined,
         };
@@ -494,7 +507,129 @@ export class AccountLoginService {
       this.log('extractProfile error', { error: String(err) });
     }
 
+    if (platform === 'douyin') {
+      try {
+        const apiProfile = await this.fetchDouyinProfileViaApi(webContents, accountId);
+        if (apiProfile) {
+          this.log('douyin profile from api fallback', { nickname: apiProfile.nickname, hasAvatar: !!apiProfile.avatarUrl });
+          return apiProfile;
+        }
+      } catch (err) {
+        this.log('douyin api profile error', { error: String(err) });
+      }
+    }
+
+    if (platform === 'xiaohongshu') {
+      try {
+        const apiProfile = await this.fetchXhsProfileViaApi(webContents, accountId);
+        if (apiProfile) {
+          this.log('xhs profile from api fallback', { nickname: apiProfile.nickname, hasAvatar: !!apiProfile.avatarUrl });
+          return apiProfile;
+        }
+      } catch (err) {
+        this.log('xhs api profile error', { error: String(err) });
+      }
+    }
+
     return channelsProfile;
+  }
+
+  private async fetchDouyinProfileViaApi(webContents: Electron.WebContents, accountId: string): Promise<UserProfile | undefined> {
+    const result = await webContents.executeJavaScript(`
+      (async function() {
+        try {
+          var resp = await fetch('https://creator.douyin.com/web/api/media/user/info/');
+          if (!resp.ok) return null;
+          var body = await resp.json();
+          if (body.status_code === 0 && body.user) {
+            return {
+              nickname: body.user.nickname || '',
+              avatarUrl: (body.user.avatar_thumb && body.user.avatar_thumb.url_list && body.user.avatar_thumb.url_list[0]) || ''
+            };
+          }
+          return null;
+        } catch(e) {
+          return null;
+        }
+      })()
+    `);
+    if (!result || typeof result !== 'object') return undefined;
+    const nickname = result.nickname || '';
+    const rawAvatarUrl = result.avatarUrl || '';
+    let avatarPath = '';
+    if (rawAvatarUrl && rawAvatarUrl.startsWith('http')) {
+      try {
+        avatarPath = await this.downloadAvatar(rawAvatarUrl, 'douyin', accountId);
+      } catch (err) {
+        this.log('douyin api downloadAvatar error', { error: String(err) });
+      }
+    }
+    const profile = {
+      nickname,
+      avatarUrl: avatarPath || rawAvatarUrl || '',
+      homepageUrl: 'https://creator.douyin.com/creator-micro/home',
+    };
+    return profile.nickname || profile.avatarUrl ? profile : undefined;
+  }
+
+  private async fetchDouyinNicknameViaApi(webContents: Electron.WebContents): Promise<string> {
+    const apiUrl = 'https://creator.douyin.com/web/api/media/user/info/';
+    const result = await webContents.executeJavaScript(`
+      (async function() {
+        try {
+          var resp = await fetch('${apiUrl}');
+          if (!resp.ok) return '';
+          var body = await resp.json();
+          if (body.status_code === 0 && body.user && body.user.nickname) {
+            return body.user.nickname;
+          }
+          return '';
+        } catch(e) {
+          return '';
+        }
+      })()
+    `);
+    return typeof result === 'string' ? result : '';
+  }
+
+  private async fetchXhsProfileViaApi(webContents: Electron.WebContents, accountId: string): Promise<UserProfile | undefined> {
+    const result = await webContents.executeJavaScript(`
+      (async function() {
+        try {
+          var resp = await fetch('https://creator.xiaohongshu.com/api/galaxy/user/info', {
+            headers: { 'Referer': 'https://creator.xiaohongshu.com/' }
+          });
+          if (!resp.ok) return null;
+          var body = await resp.json();
+          if (body && body.result === 0 && body.data) {
+            return {
+              nickname: body.data.userName || body.data.redId || '',
+              avatarUrl: body.data.userAvatar || ''
+            };
+          }
+          return null;
+        } catch(e) {
+          return null;
+        }
+      })()
+    `);
+    if (!result || typeof result !== 'object') return undefined;
+    const nickname = result.nickname || '';
+    const rawAvatarUrl = result.avatarUrl || '';
+    let avatarPath = '';
+    if (rawAvatarUrl && (rawAvatarUrl.startsWith('http://') || rawAvatarUrl.startsWith('https://'))) {
+      try {
+        avatarPath = await this.downloadAvatar(rawAvatarUrl, 'xiaohongshu', accountId);
+      } catch (err) {
+        this.log('xhs api downloadAvatar error', { error: String(err) });
+      }
+    }
+    const profile = {
+      nickname,
+      avatarUrl: avatarPath || rawAvatarUrl || '',
+      homepageUrl: 'https://creator.xiaohongshu.com',
+    };
+    return profile.nickname || profile.avatarUrl ? profile : undefined;
   }
 
   private async handleExternalLogin(platform: Platform, accountId: string, browserConfig: BrowserConfig): Promise<{ storagePath: string; profile?: UserProfile }> {
@@ -756,6 +891,23 @@ export class AccountLoginService {
         this.log('extractXhsProfile error', { error: String(err), attempt });
       }
       await this.sleep(1500);
+    }
+    // API fallback if DOM detection returned incomplete results (missing avatar or nickname)
+    try {
+      const apiProfile = await this.fetchXhsProfileViaApi(webContents, accountId);
+      if (apiProfile) {
+        this.log('extractXhsProfile api fallback', { nickname: apiProfile.nickname, hasAvatar: !!apiProfile.avatarUrl });
+        if (bestProfile) {
+          return {
+            nickname: bestProfile.nickname || apiProfile.nickname || '',
+            avatarUrl: bestProfile.avatarUrl || apiProfile.avatarUrl || '',
+            homepageUrl: bestProfile.homepageUrl || apiProfile.homepageUrl || 'https://creator.xiaohongshu.com',
+          };
+        }
+        return apiProfile;
+      }
+    } catch (err) {
+      this.log('extractXhsProfile api fallback error', { error: String(err) });
     }
     return bestProfile;
   }

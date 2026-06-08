@@ -231,7 +231,9 @@ export class AccountService implements IAccountService {
         const config = {
           bilibili: { domains: ['.bilibili.com'], required: ['SESSDATA'] },
           kuaishou: { domains: ['.kuaishou.com'], required: ['kuaishou.web.cp.api_ph', 'kuaishou.web.cp.api_st'] },
-        }[platform as 'bilibili' | 'kuaishou'];
+          douyin: { domains: ['.douyin.com'], required: ['sessionid', 'sid_tt'] },
+          xiaohongshu: { domains: ['.xiaohongshu.com'], required: ['a1'] },
+        }[platform as 'bilibili' | 'kuaishou' | 'douyin' | 'xiaohongshu'];
         if (config) {
           for (const domain of config.domains) {
             const cookies = await ses.cookies.get({ domain });

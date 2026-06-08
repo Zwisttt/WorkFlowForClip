@@ -24,6 +24,10 @@ vi.mock('@electron/platform/kuaishou', () => ({
   kuaishouAdapter: { platformId: 'kuaishou' },
 }));
 
+vi.mock('@electron/platform/bilibili', () => ({
+  bilibiliAdapter: { platformId: 'bilibili' },
+}));
+
 vi.mock('@electron/platform/base/types', () => ({}));
 vi.mock('@electron/platform/base/interfaces', () => ({}));
 vi.mock('@electron/platform/base/BaseAdapter', () => ({}));
@@ -35,6 +39,7 @@ import {
   xiaohongshuAdapter,
   channelsAdapter,
   kuaishouAdapter,
+  bilibiliAdapter,
 } from '@electron/platform/adapter';
 
 describe('platform/adapter', () => {
@@ -43,20 +48,21 @@ describe('platform/adapter', () => {
   });
 
   describe('registerAllAdapters', () => {
-    it('registers all 4 platforms', () => {
+    it('registers all 5 platforms', () => {
       registerAllAdapters();
 
-      expect(mockRegister).toHaveBeenCalledTimes(4);
+      expect(mockRegister).toHaveBeenCalledTimes(5);
       expect(mockRegister).toHaveBeenCalledWith({ platformId: 'douyin' });
       expect(mockRegister).toHaveBeenCalledWith({ platformId: 'xiaohongshu' });
       expect(mockRegister).toHaveBeenCalledWith({ platformId: 'channels' });
       expect(mockRegister).toHaveBeenCalledWith({ platformId: 'kuaishou' });
+      expect(mockRegister).toHaveBeenCalledWith({ platformId: 'bilibili' });
     });
   });
 
   describe('PLATFORM_IDS', () => {
     it('has correct keys', () => {
-      expect(Object.keys(PLATFORM_IDS)).toEqual(['douyin', 'xiaohongshu', 'channels', 'kuaishou']);
+      expect(Object.keys(PLATFORM_IDS)).toEqual(['douyin', 'xiaohongshu', 'channels', 'kuaishou', 'bilibili']);
     });
 
     it('has matching key-value pairs', () => {
@@ -64,6 +70,7 @@ describe('platform/adapter', () => {
       expect(PLATFORM_IDS.xiaohongshu).toBe('xiaohongshu');
       expect(PLATFORM_IDS.channels).toBe('channels');
       expect(PLATFORM_IDS.kuaishou).toBe('kuaishou');
+      expect(PLATFORM_IDS.bilibili).toBe('bilibili');
     });
   });
 
@@ -82,6 +89,10 @@ describe('platform/adapter', () => {
 
     it('exports kuaishouAdapter', () => {
       expect(kuaishouAdapter).toEqual({ platformId: 'kuaishou' });
+    });
+
+    it('exports bilibiliAdapter', () => {
+      expect(bilibiliAdapter).toEqual({ platformId: 'bilibili' });
     });
   });
 });

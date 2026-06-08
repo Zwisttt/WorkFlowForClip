@@ -1,62 +1,88 @@
 <template>
   <el-drawer v-model="visible" title="发布详情" direction="rtl" size="460px"
     :before-close="onClose">
-      <div v-if="group" class="drawer-body">
-      <div class="drawer-cover" v-if="group.coverUrl">
-        <img :src="normalizeCoverUrl(group.coverUrl)" class="drawer-cover__img" @error="onImgError" />
+    <div v-if="task" class="drawer-body">
+      <div class="drawer-cover" v-if="task.coverUrl">
+        <img :src="normalizeCoverUrl(task.coverUrl)" class="drawer-cover__img" @error="onImgError" />
       </div>
 
       <div class="drawer-section">
-        <h4 class="drawer-section__title">内容信息</h4>
+        <h4 class="drawer-section__title">任务信息</h4>
         <div class="drawer-row">
-          <span class="label">标题</span>
-          <span class="value">{{ group.title }}</span>
+          <span class="label">内容</span>
+          <span class="value">{{ task.contentTitle || task.title || '无标题' }}</span>
         </div>
-        <div v-if="group.description" class="drawer-row">
+        <div v-if="task.description" class="drawer-row">
           <span class="label">描述</span>
-          <span class="value">{{ group.description }}</span>
+          <span class="value">{{ task.description }}</span>
         </div>
-        <div v-if="group.tags?.length" class="drawer-row">
+        <div v-if="task.tags?.length" class="drawer-row">
           <span class="label">标签</span>
-          <span class="value">{{ group.tags.join('、') }}</span>
+          <span class="value">{{ task.tags.join('、') }}</span>
+        </div>
+        <div class="drawer-row">
+          <span class="label">平台</span>
+          <span class="value">
+            <span class="drawer-subtask__platform-dot" :class="task.platform" style="display:inline-block"></span>
+            {{ platformLabel(task.platform) }}
+          </span>
+        </div>
+        <div class="drawer-row">
+          <span class="label">账号</span>
+          <span class="value">{{ task.accountName || task.accountId }}</span>
+        </div>
+        <div class="drawer-row">
+          <span class="label">状态</span>
+          <span class="value">
+            <el-tag size="small" :type="statusTagType(task.status)">{{ statusLabel(task.status) }}</el-tag>
+          </span>
         </div>
         <div class="drawer-row">
           <span class="label">创建时间</span>
-          <span class="value">{{ formatTime(group.createdAt) }}</span>
+          <span class="value">{{ formatTime(task.createdAt) }}</span>
         </div>
-        <div v-if="group.scheduledAt" class="drawer-row">
-          <span class="label">发布时间</span>
-          <span class="value">{{ formatTime(group.scheduledAt) }}</span>
+        <div v-if="task.scheduledAt" class="drawer-row">
+          <span class="label">定时时间</span>
+          <span class="value">{{ formatTime(task.scheduledAt) }}</span>
+        </div>
+        <div v-if="task.startedAt" class="drawer-row">
+          <span class="label">开始时间</span>
+          <span class="value">{{ formatTime(task.startedAt) }}</span>
+        </div>
+        <div v-if="task.completedAt" class="drawer-row">
+          <span class="label">完成时间</span>
+          <span class="value">{{ formatTime(task.completedAt) }}</span>
+        </div>
+        <div v-if="task.durationMs" class="drawer-row">
+          <span class="label">耗时</span>
+          <span class="value">{{ formatDuration(task.durationMs) }}</span>
+        </div>
+        <div class="drawer-row">
+          <span class="label">重试次数</span>
+          <span class="value">{{ task.retryCount }}</span>
+        </div>
+        <div v-if="task.errorCode" class="drawer-row">
+          <span class="label">错误码</span>
+          <span class="value">{{ task.errorCode }}</span>
         </div>
       </div>
 
+      <div v-if="task.status === 'failed' && task.message" class="drawer-section">
+        <h4 class="drawer-section__title">错误信息</h4>
+        <div class="drawer-error">{{ task.message }}</div>
+      </div>
+
       <div class="drawer-section">
-        <h4 class="drawer-section__title">关联账号 ({{ group.accounts.length }})</h4>
-        <div
-          v-for="sub in group.subTasks"
-          :key="sub.id"
-          class="drawer-subtask"
-        >
-          <div class="drawer-subtask__info">
-            <span class="drawer-subtask__platform-dot" :class="sub.platform"></span>
-            <span class="drawer-subtask__platform">{{ platformLabel(sub.platform) }}</span>
-            <span class="drawer-subtask__account">{{ sub.accountName || sub.accountId }}</span>
-          </div>
-          <div class="drawer-subtask__meta">
-            <el-tag size="small" :type="statusTagType(sub.status)">{{ statusLabel(sub.status) }}</el-tag>
-            <span v-if="sub.scheduledAt" class="drawer-subtask__time">{{ formatTime(sub.scheduledAt) }}</span>
-            <span v-if="sub.durationMs" class="drawer-subtask__duration">{{ formatDuration(sub.durationMs) }}</span>
-            <el-button
-              v-if="sub.status === 'pending' || sub.status === 'failed'"
-              size="small"
-              type="primary"
-              @click="onExecute(sub.id)"
-            >{{ sub.status === 'failed' ? '重试' : '执行' }}</el-button>
-          </div>
-          <div v-if="sub.status === 'failed' && (sub.message || (sub as any).error)" class="drawer-subtask__error">
-            {{ sub.message || (sub as any).error }}
-          </div>
-        </div>
+        <el-button
+          v-if="task.status === 'pending' || task.status === 'scheduled' || task.status === 'failed'"
+          type="primary"
+          @click="onExecute(task.id)"
+        >{{ task.status === 'failed' ? '重试' : '立即执行' }}</el-button>
+        <el-button
+          v-if="task.status === 'running'"
+          type="danger"
+          @click="onCancel(task.id)"
+        >取消任务</el-button>
       </div>
     </div>
     <el-empty v-else description="无数据" />
@@ -65,15 +91,15 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useTaskStore } from '@/renderer/stores/task';
-import type { GroupedTask, TaskStatus } from '@/renderer/stores/task';
+import type { Task, TaskStatus } from '@/renderer/stores/task';
 
 const taskStore = useTaskStore();
 
 const props = defineProps<{
   modelValue: boolean;
-  group: GroupedTask | null;
+  task: Task | null;
 }>();
 
 const emit = defineEmits<{
@@ -106,6 +132,20 @@ async function onExecute(taskId: string) {
     setTimeout(() => taskStore.fetchTasks(), 1000);
   } catch {
     ElMessage.error('执行失败');
+  }
+}
+
+async function onCancel(taskId: string) {
+  try {
+    await ElMessageBox.confirm('确定取消该任务？', '取消确认', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+    await taskStore.cancelTask(taskId);
+    ElMessage.success('任务已取消');
+  } catch {
+    // cancelled
   }
 }
 
@@ -215,21 +255,6 @@ function formatDuration(ms?: number): string {
   word-break: break-all;
 }
 
-.drawer-subtask {
-  padding: var(--space-2) var(--space-3);
-  margin-bottom: var(--space-2);
-  background: var(--color-bg-page);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-light);
-}
-
-.drawer-subtask__info {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-bottom: var(--space-1);
-}
-
 .drawer-subtask__platform-dot {
   width: 8px;
   height: 8px;
@@ -243,42 +268,15 @@ function formatDuration(ms?: number): string {
 .drawer-subtask__platform-dot.channels { background: var(--color-plat-wechat); }
 .drawer-subtask__platform-dot.kuaishou { background: var(--color-plat-kuaishou); }
 
-.drawer-subtask__platform {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-}
-
-.drawer-subtask__account {
-  font-weight: var(--font-weight-medium);
-  font-size: var(--font-size-sm);
-}
-
-.drawer-subtask__meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.drawer-subtask__time {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-placeholder);
-  font-family: var(--font-family-mono);
-}
-
-.drawer-subtask__duration {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-placeholder);
-}
-
-.drawer-subtask__error {
-  margin-top: var(--space-1);
-  padding: var(--space-1) var(--space-2);
+.drawer-error {
+  padding: var(--space-3);
   background: var(--color-danger-light);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-xs);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
   color: var(--color-danger);
   font-family: var(--font-family-mono);
   word-break: break-all;
+  white-space: pre-wrap;
 }
 
 :deep(.el-tag) {

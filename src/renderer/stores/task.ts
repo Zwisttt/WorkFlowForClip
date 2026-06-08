@@ -101,7 +101,7 @@ export const useTaskStore = defineStore('task', () => {
     dateTo: undefined,
     limit: 20,
     offset: 0,
-    groupByContent: true,
+    groupByContent: false,
   });
 
   const runningTasks = computed(() => tasks.value.filter((t) => t.status === 'running'));

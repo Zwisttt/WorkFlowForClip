@@ -3,13 +3,13 @@ import fs from 'fs';
 import type { Page } from 'patchright';
 import { chromium } from 'patchright';
 import { Logger } from '../../core/Logger';
-import { KUAISHOU_URLS, LOGIN_SELECTORS } from './selectors';
+import { BILIBILI_URLS, LOGIN_SELECTORS } from './selectors';
 import { getCookiePath, saveCookie, cookieExists } from './cookie';
 import type { CookieResult, LoginOptions } from '../base/types';
 import { PageRiskControl } from '../base/RiskControl';
 import { getDebugRecorder } from '../base/DebugRecorder';
 
-const logger = new Logger('KuaishouLogin');
+const logger = new Logger('BilibiliLogin');
 
 const CHROME_ARGS = [
   '--disable-gpu',
@@ -35,10 +35,10 @@ export async function validateExistingCookie(cookiePath: string): Promise<boolea
     const context = await browser.newContext({ storageState: cookiePath });
     const page = await context.newPage();
 
-    await page.goto(KUAISHOU_URLS.upload, { timeout: 15000 });
+    await page.goto(BILIBILI_URLS.upload, { timeout: 15000 });
 
     try {
-      await page.waitForURL(/cp\.kuaishou\.com/, { timeout: 8000 });
+      await page.waitForURL(/member\.bilibili\.com/, { timeout: 8000 });
     } catch {
       return false;
     }
@@ -68,7 +68,7 @@ export async function validateExistingCookie(cookiePath: string): Promise<boolea
 }
 
 async function extractQrCodeSrc(page: Page): Promise<string> {
-  const scanTab = page.getByText('扫码登录', { exact: true }).first();
+  const scanTab = page.getByText('扫码登录', { exact: false }).first();
   await scanTab.waitFor({ timeout: 30000 });
 
   const qrcodeImg = page.locator(LOGIN_SELECTORS.qrCodeImage).first();
@@ -76,7 +76,7 @@ async function extractQrCodeSrc(page: Page): Promise<string> {
   const src = await qrcodeImg.getAttribute('src');
 
   if (!src) {
-    throw new Error('未获取到快手登录二维码地址');
+    throw new Error('未获取到哔哩哔哩登录二维码地址');
   }
 
   logger.info('二维码地址已提取');
@@ -86,7 +86,7 @@ async function extractQrCodeSrc(page: Page): Promise<string> {
 async function saveQrCodeImage(src: string, accountId: string): Promise<string> {
   const { app } = await import('electron');
   const userDataPath = app.getPath('userData');
-  const qrDir = path.join(userDataPath, 'qrcodes', 'kuaishou');
+  const qrDir = path.join(userDataPath, 'qrcodes', 'bilibili');
 
   if (!fs.existsSync(qrDir)) {
     fs.mkdirSync(qrDir, { recursive: true });
@@ -110,14 +110,14 @@ async function saveQrCodeImage(src: string, accountId: string): Promise<string> 
 }
 
 async function isLoginCompleted(page: Page): Promise<boolean> {
-  if (!page.url().includes('cp.kuaishou.com')) {
+  if (!page.url().includes('member.bilibili.com')) {
     return false;
   }
 
   if (
-    page.url().includes('/article/publish') ||
-    page.url().includes('/article/manage') ||
-    page.url().includes('/data/')
+    page.url().includes('/platform/upload') ||
+    page.url().includes('/platform/upload-manager') ||
+    page.url().includes('/platform/data-view')
   ) {
     return true;
   }
@@ -179,10 +179,10 @@ async function waitForLogin(
 }
 
 /**
- * 从快手创作者中心页面提取当前登录用户的昵称和头像。
+ * 从哔哩哔哩创作者中心页面提取当前登录用户的昵称和头像。
  *
  * 策略：DOM 优先 —— 通过 LOGIN_SELECTORS 读取页面元素。
- * 登录成功后页面通常在 /article/publish 或 /article/manage，
+ * 登录成功后页面通常在 /platform/upload 或 /platform/upload-manager，
  * 这些页面的 header 中通常包含用户头像和昵称。
  */
 async function extractUserInfo(page: Page): Promise<{
@@ -192,7 +192,6 @@ async function extractUserInfo(page: Page): Promise<{
   let nickname: string | undefined;
   let avatarUrl: string | undefined;
 
-  // 1. DOM 提取昵称
   const usernameEl = page.locator(LOGIN_SELECTORS.usernameText).first();
   if (
     (await usernameEl.count().catch(() => 0)) &&
@@ -205,7 +204,6 @@ async function extractUserInfo(page: Page): Promise<{
     }
   }
 
-  // 2. 头像 <img> 的 src
   const avatarEl = page.locator(LOGIN_SELECTORS.avatarIndicator).first();
   if (
     (await avatarEl.count().catch(() => 0)) &&
@@ -217,7 +215,6 @@ async function extractUserInfo(page: Page): Promise<{
       logger.info(`从头像元素提取到头像: ${avatarUrl.substring(0, 80)}`);
     }
 
-    // 3. 如果没有昵称，尝试头像的 alt 属性
     if (!nickname) {
       const alt =
         (await avatarEl.getAttribute('alt').catch(() => ''))?.trim() ?? '';
@@ -244,7 +241,7 @@ export async function qrCodeLogin(
 ): Promise<CookieResult> {
   const cookiePath = getCookiePath(accountId);
   const debugRecorder = getDebugRecorder();
-  debugRecorder.setSessionId(`kuaishou_login_${accountId}_${Date.now()}`);
+  debugRecorder.setSessionId(`bilibili_login_${accountId}_${Date.now()}`);
   const pageCtx = { accountId };
 
   if (options.force) {
@@ -275,14 +272,14 @@ export async function qrCodeLogin(
     const page = allPages.length > 0 ? allPages[0] : await context.newPage();
     const pageCtxWithPage = { page, ...pageCtx };
 
-    logger.info('打开快手创作者中心...');
+    logger.info('打开哔哩哔哩创作者中心...');
     await debugRecorder.recordStep('goto_login_page', async () => {
-      await page.goto(KUAISHOU_URLS.loginPage, { waitUntil: 'domcontentloaded' });
+      await page.goto(BILIBILI_URLS.loginPage, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(2000);
     }, pageCtxWithPage);
 
-    if (page.url().includes('/article/publish') || page.url().includes('/article/manage')) {
-      logger.info('快手已登录，cookie 有效');
+    if (page.url().includes('/platform/upload') || page.url().includes('/platform/upload-manager')) {
+      logger.info('哔哩哔哩已登录，cookie 有效');
       await saveCookie(context, cookiePath);
 
       const { nickname, avatarUrl } = await extractUserInfo(page);
@@ -293,7 +290,7 @@ export async function qrCodeLogin(
       return {
         success: true,
         cookiePath,
-        message: '快手已登录，cookie有效',
+        message: '哔哩哔哩已登录，cookie有效',
         nickname,
         avatarUrl,
       };
@@ -302,7 +299,7 @@ export async function qrCodeLogin(
     await debugRecorder.recordStep('extract_qr_code', async () => {
       const qrSrc = await extractQrCodeSrc(page);
       const qrPath = await saveQrCodeImage(qrSrc, accountId);
-      logger.info('请使用快手 APP 扫描二维码登录');
+      logger.info('请使用哔哩哔哩 APP 扫描二维码登录');
       logger.info(`二维码文件: ${qrPath}`);
       onQRReady?.(qrPath);
     }, pageCtxWithPage);
@@ -346,7 +343,7 @@ export async function qrCodeLogin(
 function getUserDataDir(accountId: string): string {
   const { app } = require('electron');
   const userDataPath = app.getPath('userData');
-  const dir = path.join(userDataPath, 'browser_data', 'kuaishou', accountId);
+  const dir = path.join(userDataPath, 'browser_data', 'bilibili', accountId);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -368,7 +365,7 @@ export async function getQRCode(accountId: string): Promise<string> {
     const context = await browser.newContext();
     const page = await context.newPage();
 
-    await page.goto(KUAISHOU_URLS.loginPage);
+    await page.goto(BILIBILI_URLS.loginPage);
     const src = await extractQrCodeSrc(page);
     const qrPath = await saveQrCodeImage(src, accountId);
 

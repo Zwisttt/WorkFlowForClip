@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { useAccountStore } from '@/renderer/stores/account';
 
 export type PublishStatus = 'pending' | 'scheduled' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
 export type PublishMode = 'server' | 'client';
@@ -96,22 +97,38 @@ export const usePublishStore = defineStore('publish', () => {
     coverRatio?: string;
   }) {
     if (!window.matrixflow) return;
+    const accountStore = useAccountStore();
     const results: PublishTask[] = [];
     for (const accountId of data.accountIds) {
-      const task = await window.matrixflow.publish.createTask({
-        contentId: data.contentId,
-        accountId,
-        platform: '',
-        scheduledAt: data.scheduledAt,
-        publishMode: data.publishMode,
-        metadata: {
-          dryRun: data.dryRun,
-          coverRatio: data.coverRatio,
-        },
-      });
-      if (task) results.push(task as PublishTask);
+      const account = accountStore.accounts.find((a) => a.id === accountId);
+      if (!account) {
+        console.warn(`[publishStore] 账号不存在: ${accountId}`);
+        continue;
+      }
+      try {
+        const response = await window.matrixflow.publish.createTask({
+          contentId: data.contentId,
+          accountId,
+          platform: account.platform,
+          scheduledAt: data.scheduledAt,
+          publishMode: data.publishMode,
+          metadata: {
+            dryRun: data.dryRun,
+            coverRatio: data.coverRatio,
+          },
+        });
+        if (response?.success && response.data) {
+          results.push(response.data as PublishTask);
+        } else if (response && !response.success) {
+          console.warn(`[publishStore] 创建任务失败: accountId=${accountId} message=${response.message}`);
+        }
+      } catch (err) {
+        console.error(`[publishStore] 创建任务异常: accountId=${accountId}`, err);
+      }
     }
-    tasks.value.push(...results);
+    if (results.length > 0) {
+      tasks.value.push(...results);
+    }
     return results;
   }
 

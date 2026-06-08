@@ -353,13 +353,39 @@ async function uploadVideoInEmbeddedBrowser(ctx: UploadContext): Promise<UploadR
       await handleEmbeddedCover(wc, ctx.coverPath);
     });
 
-    // Handle schedule if needed
-    const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
-    if (scheduleTime) {
-      await runEmbeddedDebugStep(wc, ctx, '设置定时发布', async () => {
-        const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
-        if (!mapped) throw new ValidationError('未映射抖音定时发布时间', undefined, 'douyin');
+    // Handle declaration (自主声明)
+    const declaration = ctx.declaration || 'none';
+    if (declaration && declaration !== 'none') {
+      await runEmbeddedDebugStep(wc, ctx, '设置自主声明', async () => {
+        await setEmbeddedDeclaration(wc, declaration);
       });
+    }
+
+    // Handle visibility (谁可以看)
+    const visibility = ctx.visibility || 'public';
+    if (visibility !== 'public') {
+      await runEmbeddedDebugStep(wc, ctx, '设置可见范围', async () => {
+        await setEmbeddedVisibility(wc, visibility);
+      });
+    }
+
+    // Handle save permission (保存权限)
+    if (ctx.allowDownload === false) {
+      await runEmbeddedDebugStep(wc, ctx, '设置保存权限', async () => {
+        await setEmbeddedSavePermission(wc, false);
+      });
+    }
+
+    // Handle schedule if needed
+    const scheduleMode = ctx.scheduleMode || (ctx.scheduledAt ? 'scheduled' : 'immediate');
+    if (scheduleMode === 'scheduled') {
+      const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
+      if (scheduleTime) {
+        await runEmbeddedDebugStep(wc, ctx, '设置定时发布', async () => {
+          const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
+          if (!mapped) throw new ValidationError('未映射抖音定时发布时间', undefined, 'douyin');
+        });
+      }
     }
 
     await recorder.recordStep('账号浏览器发布选项设置完成', async () => {
@@ -969,6 +995,112 @@ async function handleEmbeddedCover(wc: WebContents, coverPath?: string): Promise
   await sleep(500);
 }
 
+const DOUYIN_DECLARATION_MAP: Record<string, string> = {
+  ai_generated: '内容由AI生成',
+  personal_opinion: '内容为个人观点或见解',
+  repost: '内容为转载信息',
+  marketing: '内容含营销推广信息',
+  fictional: '虚构演绎，仅供娱乐',
+};
+
+async function realClickEmbeddedByText(wc: WebContents, targetText: string): Promise<boolean> {
+  const escapedText = targetText.replace(/'/g, "\\'");
+  const coords = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const candidates = Array.from(document.querySelectorAll('div, span, li, [role="option"], [role="menuitem"], button, a, p, label, [class*="option"], [class*="item"]'))
+        .filter((el) => isVisible(el) && (el.innerText || el.textContent || '').trim() === '${escapedText}')
+        .sort((a, b) => (a.innerText || '').trim().length - (b.innerText || '').trim().length);
+      if (candidates.length === 0) return null;
+      const el = candidates[0];
+      const rect = el.getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+    })()
+  `, true).catch(() => null) as { x: number; y: number } | null;
+
+  if (!coords) {
+    return false;
+  }
+
+  wc.sendInputEvent({ type: 'mouseMove', x: coords.x, y: coords.y } as Electron.MouseInputEvent);
+  await sleep(50);
+  wc.sendInputEvent({ type: 'mouseDown', x: coords.x, y: coords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+  await sleep(30);
+  wc.sendInputEvent({ type: 'mouseUp', x: coords.x, y: coords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+
+  return true;
+}
+
+async function setEmbeddedDeclaration(wc: WebContents, declarationValue: string): Promise<void> {
+  const targetText = DOUYIN_DECLARATION_MAP[declarationValue];
+  if (!targetText) {
+    throw new ValidationError(`未知的抖音自主声明值: ${declarationValue}`, undefined, 'douyin');
+  }
+
+  logger.info(`设置抖音自主声明: ${targetText}`);
+
+  const opened = await clickEmbeddedText(wc, [/自主声明/, /内容声明/, /添加声明/]);
+  if (!opened) {
+    throw new ValidationError('未找到抖音自主声明入口', undefined, 'douyin');
+  }
+  await sleep(800);
+
+  const clicked = await realClickEmbeddedByText(wc, targetText);
+  if (!clicked) {
+    throw new ValidationError(`未找到或无法点击抖音自主声明选项: ${targetText}`, undefined, 'douyin');
+  }
+  await sleep(500);
+
+  const confirmed = await clickEmbeddedText(wc, [/^确定$/]);
+  if (!confirmed) {
+    logger.warn('抖音自主声明已选择但未找到确定按钮，继续...');
+  }
+  logger.info(`抖音自主声明已设置: ${targetText}`);
+  await sleep(500);
+}
+
+async function setEmbeddedVisibility(wc: WebContents, visibility: string): Promise<void> {
+  const visibilityMap: Record<string, string> = {
+    friends: '好友可看',
+    private: '仅自己可见',
+  };
+  const targetText = visibilityMap[visibility];
+  if (!targetText) {
+    throw new ValidationError(`未知的抖音可见范围值: ${visibility}`, undefined, 'douyin');
+  }
+
+  logger.info(`设置抖音可见范围: ${targetText}`);
+
+  const opened = await clickEmbeddedText(wc, [/谁可以看/, /查看权限/, /可见范围/]);
+  if (!opened) {
+    throw new ValidationError('未找到抖音可见范围入口', undefined, 'douyin');
+  }
+  await sleep(800);
+
+  const clicked = await realClickEmbeddedByText(wc, targetText);
+  if (!clicked) {
+    throw new ValidationError(`未找到或无法点击抖音可见范围选项: ${targetText}`, undefined, 'douyin');
+  }
+  logger.info(`抖音可见范围已设置: ${targetText}`);
+  await sleep(500);
+}
+
+async function setEmbeddedSavePermission(wc: WebContents, allowSave: boolean): Promise<void> {
+  const targetText = allowSave ? '允许' : '不允许';
+  logger.info(`设置抖音保存权限: ${targetText}`);
+
+  const clicked = await realClickEmbeddedByText(wc, targetText);
+  if (!clicked) {
+    throw new ValidationError(`未找到或无法点击抖音保存权限选项: ${targetText}`, undefined, 'douyin');
+  }
+  logger.info(`抖音保存权限已设置: ${targetText}`);
+  await sleep(500);
+}
+
 async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): Promise<boolean> {
   logger.info(`设置内嵌抖音定时发布时间: ${scheduleTime}`);
 
@@ -1076,32 +1208,52 @@ async function waitForEmbeddedUploadComplete(
   wc: WebContents,
   timeoutMs: number,
 ): Promise<EmbeddedUploadStatus> {
-  logger.info('等待内嵌浏览器视频上传完成...');
+  logger.info('等待内嵌浏览器视频上传完成（URL 跳转检测 + body 文本兜底）...');
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
+    if (wc.isDestroyed()) {
+      return { success: false, message: '页面已关闭' };
+    }
+
+    const currentUrl = wc.getURL();
+    const url = currentUrl || '';
+
+    // 竞品方案：URL 跳转到发布页 = 上传完成（最可靠信号）
+    if (url.includes('/content/publish') || url.includes('/content/post/video')) {
+      logger.info('内嵌浏览器视频上传完成（URL 已跳转到发布页）');
+      return { success: true };
+    }
+
+    // 检测 body 文本作兜底和错误检测
     const state = await wc.executeJavaScript(`
       (() => {
         const bodyText = document.body?.innerText || '';
         return {
           failed: /上传失败|上传出错|文件异常|格式不支持/.test(bodyText),
-          uploading: /上传中|正在上传|处理中|转码中/.test(bodyText),
+          needRetry: /重新上传/.test(bodyText),
           hasPublishArea: /发布|发布时间|封面设置|标题|作品描述|添加标签/.test(bodyText),
         };
       })()
-    `).catch(() => ({ failed: false, uploading: true, hasPublishArea: false })) as {
+    `).catch(() => ({ failed: false, needRetry: false, hasPublishArea: false })) as {
       failed: boolean;
-      uploading: boolean;
+      needRetry: boolean;
       hasPublishArea: boolean;
     };
 
     if (state.failed) {
+      logger.error('检测到上传失败文本');
       return { success: false, message: '视频上传失败' };
     }
 
-    if (!state.uploading && Date.now() - start > 4000) {
-      logger.info('内嵌浏览器视频上传完成');
-      return { success: true };
+    if (state.needRetry && !state.hasPublishArea) {
+      logger.warn('检测到"重新上传"提示，视频可能需要重新上传');
+      return { success: false, message: '视频上传失败，需要重新上传' };
+    }
+
+    // 兜底：如果页面还在 /content/upload 但有发布区域，可能上传区域已隐藏
+    if (state.hasPublishArea && url.includes('/content/upload')) {
+      logger.info('检测到发布区域文本，但 URL 尚未跳转，继续等待...');
     }
 
     await sleep(2000);
@@ -1268,12 +1420,35 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
       await handleEmbeddedCover(wc, ctx.coverPath);
     });
 
-    const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
-    if (scheduleTime) {
-      await runEmbeddedDebugStep(wc, ctx, '设置定时发布', async () => {
-        const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
-        if (!mapped) throw new ValidationError('未映射抖音定时发布时间', undefined, 'douyin');
+    const declaration = ctx.declaration || 'none';
+    if (declaration && declaration !== 'none') {
+      await runEmbeddedDebugStep(wc, ctx, '设置自主声明', async () => {
+        await setEmbeddedDeclaration(wc, declaration);
       });
+    }
+
+    const visibility = ctx.visibility || 'public';
+    if (visibility !== 'public') {
+      await runEmbeddedDebugStep(wc, ctx, '设置可见范围', async () => {
+        await setEmbeddedVisibility(wc, visibility);
+      });
+    }
+
+    if (ctx.allowDownload === false) {
+      await runEmbeddedDebugStep(wc, ctx, '设置保存权限', async () => {
+        await setEmbeddedSavePermission(wc, false);
+      });
+    }
+
+    const scheduleMode = ctx.scheduleMode || (ctx.scheduledAt ? 'scheduled' : 'immediate');
+    if (scheduleMode === 'scheduled') {
+      const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
+      if (scheduleTime) {
+        await runEmbeddedDebugStep(wc, ctx, '设置定时发布', async () => {
+          const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
+          if (!mapped) throw new ValidationError('未映射抖音定时发布时间', undefined, 'douyin');
+        });
+      }
     }
 
     const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {

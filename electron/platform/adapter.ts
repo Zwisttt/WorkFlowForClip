@@ -7,18 +7,21 @@ export { douyinAdapter } from './douyin';
 export { xiaohongshuAdapter } from './xiaohongshu';
 export { channelsAdapter } from './channels';
 export { kuaishouAdapter } from './kuaishou';
+export { bilibiliAdapter } from './bilibili';
 
 import { PlatformRegistry } from './base/PlatformRegistry';
 import { douyinAdapter } from './douyin';
 import { xiaohongshuAdapter } from './xiaohongshu';
 import { channelsAdapter } from './channels';
 import { kuaishouAdapter } from './kuaishou';
+import { bilibiliAdapter } from './bilibili';
 
 export function registerAllAdapters(): void {
   PlatformRegistry.register(douyinAdapter);
   PlatformRegistry.register(xiaohongshuAdapter);
   PlatformRegistry.register(channelsAdapter);
   PlatformRegistry.register(kuaishouAdapter);
+  PlatformRegistry.register(bilibiliAdapter);
 }
 
 export const PLATFORM_IDS = {
@@ -26,6 +29,7 @@ export const PLATFORM_IDS = {
   xiaohongshu: 'xiaohongshu',
   channels: 'channels',
   kuaishou: 'kuaishou',
+  bilibili: 'bilibili',
 } as const;
 
 export type PlatformId = (typeof PLATFORM_IDS)[keyof typeof PLATFORM_IDS];

@@ -8,7 +8,7 @@ import {
 import { getBridge } from './src/bridge.js';
 import type { BridgeResult } from './src/bridge.js';
 
-const PLATFORMS = ['douyin', 'xiaohongshu', 'channels', 'kuaishou'] as const;
+const PLATFORMS = ['douyin', 'xiaohongshu', 'channels', 'kuaishou', 'bilibili'] as const;
 const PUBLISH_MODES = ['server', 'client'] as const;
 const TASK_STATUSES = ['pending', 'scheduled', 'running', 'completed', 'failed', 'cancelled'] as const;
 const METRICS = ['play_count', 'like_count', 'comment_count', 'share_count', 'collect_count'] as const;

@@ -98,6 +98,7 @@ function buildUploadContextFromTask(
     location: taskMeta.location as string | undefined,
     visibility: taskMeta.visibility as UploadContext['visibility'],
     declaration: taskMeta.declaration as string | undefined,
+    scheduleMode: taskMeta.scheduleMode as UploadContext['scheduleMode'],
     scheduledAt: dbTask.scheduled_at || taskMeta.scheduledAt as string | undefined,
     allowComment: taskMeta.allowComment as boolean | undefined,
     allowShare: taskMeta.allowShare as boolean | undefined,
@@ -119,6 +120,17 @@ function buildUploadContextFromTask(
       allowSameFrame: uploadContext.allowSameFrame ?? false,
       allowDownload: uploadContext.allowDownload ?? false,
       showInCity: uploadContext.showInCity ?? true,
+    };
+  }
+
+  if (dbTask.platform === 'douyin') {
+    return {
+      ...uploadContext,
+      declaration: uploadContext.declaration ?? 'none',
+      visibility: uploadContext.visibility ?? 'public',
+      scheduleMode: uploadContext.scheduleMode ?? 'immediate',
+      allowComment: uploadContext.allowComment ?? true,
+      allowDownload: uploadContext.allowDownload ?? true,
     };
   }
 

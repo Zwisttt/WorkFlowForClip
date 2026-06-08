@@ -294,7 +294,7 @@ vi.mock('@electron/platform/base/PlatformRegistry', () => ({
   PlatformRegistry: {
     getAllAdapters: () => [mockAdapter],
     getAdapter: (id: string) => (id === 'douyin' ? mockAdapter : undefined),
-    getSupportedPlatforms: () => ['douyin', 'xiaohongshu', 'channels', 'kuaishou'],
+    getSupportedPlatforms: () => ['douyin', 'xiaohongshu', 'channels', 'kuaishou', 'bilibili'],
   },
 }));
 

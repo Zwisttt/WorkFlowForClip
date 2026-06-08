@@ -363,13 +363,30 @@ export async function qrCodeLogin(
 
     await page.waitForTimeout(3000);
 
-    // 尝试获取登录用户名
-    const usernameEl = page.locator('[class*="nickname"]').first();
-    if ((await usernameEl.count()) && (await usernameEl.isVisible().catch(() => false))) {
-      const username = await usernameEl.textContent().catch(() => '');
-      if (username) {
-        logger.info(`登录账号: ${username}`);
+    let extractedNickname = '';
+    let extractedAvatarUrl = '';
+    try {
+      const apiResult = await page.evaluate(async () => {
+        try {
+          const resp = await fetch('https://creator.douyin.com/web/api/media/user/info/');
+          if (!resp.ok) return null;
+          const body = await resp.json();
+          if (body.status_code === 0 && body.user) {
+            const avatarUrl = body.user.avatar_thumb?.url_list?.[0] || '';
+            return { nickname: body.user.nickname || '', avatarUrl };
+          }
+          return null;
+        } catch { return null; }
+      });
+      if (apiResult) {
+        extractedNickname = apiResult.nickname || '';
+        extractedAvatarUrl = apiResult.avatarUrl || '';
+        if (extractedNickname) {
+          logger.info(`登录账号: ${extractedNickname}`);
+        }
       }
+    } catch (err) {
+      logger.warn('提取登录用户信息失败:', err);
     }
 
     await saveCookie(context, cookiePath);
@@ -394,6 +411,8 @@ export async function qrCodeLogin(
       success: true,
       cookiePath,
       message: '抖音扫码登录成功',
+      nickname: extractedNickname || undefined,
+      avatarUrl: extractedAvatarUrl || undefined,
     };
   } catch (error) {
     logger.error('登录过程出错:', error);

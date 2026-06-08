@@ -1,6 +1,6 @@
 import type { PlatformAdapter, PlatformConfig, PlatformCapabilities } from '../base/interfaces';
 import type { Page } from 'patchright';
-import { KUAISHOU_URLS } from './selectors';
+import { BILIBILI_URLS } from './selectors';
 import { qrCodeLogin, checkCookie, getQRCode } from './login';
 import { uploadVideo } from './upload';
 import { publish } from './publish';
@@ -21,20 +21,20 @@ import type {
   PageChangeReport,
 } from '../base/types';
 
-const KUAISHOU_CONFIG: PlatformConfig = {
-  platformId: 'kuaishou',
-  platformName: '快手',
-  domain: 'kuaishou.com',
+const BILIBILI_CONFIG: PlatformConfig = {
+  platformId: 'bilibili',
+  platformName: 'B站',
+  domain: 'bilibili.com',
   rateLimit: {
-    hourly: 6,
-    daily: 25,
-    burst: 2,
+    hourly: 8,
+    daily: 30,
+    burst: 3,
   },
   urls: {
-    creator: KUAISHOU_URLS.creatorHome,
-    upload: KUAISHOU_URLS.upload,
-    publish: KUAISHOU_URLS.upload,
-    login: KUAISHOU_URLS.loginPage,
+    creator: BILIBILI_URLS.creatorHome,
+    upload: BILIBILI_URLS.upload,
+    publish: BILIBILI_URLS.upload,
+    login: BILIBILI_URLS.loginPage,
   },
   selectors: {
     login: {
@@ -49,24 +49,24 @@ const KUAISHOU_CONFIG: PlatformConfig = {
   },
 };
 
-const KUAISHOU_CAPABILITIES: PlatformCapabilities = {
+const BILIBILI_CAPABILITIES: PlatformCapabilities = {
   serverScheduledPublish: true,
-  maxScheduleDays: 14,
+  maxScheduleDays: 10,
   comment: true,
   image: true,
 };
 
-class KuaishouAdapter implements PlatformAdapter {
-  readonly platformId = 'kuaishou';
-  readonly config = KUAISHOU_CONFIG;
-  readonly capabilities = KUAISHOU_CAPABILITIES;
+class BilibiliAdapter implements PlatformAdapter {
+  readonly platformId = 'bilibili';
+  readonly config = BILIBILI_CONFIG;
+  readonly capabilities = BILIBILI_CAPABILITIES;
 
   getPublishPageUrl(): string {
-    return KUAISHOU_URLS.upload;
+    return BILIBILI_URLS.upload;
   }
 
   getCreatorCenterUrl(): string {
-    return KUAISHOU_URLS.creatorHome;
+    return BILIBILI_URLS.creatorHome;
   }
 
   async detectPageChanges(page: Page): Promise<PageChangeReport> {
@@ -117,4 +117,4 @@ class KuaishouAdapter implements PlatformAdapter {
   }
 }
 
-export const kuaishouAdapter = new KuaishouAdapter();
+export const bilibiliAdapter = new BilibiliAdapter();

@@ -14,11 +14,22 @@
 
     <!-- View Mode Tabs -->
     <div class="page-tasks__toolbar">
-      <el-radio-group v-model="viewMode" size="default">
-        <el-radio-button value="summary">摘要</el-radio-button>
-        <el-radio-button value="timeline">时间线</el-radio-button>
-        <el-radio-button value="detail">详情</el-radio-button>
-      </el-radio-group>
+      <div class="toolbar-left">
+        <el-radio-group v-model="viewMode" size="default">
+          <el-radio-button value="summary">摘要</el-radio-button>
+          <el-radio-button value="timeline">时间线</el-radio-button>
+          <el-radio-button value="detail">详情</el-radio-button>
+        </el-radio-group>
+        <el-switch
+          v-if="viewMode === 'summary'"
+          v-model="showGrouped"
+          active-text="按内容分组"
+          inactive-text="按任务"
+          size="small"
+          style="margin-left: 12px"
+          @change="onGroupToggle"
+        />
+      </div>
       <div class="toolbar-actions">
         <el-button v-if="taskStore.hasFailedTasks" type="danger" plain @click="handleRetryAll">
           全部重试 ({{ taskStore.failedTasks.length }})
@@ -29,9 +40,8 @@
       </div>
     </div>
 
-    <!-- Summary View (default) -->
-    <div v-if="viewMode === 'summary'" class="tasks-view tasks-view--summary">
-      <!-- Failed tasks on TOP (priority) -->
+    <!-- Summary View: Content-Grouped Mode -->
+    <div v-if="viewMode === 'summary' && showGrouped" class="tasks-view tasks-view--summary">
       <div v-if="taskStore.hasFailedTasks" class="failed-section">
         <h4 class="section-title">⚠️ 需要处理 ({{ taskStore.failedTasks.length }})</h4>
         <div v-for="task in taskStore.failedTasks" :key="task.id" class="failed-item">
@@ -49,7 +59,6 @@
         </div>
       </div>
 
-      <!-- Recent completed -->
       <div class="recent-section">
         <h4 class="section-title">最近完成</h4>
         <el-table :data="recentTasks" size="small" stripe>
@@ -70,6 +79,45 @@
           </el-table-column>
         </el-table>
       </div>
+    </div>
+
+    <!-- Summary View: Task-Level Mode (default) -->
+    <div v-if="viewMode === 'summary' && !showGrouped" class="tasks-view tasks-view--summary">
+      <el-table :data="allTasksSorted" v-loading="taskStore.loading" size="small" stripe>
+        <el-table-column prop="platform" label="平台" width="90">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.status === 'failed' ? 'danger' : ''">{{ platformLabel(row.platform) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="accountName" label="账号" width="100" show-overflow-tooltip />
+        <el-table-column prop="contentTitle" label="内容" min-width="130" show-overflow-tooltip />
+        <el-table-column prop="status" label="状态" width="85">
+          <template #default="{ row }">
+            <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="message" label="错误信息" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.message" class="cell-error">{{ row.message }}</span>
+            <span v-else class="cell-none">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="时间" width="150">
+          <template #default="{ row }">
+            {{ formatTime(row.completedAt || row.startedAt || row.createdAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="row.status === 'failed'" link type="primary" size="small" @click="handleRetry(row.id)">重试</el-button>
+            <el-button v-if="row.status === 'failed'" link type="warning" size="small" @click="handleReLogin(row)">重新登录</el-button>
+            <el-button v-if="row.status === 'failed'" link size="small" @click="handleSkip(row.id)">跳过</el-button>
+            <el-button v-if="row.status === 'running'" link type="danger" size="small" @click="handleCancel(row.id)">取消</el-button>
+            <span v-if="row.status === 'pending' || row.status === 'scheduled' || row.status === 'completed'" class="cell-none">-</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!taskStore.loading && allTasksSorted.length === 0" description="暂无任务" />
     </div>
 
     <!-- Timeline View -->
@@ -165,6 +213,7 @@ import type { Task, TaskStatus } from '@/renderer/stores/task';
 const taskStore = useTaskStore();
 
 const viewMode = ref<'summary' | 'timeline' | 'detail'>('summary');
+const showGrouped = ref(false); // false = 按任务, true = 按内容分组
 const reLoginDialogVisible = ref(false);
 const reLoginLoading = ref(false);
 const reLoginAccount = ref<Task | null>(null);
@@ -207,6 +256,26 @@ const recentTasks = computed(() => {
     .slice(0, 20);
 });
 
+/** 按任务维度排序：失败优先 → 运行中 → 等待中 → 已完成 → 其他 */
+const allTasksSorted = computed(() => {
+  const statusOrder: Record<string, number> = {
+    failed: 0,
+    running: 1,
+    pending: 2,
+    scheduled: 3,
+    completed: 4,
+    cancelled: 5,
+    skipped: 6,
+  };
+  return [...taskStore.tasks].sort((a, b) => {
+    const orderDiff = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
+    if (orderDiff !== 0) return orderDiff;
+    const timeA = a.createdAt || '';
+    const timeB = b.createdAt || '';
+    return timeB.localeCompare(timeA);
+  });
+});
+
 const tasksByDate = computed(() => {
   const map = new Map<string, Task[]>();
   const sorted = [...taskStore.tasks].sort((a, b) =>
@@ -221,6 +290,12 @@ const tasksByDate = computed(() => {
 });
 
 // ── Handlers ──
+
+/** 切换分组模式时重新请求数据 */
+async function onGroupToggle(val: boolean) {
+  taskStore.filter.groupByContent = val;
+  await taskStore.fetchTasks();
+}
 
 async function handleRetry(id: string) {
   try {
@@ -395,6 +470,12 @@ function formatDate(dateStr: string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .toolbar-actions {
@@ -653,6 +734,10 @@ function formatDate(dateStr: string): string {
     gap: var(--space-3);
   }
 
+  .toolbar-left {
+    flex-wrap: wrap;
+  }
+
   .failed-item {
     flex-direction: column;
     align-items: flex-start;
@@ -662,5 +747,16 @@ function formatDate(dateStr: string): string {
     margin-left: 0;
     margin-top: var(--space-2);
   }
+}
+
+/* ── Task-Level Table Helpers ── */
+.cell-error {
+  font-size: var(--font-size-xs);
+  color: var(--color-danger);
+}
+
+.cell-none {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-placeholder);
 }
 </style>
