@@ -8,10 +8,12 @@
 [![Electron](https://img.shields.io/badge/Electron-41-47848F?logo=electron)](https://www.electronjs.org/)
 [![Vue 3](https://img.shields.io/badge/Vue-3-4FC08D?logo=vue.js)](https://vuejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![version](https://img.shields.io/badge/version-0.3.1-blue)](CHANGELOG.md)
 
-一键管理抖音 · 小红书 · 视频号 · 快手四大平台的内容发布、数据分析与智能运营。
+一键管理抖音 · 小红书 · 视频号 · 快手 · B站五大平台的内容发布、数据分析与智能运营。
 
-[功能特性](#-功能特性) · [快速开始](#-快速开始) · [架构设计](#-架构设计) · [技术栈](#-技术栈) · [贡献指南](#-贡献指南)
+[功能特性](#-功能特性) · [项目进度](#-项目进度) · [快速开始](#-快速开始) · [架构设计](#-架构设计) · [参与贡献](#-参与贡献)
 
 </div>
 
@@ -23,7 +25,7 @@
 
 | 传统方式 | MatrixFlow |
 |---------|-----------|
-| 逐个平台手动发布 | 四平台一键矩阵分发 |
+| 逐个平台手动发布 | 五平台一键矩阵分发 |
 | 靠经验猜最佳发布时间 | AI 分析历史数据推荐最优时间 |
 | 手动检查各平台数据 | 统一数据中心 + 趋势分析 |
 | Cookie 过期反复登录 | Cookie 加密持久化 + 状态监控 |
@@ -194,96 +196,137 @@ MatrixFlow/
 │   ├── ai/                   # AI 服务 (LLM Multi-Provider, Anomaly, Cache)
 │   ├── data/                 # SQLite 数据库 + 迁移
 │   ├── config/               # 配置 (限流, AI, Ed25519 公钥)
-│   └── ipc/                  # IPC 处理器 (152 个通道)
+│   └── ipc/                  # IPC 处理器 (146 个通道)
 ├── src/renderer/             # 渲染进程 (Vue 3)
-│   ├── views/                # 页面组件 (11 个视图)
+│   ├── views/                # 页面组件 (12 个视图)
 │   ├── components/           # UI 组件 (10 个组件域)
 │   ├── stores/               # Pinia 状态管理 (12 个 Store)
 │   └── router/               # 路由配置
 ├── mcp-server/               # MCP Server (独立 npm 包, 18 个 Tool)
 ├── tests/                    # 测试
-│   ├── unit/                 # 单元测试 (96 tests)
+│   ├── unit/                 # 单元测试 (114 文件)
 │   └── integration/          # 集成测试
 └── docs/                     # 文档 (API, 安全审计, 架构)
 ```
 
-## 📈 项目状态
+## 📈 项目进度
 
-MatrixFlow 正在**积极开发中**。
+### 当前版本 v0.3.1（2026-06-08）
 
-### 当前版本：v0.3.1（2026-06-08）
+MatrixFlow 处于**早期可用阶段** — 核心发布流程已跑通，正在向生产级稳定性迈进。以下是主要模块的完成度一览：
 
-- ✅ 5 平台适配器（抖音/小红书/视频号/快手/**B站**）— publish + login 全部跑通
-- ✅ 10 态状态机（queued → pending → uploading → publishing → audit → success/failed/cancelled）
-- ✅ Watchdog 卡死任务复活 + FailureCoordinator 失败协调
-- ✅ base/ 工具层（PlatformError / TopicSanitizer / DebugRecorder / RiskControl）
-- ✅ 嵌入式浏览器 stealth-engine（browser-manager + fingerprint + proxy + stealth-scripts）
-- ✅ 完整的 IPC 通信层（146 个通道）、22 张数据库表、17 个 Service
-- ✅ 发布模块（23 组件 + 3 视图）+ AI 驱动的发布优化和数据分析
-- ✅ MCP Server（18 Tool）for AI Agent 集成
-- ✅ 安全加固（Ed25519 签名验证、AES-256-GCM Cookie 加密、沙箱模式）
-- ✅ 单元测试 114 文件 + E2E 测试 7 文件（1094 行）
-- ✅ macOS / Windows 打包
+| 模块 | 进度 | 说明 |
+|------|:----:|------|
+| 🎯 平台适配 | **5/5** | 抖音 / 小红书 / 视频号 / 快手 / B站 publish + login 全部跑通 |
+| 🧠 AI 引擎 | **80%** | 发布前检查、最佳时间推荐、异常检测、运营周报已可用 |
+| 🔄 任务调度 | **90%** | 10 态状态机 + Watchdog 复活 + FailureCoordinator 指数退避 |
+| 📊 数据中心 | **70%** | 全平台数据概览、对比、趋势分析已可用，竞品监控待开发 |
+| 🛡️ 安全体系 | **85%** | Ed25519 签名验证 + AES-256-GCM Cookie 加密 + 沙箱模式 |
+| 🧪 测试覆盖 | **75%** | 114 单元测试 + 7 E2E（快手 + B站 E2E 待补齐） |
+| 📦 打包分发 | **100%** | macOS (DMG/ZIP) + Windows (NSIS/Portable) |
 
-### 🗺 开发路线图
+### 🗺 路线图
 
-| 版本 | 主题 | 预计 | 状态 |
-|------|------|------|------|
-| **v0.3.2** | 稳定性补全 | 1 周 | 📋 规划中 |
-| **v0.4.x** | 平台扩展 + MCP 增强 | 3-4 周 | 📋 规划中 |
-| **v0.5.x** | 批量发布 + AI 智能排期 | 4-6 周 | 💡 探索中 |
+我们正在寻找贡献者一起推进以下方向：
 
-#### v0.3.2 — 稳定性补全
+```mermaid
+timeline
+    title MatrixFlow 开发路线图
+    v0.3.1 (当前) : 5平台全就绪 : 10态状态机 : Watchdog : 开源合规
+    v0.3.2 (下个版本) : 稳定性补全 : E2E 补齐 : 外置浏览器打磨
+    v0.4.x (平台扩展) : 微信公众号 : 知乎 : B站完善 : MCP 增强
+    v0.5.x (智能排期) : 批量发布计划 : AI 智能排期 : 矩阵号管理
+```
 
-- 🔧 状态机迁移回归测试（8 test case 骨架已就绪）
-- 🔧 废弃目录清理（`electron/browser/` + `electron/scheduler/`）
-- 🔧 快手 + B站 E2E 测试补齐
-- 🔧 config.yaml 完整化（选择器 TS → YAML）
-- 🔧 外置 Chrome + 指纹浏览器路径打磨
+> 如果 Mermaid 图无法显示，看下方文字版。
 
-#### v0.4.x — 平台扩展 + MCP 增强
+| 版本 | 主题 | 预计 | 状态 | 🙋 需要帮助 |
+|------|------|------|------|-------------|
+| **v0.3.2** | 稳定性补全 | 1 周 | 📋 规划中 | E2E 测试、config.yaml 迁移 |
+| **v0.4.x** | 平台扩展 + MCP | 3-4 周 | 📋 规划中 | 微信/知乎适配器、MCP Tool 扩展 |
+| **v0.5.x** | 智能排期 | 4-6 周 | 💡 探索中 | 排期算法、矩阵策略引擎 |
 
-- 🆕 **微信公众平台适配**（长文 + 图文发布）
-- 🆕 **知乎适配**（问答 + 专栏）
-- 🆕 **B站完善**（分区选择 + 双封面 + 分片上传 + 六维统计）
-- 🆕 **MCP Tool 扩展**（互动评论 + 数据查询 + 调度控制）
-- 🔧 风险配置中心（`PLATFORM_RISK` 按风控等级映射）
+#### v0.3.2 — 下个版本（Help Wanted 🙋）
 
-#### v0.5.x — 批量发布 + AI 智能排期
+适合新贡献者的入门任务：
 
-- 🆕 **PublishPlan 批量发布**（多平台 × 多账号矩阵计划）
-- 🆕 **AI 智能排期**（基于历史数据 + 平台策略自动推荐）
-- 🆕 **矩阵号管理**（跨账号内容策略 + 分组规则引擎）
-- 🆕 AI Agent 深度集成（OpenClaw / Relay 评估）
+- [ ] 🔧 快手 + B站 E2E 测试补齐 — **Good First Issue**
+- [ ] 🔧 状态机迁移回归测试（8 个 test case 骨架已就绪）
+- [ ] 🔧 config.yaml 完整化（选择器 TS 迁移到 YAML）
+- [ ] 🔧 废弃目录清理 + 外置 Chrome 路径打磨
 
-> 完整迭代计划见 [Obsidian](https://obsidian.md) 知识库：`16_内容分发/03_迭代计划/`
+#### v0.4.x — 平台扩展
 
-## 🤝 贡献指南
+- [ ] 🆕 微信公众平台适配（长文 + 图文发布）
+- [ ] 🆕 知乎适配（问答 + 专栏）
+- [ ] 🆕 B站完善（分区选择、双封面、分片上传、六维统计）
+- [ ] 🆕 MCP Tool 扩展（互动评论 + 数据查询 + 调度控制）
 
-我们欢迎所有形式的贡献！
+#### v0.5.x — 智能排期
 
-1. **Fork** 本仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 **Pull Request**
+- [ ] 🆕 PublishPlan 批量发布（多平台 × 多账号矩阵计划）
+- [ ] 🆕 AI 智能排期（基于历史数据 + 平台策略自动推荐）
+- [ ] 🆕 矩阵号管理（跨账号内容策略 + 分组规则引擎）
+
+---
+
+## 🤝 参与贡献
+
+MatrixFlow 是一个**社区驱动的开源项目**。无论你是修复一个 Bug、添加一个新平台适配器、还是改进文档，我们都欢迎！
+
+### 快速上手
+
+```bash
+git clone https://github.com/your-username/MatrixFlow.git
+cd MatrixFlow
+npm install
+npx patchright install chrome
+npm run dev
+```
+
+### 适合新贡献者的任务
+
+| 难度 | 任务 | 涉及模块 |
+|------|------|----------|
+| 🟢 入门 | 补充测试用例 | `tests/unit/` |
+| 🟢 入门 | 改进文档和注释 | `docs/`, README |
+| 🟡 中等 | 修复 Good First Issue | 见 [Issues](https://github.com/your-username/MatrixFlow/issues) |
+| 🟡 中等 | 添加新平台的 config.yaml | `electron/platform/{platform}/` |
+| 🔴 进阶 | 实现新平台适配器 | `electron/platform/` 全套 |
+| 🔴 进阶 | MCP Tool 扩展 | `mcp-server/` |
 
 ### 开发规范
 
-- TypeScript strict mode
-- Vue 3 `<script setup>` + Composition API
-- Pinia composition-style stores
-- IPC 通道命名: `{domain}:{action}`
-- 测试覆盖率: statements/functions/lines ≥ 70%
+在提交 PR 之前，请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)：
+
+- **Commit**: 遵循 [Conventional Commits](https://www.conventionalcommits.org/)（`feat:` / `fix:` / `docs:` / `test:`）
+- **TypeScript**: 严格模式，禁止 `as any` / `@ts-ignore`
+- **Vue 3**: `<script setup lang="ts">` + Composition API
+- **IPC 通道**: `{domain}:{action}` 命名，preload.ts 白名单必注册
+- **测试**: 覆盖率 statements/functions/lines ≥ 70%，branches ≥ 60%
+- **平台适配器**: 必须在 `electron/preload.ts` 和 `electron/ipc/handlers.ts` 两处注册新通道
+
+### 添加新平台适配器
+
+想支持一个新平台？参考 [CONTRIBUTING.md](CONTRIBUTING.md) 中的完整流程：
+
+1. `electron/platform/{platform}/` 下创建 publish.ts / login.ts / cookie.ts / selectors.ts / config.yaml
+2. 在 `electron/platform/adapter.ts` 注册
+3. 在 `electron/services/PublishService.ts` 接入发布流程
+4. 编写单元测试 + E2E 测试
+
+---
 
 ## 📄 License
 
-[MIT License](LICENSE) © 2024-2026 MatrixFlow
+[MIT License](LICENSE) © 2024-2026 MatrixFlow Contributors
 
 ---
 
 <div align="center">
 
 **如果这个项目对你有帮助，请给个 ⭐ Star 支持一下！**
+
+<sub>Made with ❤️ by the MatrixFlow community</sub>
 
 </div>
