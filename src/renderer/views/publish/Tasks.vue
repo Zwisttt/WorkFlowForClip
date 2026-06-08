@@ -17,13 +17,6 @@
     <!-- 工具栏：筛选 + 操作 -->
     <div class="page-tasks__toolbar">
       <TaskFilterBar :plans="plans" @change="onFilterChange" />
-      <el-switch
-        v-model="showGrouped"
-        active-text="按内容分组"
-        inactive-text="按任务"
-        size="small"
-        @change="onGroupToggle"
-      />
     </div>
 
     <!-- 批量操作栏 -->
@@ -60,7 +53,7 @@
     <!-- 列表区域 -->
     <div class="page-tasks__list">
       <TaskTable
-        :mode="showGrouped ? 'group' : 'task'"
+        mode="task"
         :group-total="taskStore.total"
         @detail="onShowDetail"
         @execute="onExecuteTask"
@@ -79,7 +72,7 @@
       <!-- 分页 -->
       <div v-if="taskStore.total > 0" class="page-tasks__pagination">
         <span class="page-tasks__pagination-info">
-          共 {{ taskStore.total }} 个{{ showGrouped ? '发布内容' : '发布任务' }}
+          共 {{ taskStore.total }} 个发布任务
         </span>
         <el-pagination
           :current-page="currentPage"
@@ -107,7 +100,7 @@ import {
   List, Calendar, Document, VideoCamera,
 } from '@element-plus/icons-vue';
 import { useTaskStore } from '@/renderer/stores/task';
-import type { GroupedTask, Task } from '@/renderer/stores/task';
+import type { Task } from '@/renderer/stores/task';
 import TaskFilterBar from '@/renderer/components/publish/TaskFilterBar.vue';
 import TaskTable from '@/renderer/components/publish/TaskTable.vue';
 import TaskDetailDrawer from '@/renderer/components/publish/TaskDetailDrawer.vue';
@@ -127,7 +120,6 @@ function isActive(path: string) {
 }
 
 const drawerVisible = ref(false);
-const showGrouped = ref(false);
 const selectedTask = ref<Task | null>(null);
 const PAGE_SIZE_KEY = 'matrixflow.publishTasks.pageSize';
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -153,7 +145,6 @@ const plans = ref<{ id: string; name: string }[]>([]);
 let unlisten: (() => void) | null = null;
 
 onMounted(async () => {
-  taskStore.filter.groupByContent = showGrouped.value;
   await fetchCurrentPage();
   unlisten = taskStore.listenIpcEvents();
   await loadPlans();
@@ -179,7 +170,6 @@ async function loadPlans() {
 async function fetchCurrentPage() {
   taskStore.filter.limit = pageSize.value;
   taskStore.filter.offset = (currentPage.value - 1) * pageSize.value;
-  taskStore.filter.groupByContent = showGrouped.value;
   await taskStore.fetchTasks();
 
   const lastPage = Math.max(1, Math.ceil(taskStore.total / pageSize.value));
@@ -242,12 +232,6 @@ async function onDeleteTask(task: Task) {
   } catch {
     ElMessage.error('删除失败（可能正在执行中）');
   }
-}
-
-async function onGroupToggle(val: boolean) {
-  taskStore.filter.groupByContent = val;
-  currentPage.value = 1;
-  await fetchCurrentPage();
 }
 
 </script>

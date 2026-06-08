@@ -394,7 +394,6 @@ const emit = defineEmits<{
 }>();
 
 const localConfig = reactive<PlatformConfig>({
-  declaration: '0',
   visibility: 'public',
   scheduleMode: 'immediate',
   allowComment: true,

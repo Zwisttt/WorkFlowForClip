@@ -20,15 +20,6 @@
           <el-radio-button value="timeline">时间线</el-radio-button>
           <el-radio-button value="detail">详情</el-radio-button>
         </el-radio-group>
-        <el-switch
-          v-if="viewMode === 'summary'"
-          v-model="showGrouped"
-          active-text="按内容分组"
-          inactive-text="按任务"
-          size="small"
-          style="margin-left: 12px"
-          @change="onGroupToggle"
-        />
       </div>
       <div class="toolbar-actions">
         <el-button v-if="taskStore.hasFailedTasks" type="danger" plain @click="handleRetryAll">
@@ -40,49 +31,8 @@
       </div>
     </div>
 
-    <!-- Summary View: Content-Grouped Mode -->
-    <div v-if="viewMode === 'summary' && showGrouped" class="tasks-view tasks-view--summary">
-      <div v-if="taskStore.hasFailedTasks" class="failed-section">
-        <h4 class="section-title">⚠️ 需要处理 ({{ taskStore.failedTasks.length }})</h4>
-        <div v-for="task in taskStore.failedTasks" :key="task.id" class="failed-item">
-          <div class="failed-item__info">
-            <el-tag type="danger" size="small">{{ platformLabel(task.platform) }}</el-tag>
-            <span class="failed-item__account">{{ task.accountName }}</span>
-            <span class="failed-item__content">{{ task.contentTitle }}</span>
-            <span class="failed-item__error">{{ task.message || '发布失败' }}</span>
-          </div>
-          <div class="failed-item__actions">
-            <el-button size="small" type="primary" @click="handleRetry(task.id)">重试</el-button>
-            <el-button size="small" type="warning" @click="handleReLogin(task)">重新登录</el-button>
-            <el-button size="small" @click="handleSkip(task.id)">跳过</el-button>
-          </div>
-        </div>
-      </div>
-
-      <div class="recent-section">
-        <h4 class="section-title">最近完成</h4>
-        <el-table :data="recentTasks" size="small" stripe>
-          <el-table-column prop="contentTitle" label="内容" min-width="150" show-overflow-tooltip />
-          <el-table-column prop="accountName" label="账号" width="120" />
-          <el-table-column prop="platform" label="平台" width="100">
-            <template #default="{ row }">
-              <el-tag size="small">{{ platformLabel(row.platform) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="status" label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="completedAt" label="完成时间" width="160">
-            <template #default="{ row }">{{ formatTime(row.completedAt || row.updatedAt) }}</template>
-          </el-table-column>
-        </el-table>
-      </div>
-    </div>
-
-    <!-- Summary View: Task-Level Mode (default) -->
-    <div v-if="viewMode === 'summary' && !showGrouped" class="tasks-view tasks-view--summary">
+    <!-- Summary View -->
+    <div v-if="viewMode === 'summary'" class="tasks-view tasks-view--summary">
       <el-table :data="allTasksSorted" v-loading="taskStore.loading" size="small" stripe>
         <el-table-column prop="platform" label="平台" width="90">
           <template #default="{ row }">
@@ -213,7 +163,6 @@ import type { Task, TaskStatus } from '@/renderer/stores/task';
 const taskStore = useTaskStore();
 
 const viewMode = ref<'summary' | 'timeline' | 'detail'>('summary');
-const showGrouped = ref(false); // false = 按任务, true = 按内容分组
 const reLoginDialogVisible = ref(false);
 const reLoginLoading = ref(false);
 const reLoginAccount = ref<Task | null>(null);
@@ -290,12 +239,6 @@ const tasksByDate = computed(() => {
 });
 
 // ── Handlers ──
-
-/** 切换分组模式时重新请求数据 */
-async function onGroupToggle(val: boolean) {
-  taskStore.filter.groupByContent = val;
-  await taskStore.fetchTasks();
-}
 
 async function handleRetry(id: string) {
   try {

@@ -13,7 +13,6 @@ export interface TaskFilter {
   search?: string;
   limit?: number;
   offset?: number;
-  groupByContent?: boolean;
 }
 
 export interface TaskListResult {
@@ -101,7 +100,6 @@ export const useTaskStore = defineStore('task', () => {
     dateTo: undefined,
     limit: 20,
     offset: 0,
-    groupByContent: false,
   });
 
   const runningTasks = computed(() => tasks.value.filter((t) => t.status === 'running'));
