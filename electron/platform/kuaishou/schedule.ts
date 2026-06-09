@@ -3,12 +3,17 @@ import { Logger } from '../../core/Logger';
 import { UPLOAD_SELECTORS } from './selectors';
 import { fillVideoMetadata } from './publish';
 import type { ScheduleContext, ScheduleResult } from '../base/types';
+import { formatScheduleDateTime } from '../base/utils/schedule';
 
 const logger = new Logger('KuaishouSchedule');
 
 /**
  * 快手服务端定时发布
- * 必须提供 page 参数
+ *
+ * 竞品验证（social-auto-upload/ks_uploader/main.py:311-321）：
+ * - 快手使用 Ant Design Radio（非 checkbox），需点击 `.ant-radio-input:nth-child(2)` 选"定时"
+ * - 日期格式必须带秒：`YYYY-MM-DD HH:mm:ss`
+ * - 使用 `Ctrl+A → keyboard.type → Enter` 方式输入，不用逐字符 humanType
  */
 export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
   const { page, title, description, tags, scheduledTime } = ctx;
@@ -35,43 +40,49 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
   try {
     await fillVideoMetadata(page, title, description, tags);
 
-    const scheduleCheckbox = page.locator(UPLOAD_SELECTORS.scheduleCheckbox).first();
-    if (!(await scheduleCheckbox.isVisible().catch(() => false))) {
+    // 1. 选择「定时发布」Radio（Ant Design Radio.Group，第2个 radio 是"定时"）
+    const scheduleRadio = page.locator(UPLOAD_SELECTORS.scheduleRadio).first();
+    if (!(await scheduleRadio.isVisible().catch(() => false))) {
       return { success: false, message: '未找到定时发布选项' };
     }
+    await scheduleRadio.click();
+    await page.waitForTimeout(800);
 
-    await scheduleCheckbox.check();
-    await page.waitForTimeout(500);
-
+    // 2. 点击 DatePicker 输入框，evaluate 直接设置 React 受控值 + dispatch 事件
     const datePicker = page.locator(UPLOAD_SELECTORS.scheduleDatePicker).first();
     if (await datePicker.isVisible().catch(() => false)) {
-      const year = scheduledTime.getFullYear();
-      const month = String(scheduledTime.getMonth() + 1).padStart(2, '0');
-      const day = String(scheduledTime.getDate()).padStart(2, '0');
-      const hours = String(scheduledTime.getHours()).padStart(2, '0');
-      const minutes = String(scheduledTime.getMinutes()).padStart(2, '0');
-      const dateStr = `${year}-${month}-${day} ${hours}:${minutes}`;
+      const dateStr = formatScheduleDateTime(scheduledTime, { withSeconds: true });
+      if (!dateStr) {
+        return { success: false, message: '无法格式化定时发布时间' };
+      }
 
       await datePicker.click();
-      await page.keyboard.press('Control+KeyA');
-      await page.keyboard.type(dateStr);
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(300);
+      // Ant Design DatePicker 是 React 受控组件，需要原生 value setter + dispatch input/change 事件
+      await datePicker.evaluate((el, value) => {
+        const input = el as HTMLInputElement;
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype, 'value'
+        )?.set;
+        nativeSetter?.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }, dateStr);
+      await page.waitForTimeout(500);
 
-      const pickerOk = page.locator('.ant-picker-ok button, .ant-picker-footer button').first();
+      const pickerOk = page.locator(UPLOAD_SELECTORS.scheduleConfirmBtn).first();
       if (await pickerOk.isVisible().catch(() => false)) {
         await pickerOk.click();
-        logger.info('已点击日期选择器确定按钮');
       } else {
-        const confirmBtn = page.locator(UPLOAD_SELECTORS.scheduleConfirmBtn).first();
-        if (await confirmBtn.isVisible().catch(() => false)) {
-          await confirmBtn.click();
-          logger.info('已点击定时发布确定按钮');
-        } else {
-          await page.keyboard.press('Enter');
-        }
+        await page.keyboard.press('Enter');
       }
+      await page.waitForTimeout(500);
       logger.info(`定时发布时间已设置: ${dateStr}`);
     }
+
+    // 3. 点击发布按钮
+    logger.info('⏸ 发布前等待 5 秒...');
+    await page.waitForTimeout(5000);
 
     const publishBtn = page.locator(UPLOAD_SELECTORS.publishButton).first();
     await publishBtn.waitFor({ state: 'visible', timeout: 10000 });

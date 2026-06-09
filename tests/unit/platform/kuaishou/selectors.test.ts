@@ -70,7 +70,7 @@ describe('kuaishou/selectors', () => {
       expect(UPLOAD_SELECTORS.publishSuccessToast).toBeDefined();
       expect(UPLOAD_SELECTORS.publishFailedToast).toBeDefined();
       expect(UPLOAD_SELECTORS.publishDraftToast).toBeDefined();
-      expect(UPLOAD_SELECTORS.scheduleCheckbox).toBeDefined();
+      expect(UPLOAD_SELECTORS.scheduleRadio).toBeDefined();
       expect(UPLOAD_SELECTORS.scheduleDatePicker).toBeDefined();
       expect(UPLOAD_SELECTORS.scheduleConfirmBtn).toBeDefined();
     });

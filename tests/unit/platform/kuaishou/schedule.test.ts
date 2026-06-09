@@ -11,6 +11,8 @@ function createMockPage(overrides: Record<string, unknown> = {}) {
     check: vi.fn(() => Promise.resolve()),
     isVisible: vi.fn(() => Promise.resolve(true)),
     first: vi.fn(function(this: any) { return this; }),
+    evaluate: vi.fn(() => Promise.resolve()),
+    count: vi.fn(() => Promise.resolve(1)),
   };
 
   return {
@@ -81,9 +83,11 @@ describe('kuaishou/schedule', () => {
           waitFor: vi.fn(() => Promise.resolve()),
           click: vi.fn(() => Promise.resolve()),
           check: vi.fn(() => Promise.resolve()),
+          evaluate: vi.fn(() => Promise.resolve()),
+          count: vi.fn(() => Promise.resolve(1)),
           isVisible: vi.fn(() => {
             if (sel.includes('publishSuccessToast') || sel.includes('publishSuccess')) return Promise.resolve(true);
-            if (sel.includes('scheduleCheckbox')) return Promise.resolve(true);
+            if (sel.includes('scheduleRadio')) return Promise.resolve(true);
             if (sel.includes('scheduleDatePicker')) return Promise.resolve(true);
             return Promise.resolve(false);
           }),
@@ -113,6 +117,8 @@ describe('kuaishou/schedule', () => {
           waitFor: vi.fn(() => Promise.resolve()),
           click: vi.fn(() => Promise.resolve()),
           check: vi.fn(() => Promise.resolve()),
+          evaluate: vi.fn(() => Promise.resolve()),
+          count: vi.fn(() => Promise.resolve(1)),
           isVisible: vi.fn(() => {
             callCount++;
             return Promise.resolve(true);
@@ -139,6 +145,8 @@ describe('kuaishou/schedule', () => {
           waitFor: vi.fn(() => Promise.resolve()),
           click: vi.fn(() => Promise.resolve()),
           check: vi.fn(() => Promise.resolve()),
+          evaluate: vi.fn(() => Promise.resolve()),
+          count: vi.fn(() => Promise.resolve(1)),
           isVisible: vi.fn(() => {
             callCount++;
             if (callCount > 5) return Promise.resolve(false);
@@ -173,12 +181,14 @@ describe('kuaishou/schedule', () => {
       expect(result.message).toContain('出错');
     });
 
-    it('returns failure when schedule checkbox not visible', async () => {
+    it('returns failure when schedule radio not visible', async () => {
       const mockPage = createMockPage({
         locator: vi.fn((sel: string) => ({
           waitFor: vi.fn(() => Promise.resolve()),
           click: vi.fn(() => Promise.resolve()),
           check: vi.fn(() => Promise.resolve()),
+          evaluate: vi.fn(() => Promise.resolve()),
+          count: vi.fn(() => Promise.resolve(0)),
           isVisible: vi.fn(() => Promise.resolve(false)),
           first: vi.fn(function(this: any) { return this; }),
         })),

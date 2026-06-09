@@ -77,10 +77,10 @@ export const UPLOAD_SELECTORS = {
   publishFailedToast: 'get_by_text("发布失败", exact=false)',
   publishDraftToast: 'get_by_text("已保存草稿", exact=false)',
 
-  // 定时发布 — Ant Design picker
-  scheduleCheckbox: '[class*="schedule"] input, [class*="timer"] input',
-  scheduleDatePicker: 'div.ant-picker-input input[placeholder*="时间"], div.ant-picker-input input[placeholder*="日期"], input[placeholder*="发布时间"], input[placeholder*="日期"], input[placeholder*="时间"], input[type="datetime-local"]',
-  scheduleConfirmBtn: 'span:has-text("确定"), button:has-text("确定"), button:has-text("确认")',
+  // 定时发布 — Ant Design Radio + DatePicker（竞品验证: social-auto-upload/ks_uploader）
+  scheduleRadio: 'label:text("发布时间") >> xpath=following-sibling::div >> .ant-radio-input:nth-child(2)',
+  scheduleDatePicker: 'div.ant-picker-input input[placeholder="选择日期时间"]',
+  scheduleConfirmBtn: '.ant-picker-ok button, .ant-picker-footer button',
 } as const;
 
 // ---- 数据统计选择器 ----

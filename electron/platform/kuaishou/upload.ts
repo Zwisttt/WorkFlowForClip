@@ -11,6 +11,7 @@ import { TopicSanitizer } from '../base/TopicSanitizer';
 import { EmbeddedRiskControl, PageRiskControl } from '../base/RiskControl';
 import { toPlatformError, NetworkError, AuthError, SelectorError, ValidationError, ContentRejectedError } from '../base/PlatformError';
 import { getDebugRecorder } from '../base/DebugRecorder';
+import { formatScheduleDateTime } from '../base/utils/schedule';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
 import type { IBrowserLauncher, BrowserConfig } from '../../services/types';
@@ -61,14 +62,6 @@ function normalizeBrowserMode(mode?: UploadContext['browserMode']): NormalizedBr
 function normalizeLocalFilePath(value?: string | null): string | undefined {
   if (!value) return undefined;
   return value.replace(/^local-file:\/\//, '');
-}
-
-function formatScheduleDateTime(value?: string | Date | null): string | undefined {
-  if (!value) return undefined;
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return undefined;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
 }
 
 function declarationPatterns(value?: string): TextPattern[] {
@@ -1172,7 +1165,7 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
     await riskControl.randomActionDelay();
   }
 
-  const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
+  const scheduleTime = formatScheduleDateTime(ctx.scheduledAt, { withSeconds: true });
   if (scheduleTime) {
     const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
     if (!mapped) throw new ValidationError('未映射快手发布时间: 定时发布', undefined, 'kuaishou');
@@ -2272,7 +2265,7 @@ async function applyKuaishouPublishOptions(page: Page, ctx: UploadContext): Prom
     await riskControl.randomActionDelay();
   }
 
-  const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
+  const scheduleTime = formatScheduleDateTime(ctx.scheduledAt, { withSeconds: true });
   if (scheduleTime) {
     const mapped = await setScheduleTime(page, scheduleTime);
     if (!mapped) throw new ValidationError('未映射快手发布时间: 定时发布', undefined, 'kuaishou');
