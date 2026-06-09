@@ -101,6 +101,10 @@ async function executePublish(page: Page, maxRetries: number = 3): Promise<boole
     stepIntervalSec: { min: 2.0, max: 3.0 },
   });
   for (let retry = 0; retry < maxRetries; retry++) {
+    // 发布前暂停 5 秒，等待页面渲染稳定
+    logger.info('⏸ 发布前等待 5 秒...');
+    await page.waitForTimeout(5000);
+
     const publishBtn = page.getByRole('button', { name: '发布', exact: true });
     await publishBtn.waitFor({ state: 'visible', timeout: 10000 });
     await rc.humanClick('button:has-text("发布")');

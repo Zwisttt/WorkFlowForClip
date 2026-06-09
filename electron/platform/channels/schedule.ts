@@ -126,6 +126,9 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
 
     // 点击发布按钮
     await debugRecorder.recordStep('click_publish', async () => {
+      logger.info('⏸ 发布前等待 5 秒...');
+      await page.waitForTimeout(5000);
+
       const publishBtn = page.locator(UPLOAD_SELECTORS.publishButton).first();
       await publishBtn.waitFor({ state: 'visible', timeout: 10000 });
       await rc.humanClick(UPLOAD_SELECTORS.publishButton);

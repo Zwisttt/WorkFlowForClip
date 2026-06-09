@@ -1175,6 +1175,81 @@ export class PublishService implements IPublishService {
     return this.executeNow(taskId, { finalOnFailure: true });
   }
 
+  /**
+   * 重新发布：基于已有任务创建全新任务条目
+   * - 读取原任务的 contentId、accountId、platform 等参数
+   * - 创建新任务（新的 taskId，状态 pending）
+   * - 不自动执行，仅创建任务条目
+   */
+  async republishTask(taskId: string): Promise<PublishTask> {
+    const originalTask = await publishTaskRepo.findById(taskId);
+    if (!originalTask) throw new Error(`发布任务不存在: ${taskId}`);
+
+    const now = nowISO();
+    const newTaskId = randomUUID();
+
+    // 解析原任务的 metadata
+    let metadata: Record<string, unknown> = {};
+    if ((originalTask as any).metadata) {
+      try {
+        metadata = JSON.parse((originalTask as any).metadata);
+      } catch { /* ignore */ }
+    }
+
+    // 解析原任务的 tags
+    let tags: string[] = [];
+    if ((originalTask as any).tags) {
+      try {
+        tags = JSON.parse((originalTask as any).tags);
+      } catch { /* ignore */ }
+    }
+
+    const publishMode = (originalTask.publish_mode || 'client') as PublishMode;
+    const accountId = (originalTask as any).account_id || originalTask.account_id || '';
+
+    const dbRow = {
+      id: newTaskId,
+      content_id: originalTask.content_id,
+      group_id: (originalTask as any).group_id || null,
+      platform: originalTask.platform,
+      account_id: accountId,
+      proxy_id: null,
+      fingerprint_id: null,
+      scheduled_at: null,                    // 重新发布不自动定时，由用户手动设置
+      publish_mode: publishMode,
+      status: 'pending' as PublishTaskStatus,
+      result: null,
+      error_message: null,
+      retry_count: 0,
+      max_retries: originalTask.max_retries || 3,
+      created_at: now,
+      updated_at: now,
+      title: (originalTask as any).title || '',
+      description: (originalTask as any).description || '',
+      tags: JSON.stringify(tags),
+      cover_url: (originalTask as any).cover_url || null,
+      source: 'republish',                    // 标记为重新发布来源
+      metadata: JSON.stringify({ ...metadata, republishFrom: taskId }),
+    };
+
+    await publishTaskRepo.insert(dbRow);
+
+    const newTask = this.dbRowToTask(dbRow as unknown as DbPublishTask);
+
+    logger.info(`重新发布任务已创建: newTaskId=${newTaskId} from=${taskId} platform=${originalTask.platform}`);
+
+    const payload: TaskCreatedPayload = {
+      taskId: newTaskId,
+      contentId: originalTask.content_id,
+      platform: originalTask.platform,
+      accountId,
+      publishMode,
+    };
+    this.eventBus.emit(PublishEvent.TASK_CREATED, payload);
+
+    return newTask;
+  }
+
   async batchRetry(taskIds: string[]): Promise<{ taskId: string; result: PublishResult }[]> {
     const CONCURRENT_LIMIT = 5;
     const results: { taskId: string; result: PublishResult }[] = [];

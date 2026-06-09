@@ -57,13 +57,14 @@
             {{ formatTime(row.completedAt || row.startedAt || row.createdAt) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'failed'" link type="primary" size="small" @click="handleRetry(row.id)">重试</el-button>
+            <el-button v-if="row.status === 'failed' || row.status === 'completed'" link type="success" size="small" @click="handleRepublish(row.id)">重新发布</el-button>
             <el-button v-if="row.status === 'failed'" link type="warning" size="small" @click="handleReLogin(row)">重新登录</el-button>
             <el-button v-if="row.status === 'failed'" link size="small" @click="handleSkip(row.id)">跳过</el-button>
             <el-button v-if="row.status === 'running'" link type="danger" size="small" @click="handleCancel(row.id)">取消</el-button>
-            <span v-if="row.status === 'pending' || row.status === 'scheduled' || row.status === 'completed'" class="cell-none">-</span>
+            <span v-if="row.status === 'pending' || row.status === 'scheduled'" class="cell-none">-</span>
           </template>
         </el-table-column>
       </el-table>
@@ -123,9 +124,10 @@
             <el-progress :percentage="row.progress" :status="row.status === 'failed' ? 'exception' : undefined" :stroke-width="6" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" width="250">
           <template #default="{ row }">
             <el-button v-if="row.status === 'failed'" link type="primary" @click="handleRetry(row.id)">重试</el-button>
+            <el-button v-if="row.status === 'failed' || row.status === 'completed'" link type="success" @click="handleRepublish(row.id)">重新发布</el-button>
             <el-button v-if="row.status === 'failed'" link type="warning" @click="handleReLogin(row)">重新登录</el-button>
             <el-button v-if="row.status === 'failed'" link @click="handleSkip(row.id)">跳过</el-button>
             <el-button v-if="row.status === 'running'" link type="danger" @click="handleCancel(row.id)">取消</el-button>
@@ -246,6 +248,15 @@ async function handleRetry(id: string) {
     ElMessage.success('重试已提交');
   } catch {
     ElMessage.error('重试失败');
+  }
+}
+
+async function handleRepublish(id: string) {
+  try {
+    await taskStore.republishTask(id);
+    ElMessage.success('重新发布任务已创建');
+  } catch (e: any) {
+    ElMessage.error(e?.message || '重新发布失败');
   }
 }
 

@@ -571,6 +571,9 @@ async function executePublish(page: Page, maxRetries: number = 3): Promise<boole
 
   for (let retry = 0; retry < maxRetries; retry++) {
     try {
+      logger.info('⏸ 发布前等待 5 秒...');
+      await page.waitForTimeout(5000);
+
       const publishBtn = page.locator(UPLOAD_SELECTORS.publishButton).first();
       await publishBtn.waitFor({ state: 'visible', timeout: 10000 });
       await rc.humanClick(UPLOAD_SELECTORS.publishButton);

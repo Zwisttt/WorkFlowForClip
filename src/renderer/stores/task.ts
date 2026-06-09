@@ -241,6 +241,17 @@ export const useTaskStore = defineStore('task', () => {
     return result;
   }
 
+  async function republishTask(id: string) {
+    if (!window.matrixflow) return;
+    const result = await window.matrixflow.publish.republishTask(id);
+    const payload = result?.data ?? result;
+    if (result?.success === false || payload?.success === false) {
+      throw new Error(result?.message || payload?.error || '重新发布失败');
+    }
+    scheduleRefresh();
+    return payload;
+  }
+
   async function retryAllFailed() {
     const ids = failedTasks.value.map((t) => t.id);
     for (const id of ids) {
@@ -390,7 +401,7 @@ export const useTaskStore = defineStore('task', () => {
   return {
     tasks, total, taskTotal, loading, statusBreakdown, selectedIds, filter, selectedCount, allSelectedOnPage,
     groupedTasks, runningTasks, failedTasks, hasFailedTasks, stats,
-    fetchTasks, createTask, cancelTask, retryTask, retryAllFailed,
+    fetchTasks, createTask, cancelTask, retryTask, republishTask, retryAllFailed,
     batchRetry, batchCancel, batchDelete, deleteTask,
     toggleSelectAll, toggleSelect, clearSelection,
     updateTaskProgress, updateTaskStatus, listenIpcEvents,

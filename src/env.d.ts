@@ -46,6 +46,7 @@ interface MatrixFlowAPI {
     deleteTask: (taskId: string) => Promise<any>;
     cancelTask: (taskId: string) => Promise<any>;
     retryTask: (taskId: string) => Promise<any>;
+    republishTask: (taskId: string) => Promise<any>;
     listTasks: (filter?: any) => Promise<any[]>;
     listPlans?: () => Promise<any>;
     batchRetry: (taskIds: string[]) => Promise<any>;

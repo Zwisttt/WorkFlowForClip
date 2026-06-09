@@ -51,13 +51,18 @@
             <span class="task-table__time">{{ formatTime(row.createdAt) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'pending' || row.status === 'failed'"
               size="small" type="primary" link
               @click.stop="onGroupExecute(row)"
             >{{ row.status === 'failed' ? '重新执行' : '执行发布' }}</el-button>
+            <el-button
+              v-if="row.status === 'failed' || row.status === 'completed'"
+              size="small" type="success" link
+              @click.stop="handleRepublish(row.subTasks[0])"
+            >重新发布</el-button>
             <el-button size="small" link @click.stop="onGroupRowClick(row)">详情</el-button>
             <el-button size="small" type="danger" link @click.stop="onGroupDelete(row)">删除</el-button>
           </template>
@@ -106,13 +111,18 @@
             <span class="task-table__time">{{ formatTime(row.createdAt) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.status === 'pending' || row.status === 'scheduled' || row.status === 'failed'"
               size="small" type="primary" link
               @click.stop="onTaskExecute(row)"
             >{{ row.status === 'failed' ? '重试' : '执行' }}</el-button>
+            <el-button
+              v-if="row.status === 'failed' || row.status === 'completed'"
+              size="small" type="success" link
+              @click.stop="handleRepublish(row)"
+            >重新发布</el-button>
             <el-button size="small" link @click.stop="onTaskRowClick(row)">详情</el-button>
             <el-button
               v-if="row.status !== 'running'"
@@ -129,7 +139,7 @@
 <script setup lang="ts">
 import { useTaskStore } from '@/renderer/stores/task';
 import type { TaskStatus, GroupedTask, Task } from '@/renderer/stores/task';
-import { ElMessageBox } from 'element-plus';
+import { ElMessageBox, ElMessage } from 'element-plus';
 import { VideoCameraFilled } from '@element-plus/icons-vue';
 
 const taskStore = useTaskStore();
@@ -173,6 +183,15 @@ async function onTaskDelete(row: Task) {
     emit('delete', row);
   } catch {
     // cancelled
+  }
+}
+
+async function handleRepublish(row: Task) {
+  try {
+    await taskStore.republishTask(row.id);
+    ElMessage.success('重新发布任务已创建');
+  } catch (e: any) {
+    ElMessage.error(e?.message || '重新发布失败');
   }
 }
 

@@ -349,9 +349,9 @@ class MultiPanelService {
 
   private getCreatorCenterUrl(platform: string): string {
     const urls: Record<string, string> = {
-      douyin: 'https://creator.douyin.com/creator-micro/content',
-      xiaohongshu: 'https://creator.xiaohongshu.com/publish/publish',
-      kuaishou: 'https://cp.kuaishou.com/article/publish/video',
+      douyin: 'https://creator.douyin.com/creator-micro/home',
+      xiaohongshu: 'https://creator.xiaohongshu.com/',
+      kuaishou: 'https://cp.kuaishou.com/',
       channels: 'https://channels.weixin.qq.com/platform',
       bilibili: 'https://member.bilibili.com/platform/home',
     };

@@ -73,6 +73,9 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
       logger.info(`定时发布时间已设置: ${dateStr}`);
     }
 
+    logger.info('⏸ 发布前等待 5 秒...');
+    await page.waitForTimeout(5000);
+
     const publishBtn = page.locator(UPLOAD_SELECTORS.publishButton).first();
     await publishBtn.waitFor({ state: 'visible', timeout: 10000 });
     await publishBtn.click();

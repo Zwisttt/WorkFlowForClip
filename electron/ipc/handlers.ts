@@ -77,6 +77,7 @@ const CHANNEL = {
 
   TASK_LIST: 'task:list',
   TASK_RETRY: 'task:retry',
+  TASK_REPUBLISH: 'task:republish',
   TASK_BATCH_RETRY: 'task:batchRetry',
   TASK_BATCH_CANCEL: 'task:batchCancel',
   TASK_BATCH_DELETE: 'task:batchDelete',
@@ -365,6 +366,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.TASK_RETRY, async (_e, taskId: string): Promise<IpcResult<PublishResult>> => {
     return wrap(() => publishService.executeNow(taskId));
+  });
+
+  ipcMain.handle(CHANNEL.TASK_REPUBLISH, async (_e, taskId: string): Promise<IpcResult<PublishTask>> => {
+    return wrap(() => publishService.republishTask(taskId));
   });
 
   ipcMain.handle(CHANNEL.TASK_BATCH_RETRY, async (_e, taskIds: string[]): Promise<IpcResult<void>> => {

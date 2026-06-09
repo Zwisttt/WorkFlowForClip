@@ -1998,17 +1998,25 @@ export async function applyEmbeddedLocation(wc: WebContents, locationName?: stri
         (() => {
           ${EMBEDDED_DOM_HELPERS}
           const normalizeText = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+          // 对下拉项放宽可见性：只检查 display:none 和 visibility:hidden，不检查宽高
+          // 视频号无界微前端中 dropdown item 可能 bounding rect 为 0 但仍可点击
+          const isDropdownVisible = (el) => {
+            if (!el || typeof el.getBoundingClientRect !== 'function') return false;
+            const view = el.ownerDocument?.defaultView || window;
+            const style = view.getComputedStyle(el);
+            return style.visibility !== 'hidden' && style.display !== 'none';
+          };
           const roots = collectRoots();
           for (const root of roots) {
             try {
               const candidates = Array.from(root.querySelectorAll('*'))
-                .filter((el) => isVisible(el))
+                .filter((el) => isDropdownVisible(el))
                 .filter((el) => {
                   const text = normalizeText(textOf(el));
                   if (text !== '不显示位置' && text !== '不显示') return false;
                   return !Array.from(el.children || []).some((child) => {
                     const childText = normalizeText(textOf(child));
-                    return isVisible(child) && (childText === '不显示位置' || childText === '不显示');
+                    return isDropdownVisible(child) && (childText === '不显示位置' || childText === '不显示');
                   });
                 });
 

@@ -74,6 +74,8 @@ const api = {
       ipcRenderer.invoke('publish:cancelTask', taskId),
     retryTask: (taskId: string): Promise<any> =>
       ipcRenderer.invoke('publish:retryTask', taskId),
+    republishTask: (taskId: string): Promise<any> =>
+      ipcRenderer.invoke('task:republish', taskId),
     listTasks: (filter?: any): Promise<any[]> =>
       ipcRenderer.invoke('publish:listTasks', filter),
     batchRetry: (taskIds: string[]): Promise<any> =>

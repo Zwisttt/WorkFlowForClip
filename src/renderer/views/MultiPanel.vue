@@ -58,7 +58,18 @@ function handleReorder(fromId: string, toId: string) {
 }
 
 function handleRefresh() {
+  // 刷新账号列表
   panelStore.loadAvailableAccounts();
+
+  // 刷新所有内嵌浏览器标签页
+  const panelApi = (window as any).matrixflow?.panel;
+  if (!panelApi) return;
+
+  panelStore.panels.forEach(panel => {
+    if (panel.browser_mode === 'embedded' || !panel.browser_mode) {
+      panelApi.navigate(panel.id, 'refresh');
+    }
+  });
 }
 
 function handleAddAccount() {
