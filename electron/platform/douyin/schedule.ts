@@ -6,6 +6,7 @@ import type { ScheduleContext, ScheduleResult } from '../base/types';
 import { PageRiskControl } from '../base/RiskControl';
 import { toPlatformError, ValidationError } from '../base/PlatformError';
 import { getDebugRecorder } from '../base/DebugRecorder';
+import { formatScheduleDateTime } from '../base/utils/schedule';
 
 const logger = new Logger('DouyinSchedule');
 
@@ -48,42 +49,114 @@ export function validateScheduleDate(scheduledTime: Date): ScheduleValidationRes
 
 async function setScheduledTime(page: Page, scheduledTime: Date): Promise<boolean> {
   const debugRecorder = getDebugRecorder();
-  const rc = new PageRiskControl(page, {
-    typingDelayMs: { min: 100, max: 300 },
-    clickDelayMs: { min: 200, max: 500 },
-    stepIntervalSec: { min: 2.0, max: 3.0 },
-  });
 
   try {
     return await debugRecorder.recordStep('set_scheduled_time', async () => {
-      const scheduleTab = page.getByText('定时发布', { exact: true });
-      const hasScheduleTab = await scheduleTab.isVisible().catch(() => false);
-
-      if (!hasScheduleTab) {
+      // 1. 点击「定时发布」radio
+      const scheduleRadio = page.locator(UPLOAD_SELECTORS.scheduleRadio);
+      if (!(await scheduleRadio.isVisible().catch(() => false))) {
         logger.error('未找到"定时发布"选项');
         return false;
       }
+      await scheduleRadio.click();
+      await page.waitForTimeout(1000);
 
-      await rc.humanClick('text="定时发布"');
-      await page.waitForTimeout(500);
+      // 2. 点击日期输入框，弹出 Semi Design DatePicker 弹层
+      const dateInput = page.locator(UPLOAD_SELECTORS.scheduleDatePicker);
+      if (!(await dateInput.isVisible().catch(() => false))) {
+        logger.error('未找到日期时间输入框');
+        return false;
+      }
+      await dateInput.click();
+      await page.waitForTimeout(800);
 
-      const dateInput = page.locator(UPLOAD_SELECTORS.scheduleDatePicker || 'input[placeholder*="日期"]');
-      if (await dateInput.isVisible().catch(() => false)) {
-        const year = scheduledTime.getFullYear();
-        const month = String(scheduledTime.getMonth() + 1).padStart(2, '0');
-        const day = String(scheduledTime.getDate()).padStart(2, '0');
-        const hours = String(scheduledTime.getHours()).padStart(2, '0');
-        const minutes = String(scheduledTime.getMinutes()).padStart(2, '0');
-        const dateStr = `${year}-${month}-${day} ${hours}:${minutes}`;
-
-        await rc.humanClick(UPLOAD_SELECTORS.scheduleDatePicker);
-        await rc.humanType(UPLOAD_SELECTORS.scheduleDatePicker, dateStr);
-        await page.keyboard.press('Enter');
-        logger.info(`定时发布时间已设置: ${dateStr}`);
+      // 3. 等待日历面板出现（Semi Design: .semi-datepicker）
+      const panel = page.locator('.semi-datepicker').first();
+      await panel.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+      if (!(await panel.isVisible().catch(() => false))) {
+        logger.warn('日历面板未出现，回退 fill');
+        const dateStr = formatScheduleDateTime(scheduledTime);
+        if (dateStr) { await dateInput.fill(dateStr); await page.keyboard.press('Enter'); }
         return true;
       }
 
-      return false;
+      const day = scheduledTime.getDate();
+      const month = scheduledTime.getMonth() + 1;
+      const year = scheduledTime.getFullYear();
+      const hour = String(scheduledTime.getHours()).padStart(2, '0');
+      const minute = String(scheduledTime.getMinutes()).padStart(2, '0');
+      const dateIso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+      // 4. 翻到目标月份（用 aria-label="Next month"/"Previous month"）
+      const nextBtn = () => page.locator('.semi-datepicker-navigation [aria-label="Next month"]').first();
+      const prevBtn = () => page.locator('.semi-datepicker-navigation [aria-label="Previous month"]').first();
+      const monthLabel = () => panel.locator('.semi-datepicker-navigation-month span').first();
+
+      for (let i = 0; i < 24; i++) {
+        const text = (await monthLabel().textContent().catch(() => '')) || '';
+        const y = Number(text.match(/\d{4}/)?.[0]);
+        const m = (() => {
+          const cn = text.match(/(\d{1,2})\s*月/)?.[1];
+          if (cn) return Number(cn);
+          const en = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+          return en.indexOf(text.toLowerCase().match(/[a-z]+/g)?.[0] ?? '') + 1;
+        })();
+        if (y === year && m === month) break;
+        const btn = (y && y * 12 + m < year * 12 + month) ? nextBtn() : prevBtn();
+        if (!(await btn.isVisible().catch(() => false))) break;
+        await btn.click();
+        await page.waitForTimeout(300);
+      }
+
+      // 5. 点击目标日期 — aria-label 是 "YYYY-MM-DD"
+      const dayCell = panel.locator(
+        `[role="gridcell"][aria-label="${dateIso}"]:not([aria-disabled="true"])`
+      ).first();
+      if (!(await dayCell.isVisible().catch(() => false))) {
+        logger.warn(`日期 ${dateIso} 不可点击`);
+        return false;
+      }
+      await dayCell.click();
+      logger.info(`已点击日期: ${dateIso}`);
+      await page.waitForTimeout(500);
+
+      // 6. 切换到时间面板（aria-label="Switch to time panel"）
+      const switchBtn = panel.locator('[aria-label="Switch to time panel"]').first();
+      if (await switchBtn.isVisible().catch(() => false)) {
+        await switchBtn.click();
+        await page.waitForTimeout(500);
+
+        // 点小时
+        const hourOpt = panel.locator('.semi-timepicker-list-hour ul[role="listbox"] [role="option"]')
+          .filter({ hasText: new RegExp(`^${hour}`) }).first();
+        if (await hourOpt.count() > 0) { await hourOpt.click(); await page.waitForTimeout(300); }
+
+        // 点分钟
+        const minOpt = panel.locator('.semi-timepicker-list-minute ul[role="listbox"] [role="option"]')
+          .filter({ hasText: new RegExp(`^${minute}`) }).first();
+        if (await minOpt.count() > 0) { await minOpt.click(); await page.waitForTimeout(300); }
+      }
+
+      // 7. 确认 — footer 有确定按钮则点，否则 Escape 关闭
+      const confirmBtn = panel.locator(
+        '.semi-datepicker-footer button.semi-button-solid'
+      ).first();
+      if (await confirmBtn.isVisible().catch(() => false)) {
+        await confirmBtn.click();
+      } else {
+        await page.keyboard.press('Escape');
+      }
+      await page.waitForTimeout(500);
+
+      // 8. 回读校验
+      const actual = await dateInput.inputValue().catch(() => '');
+      logger.info(`定时发布: 期望=${formatScheduleDateTime(scheduledTime)} 回读=${actual}`);
+      if (!actual.includes(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`)) {
+        logger.warn(`回读值不匹配: ${actual}`);
+        return false;
+      }
+
+      return true;
     }, { page });
   } catch (error) {
     logger.error('设置定时发布时间失败', { error });
@@ -122,6 +195,9 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
       const rc = new PageRiskControl(page, {
         clickDelayMs: { min: 200, max: 500 },
       });
+
+      logger.info('⏸ 发布前等待 5 秒...');
+      await page.waitForTimeout(5000);
 
       const confirmBtn = page.getByRole('button', { name: '确认定时', exact: false });
       if (await confirmBtn.isVisible().catch(() => false)) {

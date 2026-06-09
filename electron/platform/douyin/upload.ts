@@ -11,6 +11,7 @@ import { TopicSanitizer } from '../base/TopicSanitizer';
 import { PageRiskControl, EmbeddedRiskControl } from '../base/RiskControl';
 import { toPlatformError, NetworkError, AuthError, SelectorError, ValidationError, ContentRejectedError } from '../base/PlatformError';
 import { getDebugRecorder } from '../base/DebugRecorder';
+import { formatScheduleDateTime } from '../base/utils/schedule';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
 import type { IBrowserLauncher, BrowserConfig } from '../../services/types';
@@ -46,14 +47,6 @@ function normalizeBrowserMode(mode?: UploadContext['browserMode']): NormalizedBr
 function normalizeLocalFilePath(value?: string | null): string | undefined {
   if (!value) return undefined;
   return value.replace(/^local-file:\/\//, '');
-}
-
-function formatScheduleDateTime(value?: string | Date | null): string | undefined {
-  if (!value) return undefined;
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return undefined;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
 }
 
 function shouldDebugSteps(ctx: UploadContext): boolean {
@@ -1131,6 +1124,10 @@ async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): P
       if (!(input instanceof HTMLInputElement)) return false;
       input.scrollIntoView({ block: 'center', inline: 'nearest' });
       input.focus();
+      // 先清空再聚焦，避免 Semi Design 自动填充的默认日期与 insertText 拼接
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
       return true;
     })()
   `, true).catch(() => false);

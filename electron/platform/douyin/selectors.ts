@@ -36,6 +36,7 @@ export const UPLOAD_SELECTORS = {
   recommendCover: '[class^="recommendCover-"].first',
   scheduleRadio: "[class^='radio']:has-text('定时发布')",
   scheduleDatePicker: '.semi-input[placeholder="日期和时间"]',
+  scheduleConfirmBtn: 'button:has-text("确认定时")',
   thirdPartySwitch: '[class^="info"] > [class^="first-part"] div div.semi-switch',
   thirdPartySwitchInput: 'input.semi-switch-native-control',
   locationInput: 'div.semi-select span:has-text("输入地理位置")',
