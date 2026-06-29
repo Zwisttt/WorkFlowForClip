@@ -64,9 +64,9 @@ const globalStubs = {
     props: ['modelValue'],
     emits: ['update:modelValue', 'success'],
   },
-  'AccountDetailDialog': {
-    template: '<div data-testid="detail-dialog" />',
-    props: ['modelValue', 'account', 'groups'],
+  'AccountSettingsDrawer': {
+    template: '<div data-testid="settings-drawer" />',
+    props: ['modelValue', 'account'],
     emits: ['update:modelValue', 'changed'],
   },
   'AccountFilterPanel': {

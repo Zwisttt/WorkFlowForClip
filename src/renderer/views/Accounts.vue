@@ -101,6 +101,7 @@
                   :account="account"
                   :groups="groupStore.groups"
                   @detail="handleDetail"
+                  @settings="handleSettings"
                   @validate="handleCheckCookie"
                   @login="handleLogin"
                   @delete="handleDelete"
@@ -112,53 +113,107 @@
                 v-else
                 :data="filteredAccounts"
                 class="page-accounts__table"
+                :row-class-name="() => 'account-table-row'"
               >
-                <el-table-column label="账号" min-width="180">
+                <el-table-column label="账号" min-width="240">
                   <template #default="{ row }">
-                    <div class="account-table-cell">
-                      <el-avatar :size="32" :src="row.avatar">
-                        {{ row.nickname?.charAt(0) || '?' }}
-                      </el-avatar>
-                      <div class="account-table-cell__info">
-                        <span class="account-table-cell__name">{{ row.nickname }}</span>
-                        <el-tag :type="getPlatformTagType(row.platform)" size="small" effect="plain">
-                          {{ getPlatformLabel(row.platform) }}
-                        </el-tag>
+                    <div class="account-table-account">
+                      <div class="account-table-avatar" :style="{ borderColor: getPlatformColor(row.platform) }">
+                        <span v-if="!row.avatar" class="account-table-avatar__fallback">
+                          {{ row.nickname?.charAt(0) || '?' }}
+                        </span>
+                        <img v-else :src="row.avatar" class="account-table-avatar__img" />
+                      </div>
+                      <div class="account-table-account__info">
+                        <div class="account-table-account__name-row">
+                          <span class="account-table-account__name">{{ row.nickname }}</span>
+                          <el-tag :type="getPlatformTagType(row.platform)" size="small" effect="plain" class="account-table-account__plat">
+                            {{ getPlatformLabel(row.platform) }}
+                          </el-tag>
+                        </div>
+                        <div class="account-table-account__meta">
+                          <span class="account-table-account__id">{{ shortId(row.id) }}</span>
+                          <span v-if="row.remark" class="account-table-account__remark" :title="row.remark">
+                            · {{ row.remark }}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column label="状态" width="120">
+
+                <el-table-column label="状态" width="110">
                   <template #default="{ row }">
                     <div class="account-table-status">
                       <span class="account-table-status__dot" :class="`account-table-status__dot--${row.status}`" />
-                      <span>{{ getStatusLabel(row.status) }}</span>
-                      <el-tag :type="row.cookieValid ? 'success' : 'danger'" size="small" round>
-                        Cookie{{ row.cookieValid ? '有效' : '失效' }}
-                      </el-tag>
+                      <span class="account-table-status__label">{{ getStatusLabel(row.status) }}</span>
                     </div>
                   </template>
                 </el-table-column>
-                <el-table-column label="分组" width="140">
+
+                <el-table-column label="分组" min-width="140">
                   <template #default="{ row }">
-                    <span v-if="getGroupName(row.groupId)" class="account-table-group">
-                      {{ getGroupName(row.groupId) }}
+                    <div v-if="row.groupInfos && row.groupInfos.length" class="account-table-groups">
+                      <span
+                        v-for="g in row.groupInfos"
+                        :key="g.id"
+                        class="account-table-group-chip"
+                        :style="{ background: g.color + '22', color: g.color }"
+                      >{{ g.name }}</span>
+                    </div>
+                    <span v-else class="account-table-empty">—</span>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="代理" min-width="160">
+                  <template #default="{ row }">
+                    <div v-if="row.proxyInfo" class="account-table-proxy">
+                      <el-icon :size="12" color="var(--color-success)"><Connection /></el-icon>
+                      <span class="account-table-proxy__name">{{ row.proxyInfo.name }}</span>
+                      <span class="account-table-proxy__addr">{{ row.proxyInfo.protocol }}://{{ row.proxyInfo.host }}:{{ row.proxyInfo.port }}</span>
+                    </div>
+                    <span v-else class="account-table-empty">—</span>
+                  </template>
+                </el-table-column>
+
+                <el-table-column label="指纹" width="110">
+                  <template #default="{ row }">
+                    <span v-if="row.fingerprintId" class="account-table-pill account-table-pill--on">
+                      <el-icon :size="11"><Stamp /></el-icon>
+                      已绑定
                     </span>
-                    <span v-else class="account-table-group--empty">未分组</span>
+                    <span v-else class="account-table-empty">—</span>
                   </template>
                 </el-table-column>
-                <el-table-column label="最后登录" width="160">
+
+                <el-table-column label="最后登录" width="150">
                   <template #default="{ row }">
-                    <span class="account-table-time">{{ row.lastLogin || '未登录' }}</span>
+                    <span class="account-table-time">{{ formatDate(row.lastLogin) }}</span>
                   </template>
                 </el-table-column>
-                <el-table-column label="操作" width="160" fixed="right">
+
+                <el-table-column label="操作" width="180" fixed="right">
                   <template #default="{ row }">
                     <div class="account-table-actions">
-                      <el-button text size="small" type="primary" @click="handleDetail(row.id)">设置</el-button>
+                      <el-tooltip content="打开主页" placement="top">
+                        <el-button text :icon="Share" circle size="small" @click="openHomepageFromRow(row)" />
+                      </el-tooltip>
+                      <el-tooltip :content="row.cookieValid ? '检测 Cookie' : '重新登录'" placement="top">
+                        <el-button
+                          text
+                          :icon="row.cookieValid ? CircleCheck : Refresh"
+                          circle
+                          size="small"
+                          :type="row.cookieValid ? 'success' : 'warning'"
+                          @click="row.cookieValid ? handleCheckCookie(row.id) : handleLogin(row.id)"
+                        />
+                      </el-tooltip>
+                      <el-tooltip content="账号设置" placement="top">
+                        <el-button text :icon="Setting" circle size="small" type="primary" @click="handleDetail(row.id)" />
+                      </el-tooltip>
                       <el-popconfirm title="确定删除该账号？" @confirm="handleDelete(row.id)">
                         <template #reference>
-                          <el-button text size="small" type="danger">删除</el-button>
+                          <el-button text :icon="Delete" circle size="small" type="danger" />
                         </template>
                       </el-popconfirm>
                     </div>
@@ -182,11 +237,10 @@
       @success="handleRefresh"
     />
 
-    <!-- 账号详情弹窗 -->
-    <AccountDetailDialog
-      v-model="detailDialogVisible"
+    <!-- 账号设置抽屉 -->
+    <AccountSettingsDrawer
+      v-model="settingsDrawerVisible"
       :account="selectedAccount"
-      :groups="groupStore.groups"
       @changed="handleRefresh"
     />
   </div>
@@ -195,7 +249,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
-import { User, Grid, List, Plus } from '@element-plus/icons-vue';
+import { User, Grid, List, Plus, Share, CircleCheck, Refresh, Setting, Delete, Connection, Stamp } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import { useAccountStore } from '@/renderer/stores/account';
 import { useGroupStore } from '@/renderer/stores/group';
@@ -205,7 +259,7 @@ import Empty from '@/renderer/components/common/Empty.vue';
 import AccountCard from '@/renderer/components/account/AccountCard.vue';
 import AccountFilterPanel from '@/renderer/components/account/AccountFilterPanel.vue';
 import BrowserLoginDialog from '@/renderer/components/account/BrowserLoginDialog.vue';
-import AccountDetailDialog from '@/renderer/components/account/AccountDetailDialog.vue';
+import AccountSettingsDrawer from '@/renderer/components/account/AccountSettingsDrawer.vue';
 import GroupsTab from '@/renderer/components/group/GroupsTab.vue';
 
 const accountStore = useAccountStore();
@@ -224,7 +278,7 @@ const viewMode = ref<'grid' | 'list'>('grid');
 
 // 弹窗状态
 const bindDialogVisible = ref(false);
-const detailDialogVisible = ref(false);
+const settingsDrawerVisible = ref(false);
 const selectedAccount = ref<Account | null>(null);
 
 // 筛选后的账号列表
@@ -314,7 +368,12 @@ function handleStatusFilter(value: string) {
 
 function handleDetail(id: string) {
   selectedAccount.value = accountStore.accounts.find((a) => a.id === id) || null;
-  detailDialogVisible.value = true;
+  settingsDrawerVisible.value = true;
+}
+
+function handleSettings(id: string) {
+  selectedAccount.value = accountStore.accounts.find((a) => a.id === id) || null;
+  settingsDrawerVisible.value = true;
 }
 
 async function handleLogin(id: string) {
@@ -338,6 +397,62 @@ async function handleCheckCookie(id: string) {
 async function handleDelete(id: string) {
   await accountStore.deleteAccount(id);
   ElMessage.success('已删除');
+}
+
+const platformColorMap: Record<string, string> = {
+  douyin: 'var(--color-plat-douyin)',
+  xiaohongshu: 'var(--color-plat-xiaohongshu)',
+  channels: 'var(--color-plat-wechat)',
+  kuaishou: 'var(--color-plat-kuaishou)',
+  bilibili: 'var(--color-plat-bilibili)',
+};
+
+function getPlatformColor(platform: string) {
+  return platformColorMap[platform] || 'var(--color-primary)';
+}
+
+function shortId(id: string) {
+  return id.length > 16 ? id.slice(0, 16) + '…' : id;
+}
+
+function formatDate(dateStr?: string) {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch {
+    return dateStr;
+  }
+}
+
+const PLATFORM_HOMEPAGE: Record<string, string> = {
+  douyin: 'https://creator.douyin.com/creator-micro/home',
+  xiaohongshu: 'https://creator.xiaohongshu.com/publish/publish',
+  kuaishou: 'https://cp.kuaishou.com/article/publish/video',
+  bilibili: 'https://member.bilibili.com/platform/home',
+  channels: 'https://channels.weixin.qq.com/platform',
+};
+
+async function openHomepageFromRow(row: Account) {
+  if (!row.cookieValid) {
+    ElMessage.warning('账号已离线，请重新登录');
+    return;
+  }
+  const url = row.homepageUrl || PLATFORM_HOMEPAGE[row.platform];
+  if (!url) {
+    ElMessage.warning('未配置主页地址');
+    return;
+  }
+  try {
+    const result = await window.matrixflow.browser.openAccountBrowser(row.id, url);
+    if (!result.success) {
+      ElMessage.warning(result.message || '登录态已过期，请重新登录');
+    }
+  } catch {
+    ElMessage.error('打开主页失败');
+  }
 }
 </script>
 
@@ -448,38 +563,144 @@ async function handleDelete(id: string) {
 .page-accounts__table {
   background: var(--color-bg-card);
   border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--color-border-light);
 }
 
 .page-accounts__table :deep(.el-table__header th) {
   background: var(--color-bg-page);
   color: var(--color-text-secondary);
   font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-xs);
+  height: 40px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
-.account-table-cell {
+.page-accounts__table :deep(.el-table__row) {
+  transition: background var(--transition-fast);
+}
+
+.page-accounts__table :deep(.el-table__row:hover > td) {
+  background: var(--color-bg-page) !important;
+}
+
+.page-accounts__table :deep(.el-table__row td) {
+  padding: 0 var(--space-3);
+  height: 64px;
+  border-bottom: 1px solid var(--color-border-light);
+  vertical-align: middle;
+}
+
+.page-accounts__table :deep(.el-table__row:last-child td) {
+  border-bottom: none;
+}
+
+.page-accounts__table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.account-table-row {
+  cursor: default;
+}
+
+/* ── 账号列 ── */
+.account-table-account {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  min-width: 0;
 }
 
-.account-table-cell__info {
+.account-table-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--color-border);
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-page);
+}
+
+.account-table-avatar__fallback {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+}
+
+.account-table-avatar__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.account-table-account__info {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
 }
 
-.account-table-cell__name {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-primary);
-}
-
-.account-table-status {
+.account-table-account__name-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+.account-table-account__name {
   font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.account-table-account__plat {
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.account-table-account__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-2xs);
+  color: var(--color-text-placeholder);
+  min-width: 0;
+}
+
+.account-table-account__id {
+  font-family: var(--font-family-mono);
+  flex-shrink: 0;
+}
+
+.account-table-account__remark {
   color: var(--color-text-secondary);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+/* ── 状态列 ── */
+.account-table-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-page);
 }
 
 .account-table-status__dot {
@@ -491,7 +712,7 @@ async function handleDelete(id: string) {
 
 .account-table-status__dot--online {
   background: var(--color-success);
-  box-shadow: 0 0 4px var(--color-success);
+  box-shadow: 0 0 6px var(--color-success);
 }
 
 .account-table-status__dot--offline {
@@ -502,24 +723,102 @@ async function handleDelete(id: string) {
   background: var(--color-danger);
 }
 
-.account-table-group {
-  font-size: var(--font-size-sm);
+.account-table-status__label {
+  font-size: var(--font-size-xs);
   color: var(--color-text-regular);
+  font-weight: var(--font-weight-medium);
 }
 
-.account-table-group--empty {
-  font-size: var(--font-size-sm);
+/* ── 分组列 ── */
+.account-table-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.account-table-group-chip {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  line-height: 1.5;
+  font-weight: var(--font-weight-medium);
+}
+
+/* ── 代理列 ── */
+.account-table-proxy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.account-table-proxy__name {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.account-table-proxy__addr {
+  font-size: var(--font-size-2xs);
   color: var(--color-text-placeholder);
+  font-family: var(--font-family-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.account-table-time {
+/* ── 指纹列 ── */
+.account-table-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.account-table-pill--on {
+  color: var(--color-success);
+  background: var(--color-success-light);
+}
+
+/* ── 通用空值 ── */
+.account-table-empty {
+  color: var(--color-text-placeholder);
   font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
 }
 
+/* ── 时间列 ── */
+.account-table-time {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 操作列 ── */
 .account-table-actions {
   display: flex;
-  gap: var(--space-1);
+  align-items: center;
+  gap: 2px;
+  justify-content: flex-end;
+}
+
+.account-table-actions :deep(.el-button) {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.account-table-actions :deep(.el-button .el-icon) {
+  font-size: 14px;
 }
 
 /* ── 占位符 ── */
