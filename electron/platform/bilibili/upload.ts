@@ -11,6 +11,7 @@ import { TopicSanitizer } from '../base/TopicSanitizer';
 import { EmbeddedRiskControl, PageRiskControl } from '../base/RiskControl';
 import { toPlatformError, NetworkError, AuthError, SelectorError, ValidationError, ContentRejectedError } from '../base/PlatformError';
 import { getDebugRecorder } from '../base/DebugRecorder';
+import { PRE_PUBLISH_CONFIRMATION_DELAY_MS, PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS } from '../base/publishTiming';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
 import type { IBrowserLauncher, BrowserConfig } from '../../services/types';
@@ -365,8 +366,8 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     });
 
     const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
-      logger.info('所有元素设置完成，等待10秒后发布...');
-      await sleep(10000);
+      logger.info(`所有元素设置完成，等待${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS}秒后发布...`);
+      await sleep(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
       return clickEmbeddedPublish(wc, 30000);
     });
     if (publishState === 'success') {
@@ -1519,8 +1520,8 @@ async function doUpload(
   }, { page });
 
   return await recorder.recordStep('提交发布', async () => {
-    logger.info('所有元素设置完成，等待10秒后发布...');
-    await page.waitForTimeout(10000);
+    logger.info(`所有元素设置完成，等待${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS}秒后发布...`);
+    await page.waitForTimeout(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
 
     await recorder.recordStep('发布前确认', async () => {
       return true;

@@ -3,6 +3,7 @@ import { Logger } from '../../core/Logger';
 import { UPLOAD_SELECTORS } from './selectors';
 import { fillVideoMetadata } from './publish';
 import type { ScheduleContext, ScheduleResult } from '../base/types';
+import { PRE_PUBLISH_CONFIRMATION_DELAY_MS, PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS } from '../base/publishTiming';
 
 const logger = new Logger('BilibiliSchedule');
 
@@ -73,8 +74,8 @@ export async function schedule(ctx: ScheduleContext): Promise<ScheduleResult> {
       logger.info(`定时发布时间已设置: ${dateStr}`);
     }
 
-    logger.info('⏸ 发布前等待 5 秒...');
-    await page.waitForTimeout(5000);
+    logger.info(`⏸ 发布前等待 ${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS} 秒...`);
+    await page.waitForTimeout(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
 
     const publishBtn = page.locator(UPLOAD_SELECTORS.publishButton).first();
     await publishBtn.waitFor({ state: 'visible', timeout: 10000 });
