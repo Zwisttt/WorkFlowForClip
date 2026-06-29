@@ -11,7 +11,8 @@ import { TopicSanitizer } from '../base/TopicSanitizer';
 import { PageRiskControl, EmbeddedRiskControl } from '../base/RiskControl';
 import { toPlatformError, NetworkError, AuthError, SelectorError, ValidationError, ContentRejectedError } from '../base/PlatformError';
 import { getDebugRecorder } from '../base/DebugRecorder';
-import { formatScheduleDateTime } from '../base/utils/schedule';
+import { formatScheduleDateTime, isScheduleDateTimeValueApplied } from '../base/utils/schedule';
+import { PRE_PUBLISH_CONFIRMATION_DELAY_MS, PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS } from '../base/publishTiming';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
 import type { IBrowserLauncher, BrowserConfig } from '../../services/types';
@@ -386,8 +387,8 @@ async function uploadVideoInEmbeddedBrowser(ctx: UploadContext): Promise<UploadR
     });
 
     const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
-      logger.info('所有元素设置完成，等待10秒后发布...');
-      await sleep(10000);
+      logger.info(`所有元素设置完成，等待${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS}秒后发布...`);
+      await sleep(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
       return clickEmbeddedPublish(wc, 30000);
     });
 
@@ -1097,72 +1098,122 @@ async function setEmbeddedSavePermission(wc: WebContents, allowSave: boolean): P
 async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): Promise<boolean> {
   logger.info(`设置内嵌抖音定时发布时间: ${scheduleTime}`);
 
-  // Click "定时发布" radio
-  const selected = await clickEmbeddedText(wc, [/定时发布/]);
-  if (!selected) {
+  const selected = await clickEmbeddedText(wc, [/定时发布/, /^定时$/]);
+  const inputAlreadyVisible = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      return Array.from(document.querySelectorAll('input')).some((el) => {
+        if (!(el instanceof HTMLInputElement) || !isVisible(el)) return false;
+        const attrs = [
+          el.getAttribute('placeholder') || '',
+          el.getAttribute('aria-label') || '',
+          el.getAttribute('type') || '',
+          el.getAttribute('class') || '',
+        ].join(' ');
+        return /日期和时间|日期|时间|datetime-local|semi-input/.test(attrs);
+      });
+    })()
+  `, true).catch(() => false);
+  if (!selected && !inputAlreadyVisible) {
     logger.warn('未找到抖音定时发布入口');
     return false;
   }
 
-  await sleep(800);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await sleep(attempt === 1 ? 800 : 400);
+    const result = await wc.executeJavaScript(`
+      (() => {
+        const value = ${JSON.stringify(scheduleTime)};
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const findInput = () => Array.from(document.querySelectorAll('input'))
+          .filter((el) => el instanceof HTMLInputElement && isVisible(el) && !el.disabled && !el.readOnly)
+          .find((el) => {
+            const attrs = [
+              el.getAttribute('placeholder') || '',
+              el.getAttribute('aria-label') || '',
+              el.getAttribute('type') || '',
+              el.getAttribute('class') || '',
+            ].join(' ');
+            return /日期和时间|日期|时间|datetime-local|semi-input/.test(attrs);
+          });
+        const dispatchValue = (input, nextValue) => {
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+          if (setter) {
+            setter.call(input, nextValue);
+          } else {
+            input.value = nextValue;
+          }
+          input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: nextValue }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        const input = findInput();
+        if (!(input instanceof HTMLInputElement)) {
+          return { found: false, value: '' };
+        }
+        input.scrollIntoView({ block: 'center', inline: 'nearest' });
+        input.click();
+        input.focus();
+        dispatchValue(input, '');
+        dispatchValue(input, value);
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
 
-  // Find and fill the datetime input
-  const filled = await wc.executeJavaScript(`
-    (() => {
-      const isVisible = (el) => {
-        const rect = el.getBoundingClientRect();
-        const style = window.getComputedStyle(el);
-        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-      };
-      const input = Array.from(document.querySelectorAll('input'))
-        .find((el) => {
-          if (!isVisible(el)) return false;
-          const placeholder = el.getAttribute('placeholder') || '';
-          const type = el.getAttribute('type') || '';
-          return /日期和时间|日期|时间/.test(placeholder) || type === 'datetime-local';
-        });
-      if (!(input instanceof HTMLInputElement)) return false;
-      input.scrollIntoView({ block: 'center', inline: 'nearest' });
-      input.focus();
-      // 先清空再聚焦，避免 Semi Design 自动填充的默认日期与 insertText 拼接
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(input, '');
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+        const confirmBtn = Array.from(document.querySelectorAll('.semi-datepicker-footer button, button, [role="button"]'))
+          .find((el) => {
+            if (!(el instanceof HTMLElement) || !isVisible(el)) return false;
+            const text = (el.innerText || el.textContent || '').trim();
+            return /^确定$|^确认$|^完成$/.test(text);
+          });
+        if (confirmBtn instanceof HTMLElement) confirmBtn.click();
+        input.blur();
+        return { found: true, value: input.value };
+      })()
+    `, true).catch(() => ({ found: false, value: '' })) as { found: boolean; value: string };
+
+    if (!result.found) {
+      logger.warn(`未找到抖音定时发布时间输入框，attempt=${attempt}`);
+      continue;
+    }
+
+    await sleep(500);
+    const actual = await wc.executeJavaScript(`
+      (() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const input = Array.from(document.querySelectorAll('input'))
+          .filter((el) => el instanceof HTMLInputElement && isVisible(el))
+          .find((el) => {
+            const attrs = [
+              el.getAttribute('placeholder') || '',
+              el.getAttribute('aria-label') || '',
+              el.getAttribute('type') || '',
+              el.getAttribute('class') || '',
+            ].join(' ');
+            return /日期和时间|日期|时间|datetime-local|semi-input/.test(attrs);
+          });
+        return input instanceof HTMLInputElement ? input.value : '';
+      })()
+    `, true).catch(() => result.value) as string;
+
+    logger.info(`抖音定时发布回读: 期望=${scheduleTime} 实际=${actual || result.value} attempt=${attempt}`);
+    if (isScheduleDateTimeValueApplied(actual || result.value, scheduleTime)) {
       return true;
-    })()
-  `, true).catch(() => false);
-
-  if (!filled) {
-    logger.warn('未找到抖音定时发布时间输入框');
-    return false;
+    }
   }
 
-  await wc.insertText(scheduleTime);
-  await sleep(800);
-
-  // Click confirm button
-  await wc.executeJavaScript(`
-    (() => {
-      const isVisible = (el) => {
-        const rect = el.getBoundingClientRect();
-        const style = window.getComputedStyle(el);
-        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-      };
-      const confirmBtn = Array.from(document.querySelectorAll('button, [role="button"]'))
-        .find((el) => {
-          if (!isVisible(el)) return false;
-          const text = (el.innerText || el.textContent || '').trim();
-          return /^确定$|^确认$|^完成$/.test(text);
-        });
-      if (confirmBtn instanceof HTMLElement) {
-        confirmBtn.click();
-        return true;
-      }
-      return false;
-    })()
-  `, true).catch(() => {});
-
-  return true;
+  logger.warn(`抖音定时发布时间未成功写入: ${scheduleTime}`);
+  return false;
 }
 
 async function clickEmbeddedText(wc: WebContents, patterns: TextPattern[]): Promise<boolean> {
@@ -1449,8 +1500,8 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     }
 
     const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
-      logger.info('所有元素设置完成，等待10秒后发布...');
-      await sleep(10000);
+      logger.info(`所有元素设置完成，等待${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS}秒后发布...`);
+      await sleep(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
       return clickEmbeddedPublish(wc, 30000);
     });
 
