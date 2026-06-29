@@ -18,6 +18,9 @@
         </div>
       </div>
       <div class="account-card__head-actions" :class="{ 'account-card__head-actions--visible': hovered }">
+        <el-tooltip content="账号设置" placement="top">
+          <el-button text size="small" :icon="Setting" circle class="account-card__icon-btn" @click.stop="$emit('settings', account.id)" />
+        </el-tooltip>
         <el-tooltip content="打开主页" placement="top">
           <el-button text size="small" :icon="Share" circle class="account-card__icon-btn" @click.stop="openHomepage" />
         </el-tooltip>
@@ -188,7 +191,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Delete, Stamp, Connection, FolderOpened, CircleCheck, ChatLineRound, EditPen, Share } from '@element-plus/icons-vue';
+import { Delete, Stamp, Connection, FolderOpened, CircleCheck, ChatLineRound, EditPen, Share, Setting } from '@element-plus/icons-vue';
 import type { Account } from '@/renderer/stores/account';
 import { useAccountStore } from '@/renderer/stores/account';
 import { useGroupStore } from '@/renderer/stores/group';
@@ -203,6 +206,7 @@ const emit = defineEmits<{
   validate: [id: string];
   login: [id: string];
   delete: [id: string];
+  settings: [id: string];
 }>();
 
 const store = useAccountStore();
