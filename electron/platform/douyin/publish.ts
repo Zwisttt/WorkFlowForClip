@@ -8,6 +8,7 @@ import { PageRiskControl } from '../base/RiskControl';
 import { toPlatformError } from '../base/PlatformError';
 import { TopicSanitizer } from '../base/TopicSanitizer';
 import { getDebugRecorder } from '../base/DebugRecorder';
+import { PRE_PUBLISH_CONFIRMATION_DELAY_MS, PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS } from '../base/publishTiming';
 
 const logger = new Logger('DouyinPublish');
 
@@ -101,9 +102,9 @@ async function executePublish(page: Page, maxRetries: number = 3): Promise<boole
     stepIntervalSec: { min: 2.0, max: 3.0 },
   });
   for (let retry = 0; retry < maxRetries; retry++) {
-    // 发布前暂停 5 秒，等待页面渲染稳定
-    logger.info('⏸ 发布前等待 5 秒...');
-    await page.waitForTimeout(5000);
+    // 发布前暂停，等待页面渲染稳定
+    logger.info(`⏸ 发布前等待 ${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS} 秒...`);
+    await page.waitForTimeout(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
 
     const publishBtn = page.getByRole('button', { name: '发布', exact: true });
     await publishBtn.waitFor({ state: 'visible', timeout: 10000 });

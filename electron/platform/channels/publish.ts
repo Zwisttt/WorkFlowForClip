@@ -6,6 +6,7 @@ import { PageRiskControl } from '../base/RiskControl';
 import { TopicSanitizer } from '../base/TopicSanitizer';
 import { getDebugRecorder } from '../base/DebugRecorder';
 import { toPlatformError, ContentRejectedError, ValidationError } from '../base/PlatformError';
+import { PRE_PUBLISH_CONFIRMATION_DELAY_MS, PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS } from '../base/publishTiming';
 
 const logger = new Logger('ChannelsPublish');
 
@@ -571,8 +572,8 @@ async function executePublish(page: Page, maxRetries: number = 3): Promise<boole
 
   for (let retry = 0; retry < maxRetries; retry++) {
     try {
-      logger.info('⏸ 发布前等待 5 秒...');
-      await page.waitForTimeout(5000);
+      logger.info(`⏸ 发布前等待 ${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS} 秒...`);
+      await page.waitForTimeout(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
 
       const publishBtn = page.locator(UPLOAD_SELECTORS.publishButton).first();
       await publishBtn.waitFor({ state: 'visible', timeout: 10000 });
