@@ -61,6 +61,33 @@ function normalizeLocalFilePath(value?: unknown): string | undefined {
   return value.replace(/^local-file:\/\//, '');
 }
 
+function parseTaskTags(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0);
+  }
+  if (typeof value !== 'string' || !value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function mergeTags(baseTags: string[], presetTags?: string[]): string[] {
+  if (baseTags.length === 0) return [];
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const tag of [...baseTags, ...(presetTags ?? [])]) {
+    const normalized = tag.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    merged.push(normalized);
+  }
+  return merged;
+}
+
 const PLATFORM_PRE_PUBLISH_RULES: Record<string, { titleMinLen?: number; titleMinLenMsg?: string }> = {
   channels: { titleMinLen: 6, titleMinLenMsg: '视频号标题至少需要6个字符' },
 };
@@ -87,13 +114,14 @@ function buildUploadContextFromTask(
   const headless = taskMeta.headless === true;
   const taskTitle = (dbTask as any).title || `video_${contentId.slice(0, 8)}`;
   const taskDescription = (dbTask as any).description || undefined;
+  const taskTags = parseTaskTags((dbTask as any).tags);
+  const presetTags = browserRuntime.tags;
 
   const uploadContext: UploadContext = {
     accountId,
     videoPath,
     title: taskTitle,
     description: taskDescription,
-    tags: (() => { try { return JSON.parse((dbTask as any).tags || '[]'); } catch { return []; } })(),
     coverPath: normalizeLocalFilePath((dbTask as any).cover_url || taskMeta.coverUrl),
     location: taskMeta.location as string | undefined,
     visibility: taskMeta.visibility as UploadContext['visibility'],
@@ -109,7 +137,24 @@ function buildUploadContextFromTask(
     slowMo: headless ? 0 : 200,
     debugSteps: process.env.NODE_ENV !== 'production' && taskMeta.debugSteps === true,
     ...browserRuntime,
+    tags: mergeTags(taskTags, presetTags),
   };
+
+  const taskExplicitFields: Array<keyof UploadContext> = [
+    'visibility',
+    'declaration',
+    'location',
+    'allowComment',
+    'allowShare',
+    'allowSameFrame',
+    'allowDownload',
+    'showInCity',
+  ];
+  for (const key of taskExplicitFields) {
+    if (taskMeta[key as string] !== undefined) {
+      (uploadContext as any)[key] = taskMeta[key as string];
+    }
+  }
 
   if (dbTask.platform === 'kuaishou') {
     return {
@@ -884,10 +929,10 @@ export class PublishService implements IPublishService {
 
     const db = getDatabase();
     const row = db.prepare(`
-      SELECT browser_mode, fingerprint_id, cookie_path
+      SELECT browser_mode, fingerprint_id, cookie_path, platform
       FROM accounts
       WHERE id = ?
-    `).get(accountId) as { browser_mode?: string | null; fingerprint_id?: string | null; cookie_path?: string | null } | undefined;
+    `).get(accountId) as { browser_mode?: string | null; fingerprint_id?: string | null; cookie_path?: string | null; platform?: string | null } | undefined;
 
     let chromePath: string | null = null;
     try {
@@ -899,12 +944,67 @@ export class PublishService implements IPublishService {
       chromePath = null;
     }
 
-    return {
+    const runtime: Partial<UploadContext> = {
       browserMode: (row?.browser_mode as UploadContext['browserMode']) || 'embedded',
       fingerprintId: row?.fingerprint_id || null,
       chromePath,
       cookiePath: row?.cookie_path || null,
     };
+
+    if (row?.platform) {
+      const presetRow = db.prepare(`
+        SELECT default_topics, platform_options, enabled
+        FROM account_publish_presets
+        WHERE account_id = ? AND platform = ?
+      `).get(accountId, row.platform) as
+        | { default_topics?: string | null; platform_options?: string | null; enabled?: number | null }
+        | undefined;
+
+      if (presetRow && Number(presetRow.enabled) === 1) {
+        if (presetRow.default_topics) {
+          try {
+            const parsed = JSON.parse(presetRow.default_topics);
+            if (Array.isArray(parsed)) {
+              const topics = parsed.filter((t): t is string => typeof t === 'string' && t.length > 0);
+              if (topics.length > 0) {
+                runtime.tags = topics;
+              }
+            }
+          } catch (e) {
+            logger.warn(`解析 account_publish_presets.default_topics 失败: accountId=${accountId}`);
+          }
+        }
+
+        if (presetRow.platform_options) {
+          try {
+            const opts = JSON.parse(presetRow.platform_options);
+            if (opts && typeof opts === 'object' && !Array.isArray(opts)) {
+              this.applyPresetOptions(runtime, opts as Record<string, unknown>);
+            }
+          } catch (e) {
+            logger.warn(`解析 account_publish_presets.platform_options 失败: accountId=${accountId}`);
+          }
+        }
+      }
+    }
+
+    return runtime;
+  }
+
+  private applyPresetOptions(runtime: Partial<UploadContext>, opts: Record<string, unknown>): void {
+    const knownKeys: Array<keyof UploadContext> = [
+      'declaration',
+      'visibility',
+      'allowDownload',
+      'allowSameFrame',
+      'showInCity',
+      'location',
+    ];
+    for (const key of knownKeys) {
+      if (key in opts && opts[key] !== undefined) {
+        (runtime as any)[key] = opts[key];
+      }
+    }
   }
 
   private async validateCookieForAccount(accountId: string): Promise<void> {
