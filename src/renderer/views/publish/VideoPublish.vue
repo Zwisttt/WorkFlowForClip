@@ -166,7 +166,9 @@ import AccountPickerDialog from '@/renderer/components/publish/AccountPickerDial
 import { useAccountStore } from '@/renderer/stores/account';
 import { useDraftStore } from '@/renderer/stores/draft';
 import { useTaskStore } from '@/renderer/stores/task';
+import { useAccountPublishPresetStore } from '@/renderer/stores/account-publish-preset';
 import type { Account } from '@/renderer/stores/account';
+import type { PublishPreset } from '@/renderer/stores/account-publish-preset';
 
 const route = useRoute();
 const router = useRouter();
@@ -235,6 +237,7 @@ interface PublishQueueItem {
 const accountStore = useAccountStore();
 const draftStore = useDraftStore();
 const taskStore = useTaskStore();
+const presetStore = useAccountPublishPresetStore();
 
 const uploadState = reactive<UploadState>({
   status: 'idle',
@@ -437,16 +440,24 @@ function handleAddAccount() {
   showAccountPicker.value = true;
 }
 
-function handleAccountsConfirmed(accountIds: string[]) {
+async function handleAccountsConfirmed(accountIds: string[]) {
   // 取消全部选择：清空已有配置
   for (const key of Object.keys(platformConfigs)) {
     delete platformConfigs[key];
   }
+
+  const selectedAccounts = accountIds
+    .map(id => accountStore.accounts.find(a => a.id === id))
+    .filter((account): account is Account => Boolean(account));
+  const configs = await Promise.all(
+    selectedAccounts.map(async (account) => [account.id, await buildInitialPlatformConfig(account)] as const),
+  );
+
   // 重新添加选中的账号
-  for (const id of accountIds) {
-    const account = accountStore.accounts.find(a => a.id === id);
-    platformConfigs[id] = getDefaultPlatformConfig(account?.platform);
+  for (const [id, config] of configs) {
+    platformConfigs[id] = config;
   }
+
   // 更新选中状态
   if (accountIds.length === 0) {
     selectedAccountId.value = null;
@@ -478,11 +489,13 @@ function handleApplyToAccounts() {
       ...platformConfigs[accountId],
       title: commonConfig.title || undefined,
       description: commonConfig.description || undefined,
-      tags: commonConfig.tags.length > 0 ? [...commonConfig.tags] : undefined,
       scheduleMode: commonConfig.scheduleMode,
       scheduledAt: commonConfig.scheduledAt,
       coverUrl: uploadState.coverUrl || undefined,
     };
+    if (commonConfig.tags.length > 0) {
+      platformConfigs[accountId].tags = [...commonConfig.tags];
+    }
   }
   ElMessage.success('已同步应用到所有平台账号');
 }
@@ -725,6 +738,60 @@ function taskDataScheduleMode(config: PlatformConfig) {
 
 function getPlatformLabel(platform: string) {
   return platformInfoMap[platform]?.label || platform;
+}
+
+async function buildInitialPlatformConfig(account: Account): Promise<PlatformConfig> {
+  const config = getDefaultPlatformConfig(account.platform);
+  try {
+    const preset = await presetStore.getPreset(account.id, account.platform);
+    if (!preset?.enabled) return config;
+    return mergePresetIntoConfig(config, preset, account.platform);
+  } catch (e) {
+    console.warn(`[VideoPublish] 读取账号发布预设失败: accountId=${account.id}`, e);
+    return config;
+  }
+}
+
+function mergePresetIntoConfig(config: PlatformConfig, preset: PublishPreset, platform: string): PlatformConfig {
+  const next: PlatformConfig = {
+    ...config,
+    ...normalizePresetOptions(preset.platformOptions, platform),
+  };
+  const topics = normalizePresetTopics(preset.defaultTopics);
+  if (topics.length > 0) {
+    next.tags = topics;
+  }
+  return next;
+}
+
+function normalizePresetOptions(options: Record<string, unknown>, platform: string): PlatformConfig {
+  const supportedKeys: Array<keyof PlatformConfig> = [
+    'location',
+    'visibility',
+    'declaration',
+    'allowComment',
+    'allowShare',
+    'allowSameFrame',
+    'allowDownload',
+    'showInCity',
+  ];
+  const normalized: PlatformConfig = {};
+  for (const key of supportedKeys) {
+    const value = options[key];
+    if (value !== undefined && value !== null && value !== '') {
+      (normalized as any)[key] = value;
+    }
+  }
+  if (normalized.declaration !== undefined && platform === 'xiaohongshu') {
+    normalized.declaration = String(normalized.declaration);
+  }
+  return normalized;
+}
+
+function normalizePresetTopics(topics: string[]): string[] {
+  return topics
+    .map((topic) => topic.trim())
+    .filter((topic) => topic.length > 0);
 }
 
 function getDefaultPlatformConfig(platform?: string): PlatformConfig {
