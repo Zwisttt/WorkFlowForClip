@@ -11,6 +11,7 @@ import { TopicSanitizer } from '../base/TopicSanitizer';
 import { toPlatformError, AuthError, SelectorError, ContentRejectedError } from '../base/PlatformError';
 import { accountService } from '../../services/AccountService';
 import { getDebugRecorder } from '../base/DebugRecorder';
+import { PRE_PUBLISH_CONFIRMATION_DELAY_MS, PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS } from '../base/publishTiming';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
 import { shouldPreserveStandaloneBrowserAfterFailure } from '../../services/publish-browser-policy';
@@ -2268,8 +2269,8 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     }
 
     await dumpEmbeddedState(wc, '发表前');
-    logger.info('视频号发表前暂停30秒，等待人工确认...');
-    await sleep(30 * 1000);
+    logger.info(`视频号发表前暂停${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS}秒，等待人工确认...`);
+    await sleep(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
     const publishSuccess = await clickEmbeddedPublish(wc, 30000);
     if (publishSuccess) {
       publishSucceeded = true;
