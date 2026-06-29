@@ -23,6 +23,8 @@ import { licenseService } from '../services/LicenseService';
 import { proxyService } from '../services/ProxyService';
 import { materialService } from '../services/MaterialService';
 import { SessionManager } from '../services/session-manager';
+import { accountPublishPresetService } from '../services/AccountPublishPresetService';
+import type { PublishPreset, SavePublishPresetInput } from '../services/AccountPublishPresetService';
 import { fingerprintTemplateRepo } from '../data/repositories/FingerprintTemplateRepository';
 import { getIPLimitSettingsService } from '../services/ip-limit-settings';
 import { getAIRiskSettingsService } from '../services/ai-risk-settings';
@@ -230,6 +232,11 @@ const CHANNEL = {
   ACCOUNT_OPEN_BROWSER: 'account:openBrowser',
 
   DASHBOARD_OVERVIEW: 'dashboard:overview',
+
+  ACCOUNT_PUBLISH_PRESET_GET: 'accountPublishPreset:get',
+  ACCOUNT_PUBLISH_PRESET_LIST: 'accountPublishPreset:list',
+  ACCOUNT_PUBLISH_PRESET_SAVE: 'accountPublishPreset:save',
+  ACCOUNT_PUBLISH_PRESET_DELETE: 'accountPublishPreset:delete',
 } as const;
 
 export interface IpcResult<T = unknown> {
@@ -538,6 +545,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(CHANNEL.ACCOUNTS_CREATE, async (_e, data: { platform: string; groupId?: string }) => {
     try {
       const account = await accountService.bindAccount(data.platform, data.groupId);
+      await seedDefaultPresetIfNeeded(account.id, account.platform);
       return { success: true, data: account };
     } catch (error) {
       return { success: false, message: `${error}` };
@@ -1754,5 +1762,39 @@ export function registerIpcHandlers(): void {
     });
   });
 
+  ipcMain.handle(CHANNEL.ACCOUNT_PUBLISH_PRESET_GET, async (_e, { accountId, platform }: { accountId: string; platform: string }): Promise<IpcResult<PublishPreset | null>> => {
+    return wrap(() => accountPublishPresetService.getPreset(accountId, platform));
+  });
+
+  ipcMain.handle(CHANNEL.ACCOUNT_PUBLISH_PRESET_LIST, async (_e, { accountId }: { accountId: string }): Promise<IpcResult<PublishPreset[]>> => {
+    return wrap(() => accountPublishPresetService.listPresetsByAccount(accountId));
+  });
+
+  ipcMain.handle(CHANNEL.ACCOUNT_PUBLISH_PRESET_SAVE, async (_e, payload: SavePublishPresetInput): Promise<IpcResult<PublishPreset>> => {
+    return wrap(() => accountPublishPresetService.upsertPreset(payload));
+  });
+
+  ipcMain.handle(CHANNEL.ACCOUNT_PUBLISH_PRESET_DELETE, async (_e, { accountId, platform }: { accountId: string; platform: string }): Promise<IpcResult<boolean>> => {
+    return wrap(() => accountPublishPresetService.deletePreset(accountId, platform));
+  });
+
   logger.info('IPC 处理器已注册');
+}
+
+async function seedDefaultPresetIfNeeded(accountId: string, platform: string): Promise<void> {
+  const existing = await accountPublishPresetService.getPreset(accountId, platform);
+  if (existing) return;
+  if (platform !== 'channels') return;
+  try {
+    await accountPublishPresetService.upsertPreset({
+      accountId,
+      platform,
+      defaultTopics: [],
+      platformOptions: { declaration: 'original' },
+      enabled: false,
+    });
+    logger.info(`已为视频号账号预填声明原创 preset(默认未启用): accountId=${accountId}`);
+  } catch (e) {
+    logger.warn(`预填视频号 preset 失败: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }

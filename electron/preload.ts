@@ -53,6 +53,17 @@ const api = {
       ipcRenderer.invoke('account:setProxy', { accountId, proxyId }),
   },
 
+  accountPublishPreset: {
+    get: (accountId: string, platform: string): Invoke<any> =>
+      ipcRenderer.invoke('accountPublishPreset:get', { accountId, platform }),
+    list: (accountId: string): Invoke<any> =>
+      ipcRenderer.invoke('accountPublishPreset:list', { accountId }),
+    save: (payload: { accountId: string; platform: string; defaultTopics: string[]; platformOptions: Record<string, unknown>; enabled: boolean }): Invoke<any> =>
+      ipcRenderer.invoke('accountPublishPreset:save', payload),
+    remove: (accountId: string, platform: string): Invoke<boolean> =>
+      ipcRenderer.invoke('accountPublishPreset:delete', { accountId, platform }),
+  },
+
   publish: {
     submit: (request: PublishRequest): Invoke<PublishTask> =>
       ipcRenderer.invoke('publish:submit', request),

@@ -35,6 +35,13 @@ interface MatrixFlowAPI {
     setProxy: (accountId: string, proxyId: string | null) => Promise<IpcResult<void>>;
   };
 
+  accountPublishPreset: {
+    get: (accountId: string, platform: string) => Promise<IpcResult<any>>;
+    list: (accountId: string) => Promise<IpcResult<any[]>>;
+    save: (payload: { accountId: string; platform: string; defaultTopics: string[]; platformOptions: Record<string, unknown>; enabled: boolean }) => Promise<IpcResult<any>>;
+    remove: (accountId: string, platform: string) => Promise<IpcResult<boolean>>;
+  };
+
   publish: {
     submit: (request: any) => Promise<IpcResult<any>>;
     cancel: (taskId: string) => Promise<IpcResult<void>>;
