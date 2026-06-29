@@ -78,8 +78,10 @@ export const UPLOAD_SELECTORS = {
   publishDraftToast: 'get_by_text("已保存草稿", exact=false)',
 
   // 定时发布 — Ant Design Radio + DatePicker（竞品验证: social-auto-upload/ks_uploader）
-  scheduleRadio: 'label:text("发布时间") >> xpath=following-sibling::div >> .ant-radio-input:nth-child(2)',
-  scheduleDatePicker: 'div.ant-picker-input input[placeholder="选择日期时间"]',
+  scheduleRadio:
+    'label.ant-radio-wrapper:has-text("定时发布"), label.ant-radio-wrapper:has-text("定时"), .ant-radio-wrapper:has-text("定时发布"), .ant-radio-wrapper:has-text("定时")',
+  scheduleDatePicker:
+    'div.ant-picker-input input[placeholder*="日期"], div.ant-picker-input input[placeholder*="时间"], input[placeholder*="发布时间"], input[placeholder*="日期"], input[placeholder*="时间"], input[type="datetime-local"]',
   scheduleConfirmBtn: '.ant-picker-ok button, .ant-picker-footer button',
 } as const;
 

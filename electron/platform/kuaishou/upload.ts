@@ -11,7 +11,8 @@ import { TopicSanitizer } from '../base/TopicSanitizer';
 import { EmbeddedRiskControl, PageRiskControl } from '../base/RiskControl';
 import { toPlatformError, NetworkError, AuthError, SelectorError, ValidationError, ContentRejectedError } from '../base/PlatformError';
 import { getDebugRecorder } from '../base/DebugRecorder';
-import { formatScheduleDateTime } from '../base/utils/schedule';
+import { formatScheduleDateTime, isScheduleDateTimeValueApplied } from '../base/utils/schedule';
+import { PRE_PUBLISH_CONFIRMATION_DELAY_MS, PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS } from '../base/publishTiming';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
 import type { IBrowserLauncher, BrowserConfig } from '../../services/types';
@@ -38,6 +39,16 @@ interface EmbeddedUploadStatus {
 type EmbeddedPublishState = 'success' | 'failed' | 'timeout';
 
 type TextPattern = string | RegExp;
+
+interface ScheduleDateTimeParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: string;
+  minute: string;
+  second: string;
+  dateIso: string;
+}
 
 function getUserDataDir(accountId: string): string {
   const { app } = require('electron');
@@ -127,6 +138,21 @@ function optionSummary(ctx: UploadContext): string {
     `showInCity=${ctx.showInCity ?? ''}`,
     `debugSteps=${ctx.debugSteps === true ? 'true' : 'false'}`,
   ].join(' ');
+}
+
+function parseScheduleDateTimeParts(value: string): ScheduleDateTimeParts | undefined {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[\sT]+(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return undefined;
+  const [, year, month, day, hour, minute, second = '00'] = match;
+  return {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    hour,
+    minute,
+    second,
+    dateIso: `${year}-${month}-${day}`,
+  };
 }
 
 function shouldDebugSteps(ctx: UploadContext): boolean {
@@ -430,8 +456,8 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     });
 
     const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
-      logger.info('所有元素设置完成，等待10秒后发布...');
-      await sleep(10000);
+      logger.info(`所有元素设置完成，等待${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS}秒后发布...`);
+      await sleep(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
       return clickEmbeddedPublish(wc, 30000);
     });
     if (publishState === 'success') {
@@ -1192,74 +1218,282 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
 
 async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): Promise<boolean> {
   logger.info(`设置内嵌快手定时发布时间: ${scheduleTime}`);
+  const parts = parseScheduleDateTimeParts(scheduleTime);
+  if (!parts) {
+    logger.warn(`快手定时发布时间格式无效: ${scheduleTime}`);
+    return false;
+  }
+
   const selected = await selectEmbeddedOptionNearLabel(wc, [/发布时间/, /发布设置/], [/定时发布/, /^定时$/])
     || await clickEmbeddedText(wc, [/定时发布/, /定时/, /发布时间/]);
-  if (!selected) {
+  const inputAlreadyVisible = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      return Array.from(document.querySelectorAll('input')).some((el) => {
+        if (!(el instanceof HTMLInputElement) || !isVisible(el)) return false;
+        const attrs = [
+          el.getAttribute('placeholder') || '',
+          el.getAttribute('aria-label') || '',
+          el.getAttribute('type') || '',
+          el.getAttribute('class') || '',
+        ].join(' ');
+        return /选择日期时间|选择发布时间|发布时间|日期|时间|datetime-local|ant-picker/.test(attrs);
+      });
+    })()
+  `, true).catch(() => false);
+  if (!selected && !inputAlreadyVisible) {
     logger.warn('未找到快手定时发布入口，跳过定时设置');
     return false;
   }
-  await sleep(800);
 
-  const focused = await wc.executeJavaScript(`
-    (() => {
-      const isVisible = (el) => {
-        const rect = el.getBoundingClientRect();
-        const style = window.getComputedStyle(el);
-        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-      };
-      const input = Array.from(document.querySelectorAll('input'))
-        .find((el) => {
-          if (!isVisible(el)) return false;
-          const placeholder = el.getAttribute('placeholder') || '';
-          const ariaLabel = el.getAttribute('aria-label') || '';
-          const type = el.getAttribute('type') || '';
-          return /选择日期时间|选择发布时间|发布时间|日期|时间/.test(placeholder + ariaLabel) || type === 'datetime-local';
-        });
-      if (!(input instanceof HTMLInputElement)) return false;
-      input.scrollIntoView({ block: 'center', inline: 'nearest' });
-      input.focus();
-      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      valueSetter?.call(input, '');
-      input.select();
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await sleep(attempt === 1 ? 800 : 400);
+    const result = await wc.executeJavaScript(`
+      (() => {
+        const value = ${JSON.stringify(scheduleTime)};
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const findInput = () => Array.from(document.querySelectorAll('input'))
+          .filter((el) => el instanceof HTMLInputElement && isVisible(el) && !el.disabled && !el.readOnly)
+          .find((el) => {
+            const attrs = [
+              el.getAttribute('placeholder') || '',
+              el.getAttribute('aria-label') || '',
+              el.getAttribute('type') || '',
+              el.getAttribute('class') || '',
+            ].join(' ');
+            return /选择日期时间|选择发布时间|发布时间|日期|时间|datetime-local|ant-picker/.test(attrs);
+          });
+        const dispatchValue = (input, nextValue) => {
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+          if (setter) {
+            setter.call(input, nextValue);
+          } else {
+            input.value = nextValue;
+          }
+          input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: nextValue }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        const input = findInput();
+        if (!(input instanceof HTMLInputElement)) {
+          return { found: false, value: '' };
+        }
+        input.scrollIntoView({ block: 'center', inline: 'nearest' });
+        input.click();
+        input.focus();
+        input.select();
+        dispatchValue(input, '');
+        dispatchValue(input, value);
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+
+        const okBtn = Array.from(document.querySelectorAll('.ant-picker-ok button, .ant-picker-footer button, button, [role="button"]'))
+          .find((el) => {
+            if (!(el instanceof HTMLElement) || !isVisible(el)) return false;
+            const text = (el.innerText || el.textContent || '').trim();
+            return /^OK$/i.test(text) || /^确定$|^确认$|^完成$/.test(text) || el.closest('.ant-picker-ok');
+          });
+        if (okBtn instanceof HTMLElement) okBtn.click();
+        input.blur();
+        return { found: true, value: input.value };
+      })()
+    `, true).catch(() => ({ found: false, value: '' })) as { found: boolean; value: string };
+
+    if (!result.found) {
+      logger.warn(`未找到快手定时发布时间输入框，attempt=${attempt}`);
+      const pickedByPanel = await setEmbeddedScheduleTimeByPickerPanel(wc, scheduleTime, parts);
+      if (pickedByPanel) {
+        return true;
+      }
+      continue;
+    }
+
+    await sleep(500);
+    const actual = await wc.executeJavaScript(`
+      (() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const input = Array.from(document.querySelectorAll('input'))
+          .filter((el) => el instanceof HTMLInputElement && isVisible(el))
+          .find((el) => {
+            const attrs = [
+              el.getAttribute('placeholder') || '',
+              el.getAttribute('aria-label') || '',
+              el.getAttribute('type') || '',
+              el.getAttribute('class') || '',
+            ].join(' ');
+            return /选择日期时间|选择发布时间|发布时间|日期|时间|datetime-local|ant-picker/.test(attrs);
+          });
+        return input instanceof HTMLInputElement ? input.value : '';
+      })()
+    `, true).catch(() => result.value) as string;
+
+    logger.info(`快手定时发布回读: 期望=${scheduleTime} 实际=${actual || result.value} attempt=${attempt}`);
+    if (isScheduleDateTimeValueApplied(actual || result.value, scheduleTime)) {
       return true;
-    })()
-  `, true).catch(() => false);
-
-  if (!focused) {
-    logger.warn('未找到快手定时发布时间输入框，跳过定时设置');
-    return false;
+    }
   }
 
-  await wc.insertText(scheduleTime);
-  await sleep(800);
-  await wc.executeJavaScript(`
+  logger.warn(`快手定时发布时间未成功写入: ${scheduleTime}`);
+  return false;
+}
+
+async function setEmbeddedScheduleTimeByPickerPanel(
+  wc: WebContents,
+  scheduleTime: string,
+  parts: ScheduleDateTimeParts,
+): Promise<boolean> {
+  logger.info(`尝试通过快手日历面板设置定时发布时间: ${scheduleTime}`);
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const result = await wc.executeJavaScript(`
+      (() => {
+        const target = ${JSON.stringify(parts)};
+        const expected = ${JSON.stringify(scheduleTime)};
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const textOf = (el) => (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
+        const clickElement = (el) => {
+          if (!(el instanceof HTMLElement)) return false;
+          el.scrollIntoView({ block: 'center', inline: 'nearest' });
+          el.click();
+          return true;
+        };
+        const panel = Array.from(document.querySelectorAll('.ant-picker-dropdown, .ant-picker-panel, [class*="picker"]'))
+          .filter((el) => el instanceof HTMLElement && isVisible(el))
+          .sort((a, b) => textOf(b).length - textOf(a).length)[0] || document.body;
+        if (!(panel instanceof HTMLElement)) {
+          return { ok: false, reason: 'panel-not-found', actual: '' };
+        }
+
+        const panelText = textOf(panel);
+        const monthText = String(target.month) + '月';
+        const yearText = String(target.year) + '年';
+        const prevButton = () => Array.from(panel.querySelectorAll('.ant-picker-header-prev-btn, .ant-picker-header-super-prev-btn, button[aria-label*="Previous"], button[title*="Previous"], button'))
+          .find((el) => el instanceof HTMLElement && isVisible(el) && /上|prev|previous|‹|«|</i.test(textOf(el) || el.getAttribute('aria-label') || el.getAttribute('title') || ''));
+        const nextButton = () => Array.from(panel.querySelectorAll('.ant-picker-header-next-btn, .ant-picker-header-super-next-btn, button[aria-label*="Next"], button[title*="Next"], button'))
+          .find((el) => el instanceof HTMLElement && isVisible(el) && /下|next|›|»|>/i.test(textOf(el) || el.getAttribute('aria-label') || el.getAttribute('title') || ''));
+
+        const headerYearMatch = panelText.match(/(\\d{4})\\s*年/);
+        const headerMonthMatch = panelText.match(/(\\d{1,2})\\s*月/);
+        const currentYear = headerYearMatch ? Number(headerYearMatch[1]) : target.year;
+        const currentMonth = headerMonthMatch ? Number(headerMonthMatch[1]) : target.month;
+        const currentIndex = currentYear * 12 + currentMonth;
+        const targetIndex = target.year * 12 + target.month;
+        if ((currentYear !== target.year || currentMonth !== target.month) && Math.abs(targetIndex - currentIndex) <= 24) {
+          const nav = targetIndex > currentIndex ? nextButton() : prevButton();
+          if (nav instanceof HTMLElement) {
+            nav.click();
+            return { ok: false, reason: 'navigated-month', actual: panelText };
+          }
+        }
+
+        const dayText = String(target.day);
+        const dayCandidates = Array.from(panel.querySelectorAll('.ant-picker-cell:not(.ant-picker-cell-disabled), td, button, div, span'))
+          .filter((el) => {
+            if (!(el instanceof HTMLElement) || !isVisible(el)) return false;
+            const text = textOf(el);
+            if (text !== dayText) return false;
+            if (/ant-picker-cell-in-view/.test(String(el.className || ''))) return true;
+            const cell = el.closest('.ant-picker-cell');
+            return !cell || /ant-picker-cell-in-view/.test(String(cell.className || ''));
+          })
+          .sort((a, b) => {
+            const ac = String((a.closest('.ant-picker-cell') || a).className || '');
+            const bc = String((b.closest('.ant-picker-cell') || b).className || '');
+            return (bc.includes('ant-picker-cell-in-view') ? 1 : 0) - (ac.includes('ant-picker-cell-in-view') ? 1 : 0);
+          });
+        const dayTarget = dayCandidates
+          .map((el) => el.closest('.ant-picker-cell') || el)
+          .find((el) => el instanceof HTMLElement && isVisible(el));
+        if (!clickElement(dayTarget)) {
+          return { ok: false, reason: 'day-not-found', actual: panelText };
+        }
+
+        const selectTimeOption = (kind, value) => {
+          const lists = Array.from(panel.querySelectorAll('.ant-picker-time-panel-column, [class*="time-panel-column"], ul, ol'))
+            .filter((el) => el instanceof HTMLElement && isVisible(el));
+          const index = kind === 'hour' ? 0 : kind === 'minute' ? 1 : 2;
+          const preferred = lists[index] ? [lists[index]] : [];
+          const candidates = [...preferred, ...lists];
+          for (const list of candidates) {
+            const option = Array.from(list.querySelectorAll('li, div, span, button'))
+              .find((el) => el instanceof HTMLElement && isVisible(el) && textOf(el).replace(/\\D/g, '').padStart(2, '0') === value);
+            if (option instanceof HTMLElement) {
+              option.scrollIntoView({ block: 'center', inline: 'nearest' });
+              option.click();
+              return true;
+            }
+          }
+          return false;
+        };
+        selectTimeOption('hour', target.hour);
+        selectTimeOption('minute', target.minute);
+        selectTimeOption('second', target.second);
+
+        const okBtn = Array.from(document.querySelectorAll('.ant-picker-ok button, .ant-picker-footer button, button, [role="button"]'))
+          .find((el) => {
+            if (!(el instanceof HTMLElement) || !isVisible(el)) return false;
+            const text = textOf(el);
+            return /^OK$/i.test(text) || /^确定$|^确认$|^完成$/.test(text) || el.closest('.ant-picker-ok');
+          });
+        if (okBtn instanceof HTMLElement) okBtn.click();
+
+        const actual = [
+          ...Array.from(document.querySelectorAll('input')).map((el) => el instanceof HTMLInputElement ? el.value : ''),
+          document.body?.innerText || '',
+        ].filter(Boolean).join(' ');
+        return { ok: actual.includes(target.dateIso) || actual.includes(yearText) && actual.includes(monthText) && actual.includes(dayText), reason: 'picked', actual };
+      })()
+    `, true).catch((error) => ({
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+      actual: '',
+    })) as { ok: boolean; reason: string; actual: string };
+
+    await sleep(600);
+    const actual = await getEmbeddedScheduleActualText(wc);
+    logger.info(`快手日历面板回读: 期望=${scheduleTime} 实际=${actual || result.actual} attempt=${attempt} reason=${result.reason}`);
+    if (result.ok && (isScheduleDateTimeValueApplied(actual || result.actual, scheduleTime) || isEmbeddedScheduleDateApplied(actual || result.actual, parts))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function getEmbeddedScheduleActualText(wc: WebContents): Promise<string> {
+  return await wc.executeJavaScript(`
     (() => {
-      const isVisible = (el) => {
-        const rect = el.getBoundingClientRect();
-        const style = window.getComputedStyle(el);
-        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-      };
-      const okBtn = Array.from(document.querySelectorAll('.ant-picker-ok button, .ant-picker-footer button'))
-        .find((el) => isVisible(el));
-      if (okBtn instanceof HTMLElement) {
-        okBtn.click();
-        return true;
-      }
-      const confirmBtn = Array.from(document.querySelectorAll('button, span, [role="button"]'))
-        .find((el) => {
-          if (!isVisible(el)) return false;
-          const text = (el.innerText || el.textContent || '').trim();
-          return /^确定$|^确认$|^完成$/.test(text);
-        });
-      if (confirmBtn instanceof HTMLElement) {
-        confirmBtn.click();
-        return true;
-      }
-      return false;
+      const values = Array.from(document.querySelectorAll('input'))
+        .map((el) => el instanceof HTMLInputElement ? el.value : '')
+        .filter(Boolean);
+      const text = document.body?.innerText || '';
+      return [...values, text].join(' ');
     })()
-  `, true).catch(() => {});
-  return true;
+  `, true).catch(() => '') as string;
+}
+
+function isEmbeddedScheduleDateApplied(actual: string | undefined, parts: ScheduleDateTimeParts): boolean {
+  if (!actual) return false;
+  const normalized = actual.replace(/\s+/g, ' ').trim();
+  const hasDate = normalized.includes(parts.dateIso)
+    || normalized.includes(`${parts.year}年${parts.month}月${parts.day}日`)
+    || new RegExp(`${parts.year}年\\s*${parts.month}月\\s*${parts.day}日?`).test(normalized);
+  return hasDate;
 }
 
 async function clickEmbeddedText(wc: WebContents, patterns: TextPattern[]): Promise<boolean> {
@@ -1974,8 +2208,8 @@ async function doUpload(
 
   // 点击发布
   return await runPageDebugStep(page, ctx, '提交发布', async () => {
-    logger.info('所有元素设置完成，等待10秒后发布...');
-    await page.waitForTimeout(10000);
+    logger.info(`所有元素设置完成，等待${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS}秒后发布...`);
+    await page.waitForTimeout(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
 
     await recorder.recordStep('发布前确认', async () => {
       return true;
@@ -2302,19 +2536,42 @@ async function setScheduleTime(page: Page, scheduleTime: string): Promise<boolea
     await page.waitForTimeout(800);
     const input = page.locator('div.ant-picker-input input[placeholder*="时间"], div.ant-picker-input input[placeholder*="日期"], input[placeholder*="发布时间"], input[placeholder*="日期"], input[placeholder*="时间"], input[type="datetime-local"]').first();
     await input.waitFor({ state: 'visible', timeout: 10000 });
-    await input.click();
-    await page.keyboard.press('Control+KeyA');
-    await page.keyboard.type(scheduleTime);
-    await page.waitForTimeout(800);
 
-    const pickerOk = page.locator('.ant-picker-ok button, .ant-picker-footer button').first();
-    if (await pickerOk.isVisible().catch(() => false)) {
-      await pickerOk.click();
-    } else {
-      await clickPageText(page, [/^确定$/, /^确认$/, /^完成$/]);
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await input.click();
+      await page.waitForTimeout(attempt === 1 ? 500 : 300);
+      await input.evaluate((el, value) => {
+        const inputEl = el as HTMLInputElement;
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        if (setter) {
+          setter.call(inputEl, '');
+          setter.call(inputEl, value);
+        } else {
+          inputEl.value = value;
+        }
+        inputEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+      }, scheduleTime);
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(300);
+
+      const pickerOk = page.locator('.ant-picker-ok button, .ant-picker-footer button, button:has-text("确定"), button:has-text("确认"), button:has-text("完成")').first();
+      if (await pickerOk.isVisible().catch(() => false)) {
+        await pickerOk.click();
+      } else {
+        await clickPageText(page, [/^确定$/, /^确认$/, /^完成$/]);
+      }
+      await page.waitForTimeout(500);
+
+      const actual = await input.inputValue().catch(() => '');
+      logger.info(`快手定时发布回读: 期望=${scheduleTime} 实际=${actual} attempt=${attempt}`);
+      if (isScheduleDateTimeValueApplied(actual, scheduleTime)) {
+        return true;
+      }
     }
-    await page.waitForTimeout(800);
-    return true;
+
+    logger.warn(`快手定时发布时间回读不匹配: ${scheduleTime}`);
+    return false;
   } catch (error) {
     logger.warn(`设置快手定时发布时间失败: ${error}`);
     return false;

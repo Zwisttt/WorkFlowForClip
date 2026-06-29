@@ -12,6 +12,7 @@ function createMockPage(overrides: Record<string, unknown> = {}) {
     isVisible: vi.fn(() => Promise.resolve(true)),
     first: vi.fn(function(this: any) { return this; }),
     evaluate: vi.fn(() => Promise.resolve()),
+    inputValue: vi.fn(() => Promise.resolve('2026-06-10 12:00:00')),
     count: vi.fn(() => Promise.resolve(1)),
   };
 
@@ -76,7 +77,8 @@ describe('kuaishou/schedule', () => {
     });
 
     it('accepts scheduledTime 2 hours from now (valid)', async () => {
-      const page = createMockPage();
+      const scheduledTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
+      const expectedDate = `${scheduledTime.getFullYear()}-${String(scheduledTime.getMonth() + 1).padStart(2, '0')}-${String(scheduledTime.getDate()).padStart(2, '0')} ${String(scheduledTime.getHours()).padStart(2, '0')}:${String(scheduledTime.getMinutes()).padStart(2, '0')}:00`;
       // Make success toast visible to trigger success path
       const mockPage = createMockPage({
         locator: vi.fn((sel: string) => ({
@@ -84,6 +86,7 @@ describe('kuaishou/schedule', () => {
           click: vi.fn(() => Promise.resolve()),
           check: vi.fn(() => Promise.resolve()),
           evaluate: vi.fn(() => Promise.resolve()),
+          inputValue: vi.fn(() => Promise.resolve(expectedDate)),
           count: vi.fn(() => Promise.resolve(1)),
           isVisible: vi.fn(() => {
             if (sel.includes('publishSuccessToast') || sel.includes('publishSuccess')) return Promise.resolve(true);
@@ -100,7 +103,7 @@ describe('kuaishou/schedule', () => {
         title: '测试',
         description: '描述',
         tags: ['标签1'],
-        scheduledTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        scheduledTime,
       } as any);
       
       // Should proceed past validation (may succeed or fail at DOM interaction)
@@ -112,12 +115,15 @@ describe('kuaishou/schedule', () => {
   describe('success paths', () => {
     it('returns success when toast is visible', async () => {
       let callCount = 0;
+      const scheduledTime = new Date(Date.now() + 3 * 60 * 60 * 1000);
+      const expectedDate = `${scheduledTime.getFullYear()}-${String(scheduledTime.getMonth() + 1).padStart(2, '0')}-${String(scheduledTime.getDate()).padStart(2, '0')} ${String(scheduledTime.getHours()).padStart(2, '0')}:${String(scheduledTime.getMinutes()).padStart(2, '0')}:00`;
       const mockPage = createMockPage({
         locator: vi.fn((_sel: string) => ({
           waitFor: vi.fn(() => Promise.resolve()),
           click: vi.fn(() => Promise.resolve()),
           check: vi.fn(() => Promise.resolve()),
           evaluate: vi.fn(() => Promise.resolve()),
+          inputValue: vi.fn(() => Promise.resolve(expectedDate)),
           count: vi.fn(() => Promise.resolve(1)),
           isVisible: vi.fn(() => {
             callCount++;
@@ -130,7 +136,7 @@ describe('kuaishou/schedule', () => {
       const result = await schedule({
         page: mockPage,
         title: '测试',
-        scheduledTime: new Date(Date.now() + 3 * 60 * 60 * 1000),
+        scheduledTime,
       } as any);
 
       expect(result.success).toBe(true);
@@ -139,6 +145,8 @@ describe('kuaishou/schedule', () => {
 
     it('returns success when URL redirects to manage page', async () => {
       let callCount = 0;
+      const scheduledTime = new Date(Date.now() + 3 * 60 * 60 * 1000);
+      const expectedDate = `${scheduledTime.getFullYear()}-${String(scheduledTime.getMonth() + 1).padStart(2, '0')}-${String(scheduledTime.getDate()).padStart(2, '0')} ${String(scheduledTime.getHours()).padStart(2, '0')}:${String(scheduledTime.getMinutes()).padStart(2, '0')}:00`;
       const mockPage = createMockPage({
         url: vi.fn(() => 'https://cp.kuaishou.com/article/manage/video'),
         locator: vi.fn((_sel: string) => ({
@@ -146,6 +154,7 @@ describe('kuaishou/schedule', () => {
           click: vi.fn(() => Promise.resolve()),
           check: vi.fn(() => Promise.resolve()),
           evaluate: vi.fn(() => Promise.resolve()),
+          inputValue: vi.fn(() => Promise.resolve(expectedDate)),
           count: vi.fn(() => Promise.resolve(1)),
           isVisible: vi.fn(() => {
             callCount++;
@@ -159,7 +168,7 @@ describe('kuaishou/schedule', () => {
       const result = await schedule({
         page: mockPage,
         title: '测试',
-        scheduledTime: new Date(Date.now() + 3 * 60 * 60 * 1000),
+        scheduledTime,
       } as any);
 
       expect(result.success).toBe(true);
@@ -188,6 +197,7 @@ describe('kuaishou/schedule', () => {
           click: vi.fn(() => Promise.resolve()),
           check: vi.fn(() => Promise.resolve()),
           evaluate: vi.fn(() => Promise.resolve()),
+          inputValue: vi.fn(() => Promise.resolve('')),
           count: vi.fn(() => Promise.resolve(0)),
           isVisible: vi.fn(() => Promise.resolve(false)),
           first: vi.fn(function(this: any) { return this; }),
@@ -202,6 +212,34 @@ describe('kuaishou/schedule', () => {
 
       expect(result.success).toBe(false);
       expect(result.message).toContain('定时发布选项');
+    });
+
+    it('returns failure when schedule date picker value is not applied', async () => {
+      const publishClick = vi.fn(() => Promise.resolve());
+      const mockPage = createMockPage({
+        locator: vi.fn((sel: string) => ({
+          waitFor: vi.fn(() => Promise.resolve()),
+          click: sel.includes('publishButton') || sel.includes('button:has-text("发布")')
+            ? publishClick
+            : vi.fn(() => Promise.resolve()),
+          check: vi.fn(() => Promise.resolve()),
+          evaluate: vi.fn(() => Promise.resolve()),
+          inputValue: vi.fn(() => Promise.resolve('')),
+          count: vi.fn(() => Promise.resolve(1)),
+          isVisible: vi.fn(() => Promise.resolve(true)),
+          first: vi.fn(function(this: any) { return this; }),
+        })),
+      });
+
+      const result = await schedule({
+        page: mockPage,
+        title: '测试',
+        scheduledTime: new Date('2026-06-10T12:00:00'),
+      } as any);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('设置定时发布时间失败');
+      expect(publishClick).not.toHaveBeenCalled();
     });
   });
 });
