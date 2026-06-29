@@ -31,3 +31,35 @@ export function formatScheduleDateTime(
   }
   return base;
 }
+
+/**
+ * 判断日期控件回读值是否已经应用了期望时间。
+ *
+ * 平台控件可能把 `YYYY-MM-DD HH:mm:ss` 回显为不带秒、斜杠日期或中文日期，
+ * 这里只校验日期与分钟，避免因控件裁掉秒导致误判失败。
+ */
+export function isScheduleDateTimeValueApplied(
+  actual?: string | null,
+  expected?: string | null,
+): boolean {
+  if (!actual || !expected) return false;
+
+  const match = expected.match(/^(\d{4})-(\d{2})-(\d{2})[\sT]+(\d{2}):(\d{2})/);
+  if (!match) return actual.replace(/\s+/g, ' ').trim() === expected.replace(/\s+/g, ' ').trim();
+
+  const [, year, month, day, hour, minute] = match;
+  const plainDay = String(Number(day));
+  const plainMonth = String(Number(month));
+  const plainHour = String(Number(hour));
+  const normalized = actual.replace(/\s+/g, ' ').trim();
+  const hasDate = normalized.includes(`${year}-${month}-${day}`)
+    || normalized.includes(`${year}/${month}/${day}`)
+    || normalized.includes(`${year}-${plainMonth}-${plainDay}`)
+    || normalized.includes(`${year}/${plainMonth}/${plainDay}`)
+    || normalized.includes(`${year}年${month}月${day}日`)
+    || normalized.includes(`${year}年${plainMonth}月${plainDay}日`)
+    || new RegExp(`${year}年\\s*${plainMonth}月\\s*${plainDay}日?`).test(normalized);
+  const hasTime = normalized.includes(`${hour}:${minute}`)
+    || normalized.includes(`${plainHour}:${minute}`);
+  return hasDate && hasTime;
+}

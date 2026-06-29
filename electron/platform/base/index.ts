@@ -6,3 +6,4 @@ export * from './RiskControl';
 export * from './TopicSanitizer';
 export * from './DebugRecorder';
 export * from './PlatformError';
+export * from './publishTiming';
