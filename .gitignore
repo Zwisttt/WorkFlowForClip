@@ -73,3 +73,7 @@ data/*.json
 
 # Internal docs (security audit, design drafts)
 docs/internal/
+
+# AI tooling work directories
+.omo/
+.spec-workflow/
