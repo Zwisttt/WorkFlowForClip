@@ -342,12 +342,7 @@ export class QueueManager implements IQueueManager {
           maxRetries: (row.max_retries as number) || 3,
         };
 
-        if (task.status === 'pending' || task.status === 'queued') {
-          this.taskMap.set(task.id, task);
-          this.heapPush(task);
-        } else {
-          this.taskMap.set(task.id, task);
-        }
+        this.taskMap.set(task.id, task);
       }
 
       logger.info(`已恢复 ${this.taskMap.size} 个任务（队列中 ${this.heap.length} 个）`);

@@ -390,6 +390,67 @@ describe('QueueManager', () => {
       await expect(queue.restore()).resolves.toBeUndefined();
     });
 
+    it('restore 只恢复历史记录，不把旧 pending/queued 任务重新入队', async () => {
+      const db = getDatabase() as any;
+      const tableInfoStmt = {
+        all: vi.fn(() => []),
+      };
+      const rowsStmt = {
+        all: vi.fn(() => [
+          {
+            id: 'old-pending',
+            type: 'publish',
+            platform: 'kuaishou',
+            accountId: 'account-1',
+            priority: 10,
+            payload: JSON.stringify({ publishTaskId: 'pt-old' }),
+            status: 'pending',
+            created_at: '2026-06-01T00:00:00.000Z',
+            scheduled_at: null,
+            started_at: null,
+            completed_at: null,
+            error: null,
+            retry_count: 0,
+            max_retries: 3,
+          },
+          {
+            id: 'old-queued',
+            type: 'publish',
+            platform: 'kuaishou',
+            accountId: 'account-1',
+            priority: 9,
+            payload: JSON.stringify({ publishTaskId: 'pt-old-2' }),
+            status: 'queued',
+            created_at: '2026-06-01T00:01:00.000Z',
+            scheduled_at: null,
+            started_at: null,
+            completed_at: null,
+            error: null,
+            retry_count: 0,
+            max_retries: 3,
+          },
+        ]),
+      };
+      const stmt = {
+        run: vi.fn(),
+        all: vi.fn(() => []),
+        get: vi.fn(() => undefined),
+      };
+
+      db.prepare.mockImplementation((sql: string) => {
+        if (sql === 'PRAGMA table_info(tasks)') return tableInfoStmt;
+        if (sql.startsWith('SELECT * FROM tasks')) return rowsStmt;
+        return stmt;
+      });
+
+      await queue.restore();
+
+      expect(queue.size()).toBe(0);
+      expect(queue.peek()).toBeUndefined();
+      expect(queue.getByStatus('pending')).toHaveLength(1);
+      expect(queue.getByStatus('queued')).toHaveLength(1);
+    });
+
     it('persist 会补齐旧 tasks 表缺失的队列字段', async () => {
       const db = getDatabase() as any;
       const tableInfoStmt = {

@@ -44,8 +44,6 @@ const logger = new Logger('TaskScheduler');
  */
 
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
-const DEFAULT_RETRY_DELAY_MS = 30_000;
-const MAX_RETRY_BACKOFF_MS = 300_000;
 
 export class TaskScheduler implements ITaskScheduler {
   private static instance: TaskScheduler;
@@ -334,27 +332,8 @@ export class TaskScheduler implements ITaskScheduler {
       this.markPlatformTasksSkipped(task.platform, task.accountId);
     }
 
-    const updated = this.getTaskFromMap(task.id);
-    const currentRetry = updated?.retryCount ?? task.retryCount;
-
-    if (currentRetry < task.maxRetries) {
-      const nextRetry = currentRetry + 1;
-      const backoff = Math.min(DEFAULT_RETRY_DELAY_MS * Math.pow(2, currentRetry), MAX_RETRY_BACKOFF_MS);
-
-      this.queue.updateStatus(task.id, 'retry', `重试 ${nextRetry}/${task.maxRetries}: ${error}`);
-
-      const retryTask = this.getTaskFromMap(task.id);
-      if (retryTask) {
-        retryTask.retryCount = nextRetry;
-        retryTask.status = 'queued';
-        retryTask.error = undefined;
-      }
-
-      logger.info(`任务重试: ${task.id} 第${nextRetry}次 延迟=${backoff}ms 原因=${error}`);
-    } else {
-      this.queue.updateStatus(task.id, 'failed', `已达最大重试次数(${task.maxRetries}): ${error}`);
-      logger.error(`任务最终失败: ${task.id} 重试${currentRetry}次 原因=${error}`);
-    }
+    this.queue.updateStatus(task.id, 'failed', error);
+    logger.error(`任务失败，不自动重试: ${task.id} 原因=${error}`);
   }
 
   private markPlatformTasksSkipped(platform: string, accountId: string): void {

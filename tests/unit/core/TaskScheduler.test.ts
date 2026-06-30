@@ -371,11 +371,11 @@ describe('TaskScheduler', () => {
       scheduler.schedule(makeTask({ id: 't1', maxRetries: 3, retryCount: 0 }));
       await startAndTick();
 
-      // handleFailure sets status to 'retry' via updateStatus
-      // getTaskFromMap returns a copy, so retryTask.status='queued' only affects the copy
-      // The taskMap keeps status 'retry'
       const retryTask = queue.getByStatus('retry').find(t => t.id === 't1');
-      expect(retryTask).toBeDefined();
+      expect(retryTask).toBeUndefined();
+      const failedTask = queue.getByStatus('failed').find(t => t.id === 't1');
+      expect(failedTask).toBeDefined();
+      expect(failedTask!.error).toBe('fail');
     });
 
     it('达到最大重试次数后标记为 failed', async () => {
@@ -394,7 +394,7 @@ describe('TaskScheduler', () => {
       expect(failed[0].id).toBe('t1');
     });
 
-    it('onTaskExecute 抛出异常时触发重试', async () => {
+    it('onTaskExecute 抛出异常时直接标记失败，不自动重试', async () => {
       scheduler.onTaskExecute = vi.fn(() =>
         Promise.reject(new Error('exec error'))
       );
@@ -404,9 +404,11 @@ describe('TaskScheduler', () => {
       scheduler.schedule(makeTask({ id: 't1', maxRetries: 3, retryCount: 0 }));
       await startAndTick();
 
-      // Same as failure case: status is 'retry' in taskMap
       const retryTask = queue.getByStatus('retry').find(t => t.id === 't1');
-      expect(retryTask).toBeDefined();
+      expect(retryTask).toBeUndefined();
+      const failedTask = queue.getByStatus('failed').find(t => t.id === 't1');
+      expect(failedTask).toBeDefined();
+      expect(failedTask!.error).toBe('exec error');
     });
 
     it('限流时跳过执行', async () => {
