@@ -866,13 +866,11 @@ export class PublishService implements IPublishService {
   private async handleTaskFailure(
     taskId: string,
     error: string,
-    currentRetryCount: number,
+    _currentRetryCount: number,
     maxRetries: number,
-    options: { finalOnFailure?: boolean } = {},
+    _options: { finalOnFailure?: boolean } = {},
   ): Promise<void> {
-    const updatedTask = options.finalOnFailure
-      ? await publishTaskRepo.markFinalFailed(taskId, error)
-      : await publishTaskRepo.markFailed(taskId, error);
+    const updatedTask = await publishTaskRepo.markFinalFailed(taskId, error);
     const newRetryCount = updatedTask.retry_count;
 
     const payload: TaskFailedPayload = {
@@ -883,30 +881,7 @@ export class PublishService implements IPublishService {
     };
     this.eventBus.emit(PublishEvent.TASK_FAILED, payload);
 
-    if (options.finalOnFailure) {
-      logger.error(`发布任务失败并标记为终态失败: taskId=${taskId} error=${error}`);
-      return;
-    }
-
-    if (newRetryCount < maxRetries) {
-      logger.info(`发布任务将重试: taskId=${taskId} retry=${newRetryCount}/${maxRetries}`);
-      setTimeout(() => {
-        if (this.executingTasks.has(taskId)) {
-          logger.warn(`任务仍在执行中，延迟重试: taskId=${taskId}`);
-          setTimeout(() => {
-            this.executeNow(taskId).catch(err => {
-              logger.error(`延迟重试执行失败 taskId=${taskId}: ${err}`);
-            });
-          }, 5000);
-          return;
-        }
-        this.executeNow(taskId).catch(err => {
-          logger.error(`重试执行失败 taskId=${taskId}: ${err}`);
-        });
-      }, 2000);
-    } else {
-      logger.error(`发布任务最终失败: taskId=${taskId} retries=${maxRetries} error=${error}`);
-    }
+    logger.error(`发布任务失败，不自动重试: taskId=${taskId} retry=${newRetryCount}/${maxRetries} error=${error}`);
   }
 
   private async closeStandaloneBrowserAfterPublish(accountId: string, outcome: 'completed' | 'failed'): Promise<void> {

@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { uploadVideo, mockDb, mockAccountFindById, mockTaskFindById, mockFindItems } = vi.hoisted(() => ({
+const {
+  uploadVideo,
+  mockDb,
+  mockAccountFindById,
+  mockTaskFindById,
+  mockFindItems,
+  mockPublishTaskUpdate,
+  mockPublishTaskMarkCompleted,
+  mockPublishTaskMarkFailed,
+  mockPublishTaskMarkFinalFailed,
+} = vi.hoisted(() => ({
   uploadVideo: vi.fn(),
   mockDb: {
     prepare: vi.fn(),
@@ -8,6 +18,10 @@ const { uploadVideo, mockDb, mockAccountFindById, mockTaskFindById, mockFindItem
   mockAccountFindById: vi.fn(),
   mockTaskFindById: vi.fn(),
   mockFindItems: vi.fn(),
+  mockPublishTaskUpdate: vi.fn(),
+  mockPublishTaskMarkCompleted: vi.fn(),
+  mockPublishTaskMarkFailed: vi.fn(),
+  mockPublishTaskMarkFinalFailed: vi.fn(),
 }));
 
 vi.mock('@electron/core/Logger', () => ({
@@ -45,8 +59,10 @@ vi.mock('@electron/data/repositories/AccountRepository', () => ({
 vi.mock('@electron/data/repositories/PublishTaskRepository', () => ({
   publishTaskRepo: {
     findById: mockTaskFindById,
-    update: vi.fn().mockResolvedValue({}),
-    markCompleted: vi.fn(),
+    update: mockPublishTaskUpdate,
+    markCompleted: mockPublishTaskMarkCompleted,
+    markFailed: mockPublishTaskMarkFailed,
+    markFinalFailed: mockPublishTaskMarkFinalFailed,
     insert: vi.fn(),
   },
 }));
@@ -120,6 +136,20 @@ function makeTask(tags: string[]) {
 describe('PublishService account publish preset tags', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPublishTaskUpdate.mockResolvedValue({});
+    mockPublishTaskMarkCompleted.mockResolvedValue({});
+    mockPublishTaskMarkFailed.mockImplementation(async (_id: string, error: string) => ({
+      ...makeTask(['#原始标签']),
+      status: 'failed',
+      error_message: error,
+      retry_count: 1,
+    }));
+    mockPublishTaskMarkFinalFailed.mockImplementation(async (_id: string, error: string) => ({
+      ...makeTask(['#原始标签']),
+      status: 'failed',
+      error_message: error,
+      retry_count: 1,
+    }));
     mockAccountFindById.mockResolvedValue({
       id: 'account-1',
       platform: 'xiaohongshu',
@@ -182,5 +212,22 @@ describe('PublishService account publish preset tags', () => {
     expect(uploadVideo).toHaveBeenCalledWith(expect.objectContaining({
       tags: ['#原始标签', '#预设话题'],
     }));
+  });
+
+  it('executeNow 失败后只标记失败，不自动再次执行', async () => {
+    vi.useFakeTimers();
+    mockTaskFindById.mockResolvedValue(makeTask(['#原始标签']));
+    uploadVideo.mockResolvedValue({ success: false, message: '上传失败' });
+
+    const result = await PublishService.getInstance().executeNow('task-1');
+
+    expect(result.success).toBe(false);
+    expect(uploadVideo).toHaveBeenCalledTimes(1);
+    expect(mockPublishTaskMarkFailed).not.toHaveBeenCalled();
+    expect(mockPublishTaskMarkFinalFailed).toHaveBeenCalledWith('task-1', '上传失败: 上传失败');
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(uploadVideo).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 });
