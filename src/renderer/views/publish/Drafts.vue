@@ -106,7 +106,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  List, Document, VideoCamera, Grid, Plus,
+  List, Document, VideoCamera, Grid, Plus, MagicStick,
 } from '@element-plus/icons-vue';
 import { useDraftStore } from '@/renderer/stores/draft';
 import DraftCard from '@/renderer/components/publish/DraftCard.vue';
@@ -119,6 +119,7 @@ const navItems = [
   { path: '/publish/tasks', label: '任务列表', icon: List },
   { path: '/publish/drafts', label: '草稿', icon: Document },
   { path: '/publish/video', label: '视频发布', icon: VideoCamera },
+  { path: '/publish/automation', label: '自动剪辑发布', icon: MagicStick },
 ];
 
 function isActive(path: string) {

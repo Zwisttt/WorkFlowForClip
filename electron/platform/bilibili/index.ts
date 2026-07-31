@@ -54,6 +54,7 @@ const BILIBILI_CAPABILITIES: PlatformCapabilities = {
   maxScheduleDays: 10,
   comment: true,
   image: true,
+  coverRatios: ['16:9', '4:3', '1:1'],
 };
 
 class BilibiliAdapter implements PlatformAdapter {

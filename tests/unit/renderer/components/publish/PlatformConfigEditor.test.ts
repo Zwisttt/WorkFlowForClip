@@ -12,10 +12,10 @@ const account: Account = {
   createdAt: '2026-06-06T00:00:00.000Z',
 };
 
-function mountEditor() {
+function mountEditor(accountOverride: Account = account) {
   return mount(PlatformConfigEditor, {
     props: {
-      account,
+      account: accountOverride,
       platformConfig: {},
       commonConfig: {
         title: '',
@@ -75,6 +75,29 @@ describe('PlatformConfigEditor', () => {
     expect(wrapper.text()).toContain('选择位置');
     expect(wrapper.text()).toContain('留空时自动选择“不显示位置”');
     expect(wrapper.get<HTMLInputElement>('input[placeholder="输入地点名称，留空则不显示位置"]').element.value).toBe('');
+  });
+
+  it('为抖音使用 none 作为无需声明的默认值', () => {
+    wrapper = mountEditor({
+      ...account,
+      id: 'douyin-account',
+      platform: 'douyin',
+      nickname: '抖音账号',
+    });
+
+    expect(wrapper.get<HTMLSelectElement>('select').element.value).toBe('none');
+  });
+
+  it('为B站默认选择原创创作声明', () => {
+    wrapper = mountEditor({
+      ...account,
+      id: 'bilibili-account',
+      platform: 'bilibili',
+      nickname: 'B站账号',
+    });
+
+    expect(wrapper.get<HTMLSelectElement>('select').element.value).toBe('original');
+    expect(wrapper.text()).toContain('B站投稿必填');
   });
 
   it('勾选视频号原创声明时同步发布链使用的 declaration 字段', async () => {

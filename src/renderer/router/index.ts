@@ -42,6 +42,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '视频发布', icon: 'VideoCamera' },
       },
       {
+        path: 'publish/automation',
+        name: 'PublishAutomation',
+        component: () => import('@/renderer/views/publish/Automation.vue'),
+        meta: { title: '自动剪辑发布', icon: 'MagicStick' },
+      },
+      {
         path: 'publish/tasks',
         name: 'PublishTasks',
         component: () => import('@/renderer/views/publish/Tasks.vue'),

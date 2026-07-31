@@ -241,6 +241,18 @@
       </div>
     </div>
 
+    <div v-if="platform === 'bilibili'" class="config-section">
+      <h4>B站专属</h4>
+      <div class="form-group">
+        <label class="form-label">创作声明</label>
+        <select v-model="localConfig.declaration" class="form-select" @change="emitUpdate">
+          <option value="original">原创 / 自制</option>
+          <option value="repost">转载</option>
+        </select>
+        <span class="form-hint">B站投稿必填，请按视频实际版权来源选择</span>
+      </div>
+    </div>
+
     <!-- 视频号专属配置 -->
     <div v-if="platform === 'channels'" class="config-section">
       <h4>视频号专属</h4>
@@ -393,6 +405,13 @@ const emit = defineEmits<{
   'update:platform-config': [config: PlatformConfig];
 }>();
 
+function defaultDeclarationForPlatform(platform: string): string {
+  if (platform === 'xiaohongshu') return '0';
+  if (platform === 'douyin') return 'none';
+  if (platform === 'bilibili') return 'original';
+  return '';
+}
+
 const localConfig = reactive<PlatformConfig>({
   visibility: 'public',
   scheduleMode: 'immediate',
@@ -404,7 +423,8 @@ const localConfig = reactive<PlatformConfig>({
   isOriginal: false,
   location: '',
   ...props.platformConfig,
-  declaration: props.platformConfig.declaration || '0',
+  coverRatio: props.platformConfig.coverRatio || (props.account.platform === 'bilibili' ? '16:9' : undefined),
+  declaration: props.platformConfig.declaration || defaultDeclarationForPlatform(props.account.platform),
 });
 const tagInput = ref('');
 const tagInputRef = ref<HTMLInputElement | null>(null);
@@ -428,9 +448,11 @@ const coverRatioLabel = computed(() => {
   const ratios: Record<string, string> = {
     '3:4': '3:4 竖版',
     '16:9': '16:9 横版',
+    '4:3': '4:3 横版',
     '1:1': '1:1 方版',
   };
-  return ratios[localConfig.coverRatio || '3:4'] || '3:4 竖版';
+  const defaultRatio = platform.value === 'bilibili' ? '16:9' : '3:4';
+  return ratios[localConfig.coverRatio || defaultRatio] || ratios[defaultRatio];
 });
 
 const titleLimit = computed(() => {
@@ -521,6 +543,10 @@ watch(
       if (localConfig.allowDownload === undefined) localConfig.allowDownload = true;
       if (localConfig.allowComment === undefined) localConfig.allowComment = true;
       if (!localConfig.scheduleMode) localConfig.scheduleMode = 'immediate';
+    }
+    // B站创作声明为投稿必填项
+    if (props.account.platform === 'bilibili' && !localConfig.declaration) {
+      localConfig.declaration = 'original';
     }
   },
   { deep: true, immediate: true }

@@ -88,7 +88,7 @@ function declarationPatterns(value?: string): TextPattern[] {
     case 'personal_opinion':
       return [/个人观点/, /仅供参考/];
     case 'original':
-      return [/自主拍摄/, /原创/, /自行拍摄/];
+      return [/自制/, /自主拍摄/, /原创内容/, /原创/, /自行拍摄/];
     case 'repost':
       return [/素材来源于网络/, /来源转载/, /转载/, /网络/, /非原创/];
     default:
@@ -139,9 +139,10 @@ function shouldDebugSteps(ctx: UploadContext): boolean {
   return ctx.debugSteps === true && process.env.NODE_ENV !== 'production';
 }
 
-function shouldKeepBrowserOnPublishFailure(): boolean {
+function shouldKeepBrowserOnPublishFailure(ctx?: UploadContext): boolean {
   return process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === '1'
-    || process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === 'true';
+    || process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === 'true'
+    || (process.env.NODE_ENV !== 'production' && ctx?.debugSteps === true);
 }
 
 function errorMessage(error: unknown): string {
@@ -368,7 +369,7 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     const publishState = await runEmbeddedDebugStep(wc, ctx, '提交发布', async () => {
       logger.info(`所有元素设置完成，等待${PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS}秒后发布...`);
       await sleep(PRE_PUBLISH_CONFIRMATION_DELAY_MS);
-      return clickEmbeddedPublish(wc, 30000);
+      return clickEmbeddedPublish(wc, 90000);
     });
     if (publishState === 'success') {
       publishSucceeded = true;
@@ -387,7 +388,7 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     if (!publishSucceeded && debugWebContents && !debugWebContents.isDestroyed()) {
       await logEmbeddedPublishDiagnostics(debugWebContents, failureMessage || '未知失败原因');
     }
-    if (!publishSucceeded && shouldKeepBrowserOnPublishFailure()) {
+    if (!publishSucceeded && shouldKeepBrowserOnPublishFailure(ctx)) {
       logger.warn(`已保留哔哩哔哩发布失败浏览器现场: accountId=${accountId} reason=${failureMessage || '未知失败原因'}`);
     } else if (browserManager.hasStandaloneTab(accountId)) {
       await browserManager.closeTab(accountId).catch((closeError) => {
@@ -538,8 +539,6 @@ async function findEmbeddedFileInputNodeId(wc: WebContents, kind: 'video' | 'ima
     ? [
       'div[role="document"] input[type="file"][accept*="image"]',
       'input[type="file"][accept*="image"]',
-      'div[role="document"] input[type="file"]',
-      'input[type="file"]',
     ]
     : kind === 'video'
       ? [
@@ -714,12 +713,18 @@ async function logEmbeddedPublishDiagnostics(wc: WebContents, reason: string): P
         return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
       };
       const textOf = (el) => (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
-      const visibleTexts = Array.from(document.querySelectorAll('button, [role="button"], label, .ant-select, .ant-radio-wrapper, .ant-checkbox-wrapper, [role="switch"], [class*="edit-form-item"]'))
+      const visibleTexts = Array.from(document.querySelectorAll('button, [role="button"], label, input, textarea, .ant-select, .ant-radio-wrapper, .ant-checkbox-wrapper, [role="switch"], [role="alert"], [class*="edit-form-item"], [class*="form-item"], [class*="error"], [class*="tip"], [class*="required"]'))
         .filter((el) => el instanceof HTMLElement && isVisible(el))
-        .map(textOf)
+        .map((el) => {
+          const text = textOf(el);
+          const placeholder = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+            ? el.placeholder
+            : '';
+          return [text, placeholder].filter(Boolean).join(' | ');
+        })
         .filter(Boolean)
-        .slice(0, 40);
-      const sectionLabels = ['作者声明', '查看权限', '发布时间', '互动设置', '作品描述', '封面设置', '添加地点'];
+        .slice(0, 100);
+      const sectionLabels = ['稿件类型', '创作类型', '分区', '标签', '作者声明', '查看权限', '发布时间', '互动设置', '作品描述', '封面设置', '添加地点'];
       const sections = {};
       for (const label of sectionLabels) {
         const node = Array.from(document.querySelectorAll('label, span, div, p'))
@@ -940,42 +945,157 @@ async function fillEmbeddedDescriptionAndTags(
   }
 }
 
-async function setEmbeddedCover(wc: WebContents, coverPath?: string): Promise<void> {
-  const normalizedCoverPath = normalizeLocalFilePath(coverPath);
-  if (!normalizedCoverPath || !fs.existsSync(normalizedCoverPath)) {
-    return;
-  }
+async function setEmbeddedCover(wc: WebContents, _coverPath?: string): Promise<void> {
+  logger.info('使用哔哩哔哩网页模板设置封面...');
 
-  logger.info('在内嵌浏览器中设置哔哩哔哩封面...');
-  const opened = await clickEmbeddedText(wc, [/封面设置/, /设置封面/, /封面/]);
-  if (!opened) {
-    logger.warn('未找到哔哩哔哩封面设置入口，跳过封面设置');
-    return;
-  }
-  await sleep(1000);
+  const modalAlreadyOpen = await wc.executeJavaScript(`
+    (() => {
+      const text = document.body?.innerText || '';
+      return /首页推荐封面/.test(text) && /个人空间封面/.test(text) && /完成/.test(text);
+    })()
+  `, true).catch(() => false) as boolean;
 
-  await clickEmbeddedText(wc, [/上传封面/, /本地上传/]);
-  await sleep(500);
-
-  const shouldDetach = await attachDebuggerIfNeeded(wc);
-  try {
-    const nodeId = await findEmbeddedFileInputNodeId(wc, 'image');
-    if (!nodeId) {
-      logger.warn('未找到封面上传控件，跳过封面设置');
+  if (!modalAlreadyOpen) {
+    const opened = await clickEmbeddedText(wc, [/^封面设置$/, /^设置封面$/, /^主封面$/]);
+    if (!opened) {
+      logger.warn('未找到哔哩哔哩封面设置入口，保留平台自动生成的推荐封面');
       return;
     }
-    await wc.debugger.sendCommand('DOM.setFileInputFiles', {
-      nodeId,
-      files: [normalizedCoverPath],
-    });
-  } finally {
-    if (shouldDetach && wc.debugger.isAttached()) {
-      wc.debugger.detach();
-    }
+    await sleep(1000);
   }
 
-  await sleep(1000);
-  await clickEmbeddedText(wc, [/^确认$/, /^确定$/, /^完成$/]);
+  const templateTabOpened = await clickEmbeddedText(wc, [/^模版$/, /^模板$/]);
+  if (templateTabOpened) {
+    await sleep(600);
+    const templateSelected = await wc.executeJavaScript(`
+      (() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const textOf = (el) => (el.innerText || el.textContent || '').trim();
+        const noUse = Array.from(document.querySelectorAll('div, span, button'))
+          .filter((el) => el instanceof HTMLElement && isVisible(el) && textOf(el) === '不使用')
+          .sort((a, b) => textOf(a.parentElement || a).length - textOf(b.parentElement || b).length)[0];
+        if (!(noUse instanceof HTMLElement)) return false;
+
+        let card = noUse;
+        for (let depth = 0; card.parentElement && depth < 5; depth += 1) {
+          const parent = card.parentElement;
+          const siblings = Array.from(parent.children)
+            .filter((el) => el instanceof HTMLElement && isVisible(el));
+          if (siblings.length >= 2 && siblings.length <= 20) {
+            const candidate = siblings.find((el) => {
+              if (!(el instanceof HTMLElement) || el.contains(noUse)) return false;
+              const rect = el.getBoundingClientRect();
+              return rect.width >= 80 && rect.height >= 60
+                && (el.querySelector('img, canvas, svg') !== null
+                  || window.getComputedStyle(el).backgroundImage !== 'none'
+                  || textOf(el).length > 0);
+            });
+            if (candidate instanceof HTMLElement) {
+              candidate.scrollIntoView({ block: 'center', inline: 'nearest' });
+              candidate.click();
+              return true;
+            }
+          }
+          card = parent;
+        }
+        return false;
+      })()
+    `, true).catch(() => false) as boolean;
+    logger.info(templateSelected
+      ? '已选择哔哩哔哩提供的封面模板'
+      : '未识别到模板卡片，使用哔哩哔哩当前推荐封面');
+    await sleep(500);
+  }
+
+  const completed = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const textOf = (el) => (el.innerText || el.textContent || '').trim();
+      const buttons = Array.from(document.querySelectorAll('button, [role="button"], span, div'))
+        .filter((el) => el instanceof HTMLElement && isVisible(el) && textOf(el) === '完成')
+        .sort((a, b) => textOf(a).length - textOf(b).length);
+      const target = buttons[0];
+      if (!(target instanceof HTMLElement)) return false;
+      const clickable = target.closest('button, [role="button"]') || target;
+      if (!(clickable instanceof HTMLElement)) return false;
+      clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
+      clickable.click();
+      return true;
+    })()
+  `, true).catch(() => false) as boolean;
+  if (!completed) {
+    throw new SelectorError('未找到哔哩哔哩封面编辑器的“完成”按钮', undefined, 'bilibili');
+  }
+  await sleep(1200);
+  logger.info('哔哩哔哩网页封面设置已完成');
+}
+
+async function selectEmbeddedCreationDeclaration(
+  wc: WebContents,
+  optionPatterns: TextPattern[],
+): Promise<boolean> {
+  const serializedPatterns = optionPatterns.map(patternToSource);
+  const alreadySelected = await wc.executeJavaScript(`
+    (() => {
+      const patterns = ${JSON.stringify(serializedPatterns)}.map((p) => new RegExp(p.source, p.flags));
+      const text = document.body?.innerText || '';
+      const line = text.split('\\n').find((value) => /创作声明/.test(value)) || '';
+      return !/请选择符合您视频内容的创作声明/.test(text)
+        && patterns.some((pattern) => pattern.test(line));
+    })()
+  `, true).catch(() => false) as boolean;
+  if (alreadySelected) return true;
+
+  const opened = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const textOf = (el) => (el.innerText || el.textContent || '').trim();
+      const placeholders = Array.from(document.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], button, span, div'))
+        .filter((el) => el instanceof HTMLElement
+          && isVisible(el)
+          && /请选择符合您视频内容的创作声明/.test(textOf(el)))
+        .sort((a, b) => textOf(a).length - textOf(b).length);
+      const target = placeholders[0];
+      if (!(target instanceof HTMLElement)) return false;
+      const clickable = target.closest('[role="combobox"], [aria-haspopup="listbox"], button, [role="button"]') || target;
+      if (!(clickable instanceof HTMLElement)) return false;
+      clickable.scrollIntoView({ block: 'center', inline: 'nearest' });
+      clickable.click();
+      return true;
+    })()
+  `, true).catch(() => false) as boolean;
+  if (!opened) return false;
+
+  await sleep(700);
+  const selected = await selectEmbeddedControlByText(wc, optionPatterns);
+  if (!selected) return false;
+  await sleep(700);
+
+  return await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      return !Array.from(document.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], span, div'))
+        .some((el) => el instanceof HTMLElement
+          && isVisible(el)
+          && (el.innerText || el.textContent || '').trim() === '请选择符合您视频内容的创作声明');
+    })()
+  `, true).catch(() => false) as boolean;
 }
 
 async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext): Promise<void> {
@@ -983,23 +1103,19 @@ async function applyEmbeddedPublishOptions(wc: WebContents, ctx: UploadContext):
   const riskControl = new EmbeddedRiskControl(wc);
 
   if (ctx.declaration !== undefined) {
-    const mapped = await selectEmbeddedOptionNearLabel(
-      wc,
-      [/作者声明/, /自主声明/, /作品声明/, /声明/],
-      declarationPatterns(ctx.declaration),
-    );
+    const patterns = declarationPatterns(ctx.declaration);
+    const mapped = await selectEmbeddedCreationDeclaration(wc, patterns)
+      || await selectEmbeddedOptionNearLabel(
+        wc,
+        [/创作声明/, /作者声明/, /自主声明/, /作品声明/, /声明/],
+        patterns,
+      );
     if (ctx.declaration && !mapped) throw new ValidationError('未映射哔哩哔哩作者声明', undefined, 'bilibili');
     await riskControl.randomActionDelay();
   }
 
-  if (ctx.visibility) {
-    const mapped = await selectEmbeddedOptionNearLabel(
-      wc,
-      [/查看权限/, /谁可以看/, /可见范围/, /可见/],
-      visibilityPatterns(ctx.visibility),
-    );
-    if (!mapped) throw new ValidationError('未映射哔哩哔哩查看权限', undefined, 'bilibili');
-    await riskControl.randomActionDelay();
+  if (ctx.visibility && ctx.visibility !== 'public') {
+    logger.warn(`当前哔哩哔哩投稿页不提供查看权限设置，忽略配置: ${ctx.visibility}`);
   }
 
   const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
@@ -1339,7 +1455,7 @@ async function getEmbeddedPublishState(wc: WebContents): Promise<EmbeddedPublish
   const state = await wc.executeJavaScript(`
     (() => {
       const bodyText = document.body?.innerText || '';
-      if (/投稿成功|发布成功|作品发布成功|提交成功/.test(bodyText)) return 'success';
+      if (/投稿成功|发布成功|作品发布成功|提交成功|查看进度|再投一个/.test(bodyText)) return 'success';
       if (/发布失败|提交失败|发布出错|审核失败|上传失败/.test(bodyText)) return 'failed';
       return 'timeout';
     })()
@@ -1412,7 +1528,7 @@ export async function uploadVideo(ctx: UploadContext): Promise<UploadResult> {
     }
     return { success: false, message: failureMessage };
   } finally {
-    if (!uploadSucceeded && !headless && shouldKeepBrowserOnPublishFailure()) {
+    if (!uploadSucceeded && !headless && shouldKeepBrowserOnPublishFailure(ctx)) {
       logger.warn(`已保留哔哩哔哩发布失败浏览器现场: accountId=${accountId} reason=${failureMessage || '未知失败原因'}`);
     } else {
       await launched.close().catch(() => {});
@@ -1711,14 +1827,8 @@ async function applyBilibiliPublishOptions(page: Page, ctx: UploadContext): Prom
     await riskControl.randomActionDelay();
   }
 
-  if (ctx.visibility) {
-    const mapped = await selectOptionNearLabel(
-      page,
-      [/查看权限/, /谁可以看/, /可见范围/, /可见/],
-      visibilityPatterns(ctx.visibility),
-    );
-    if (!mapped) throw new ValidationError('未映射哔哩哔哩查看权限', undefined, 'bilibili');
-    await riskControl.randomActionDelay();
+  if (ctx.visibility && ctx.visibility !== 'public') {
+    logger.warn(`当前哔哩哔哩投稿页不提供查看权限设置，忽略配置: ${ctx.visibility}`);
   }
 
   const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
@@ -1989,7 +2099,7 @@ async function waitForPublishState(
     }
 
     const successVisible = await page
-      .getByText(/^(投稿成功|发布成功|提交成功)$/)
+      .getByText(/^(投稿成功|发布成功|提交成功|查看进度|再投一个)$/)
       .first()
       .isVisible()
       .catch(() => false);

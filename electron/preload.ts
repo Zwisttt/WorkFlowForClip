@@ -10,8 +10,50 @@ import type {
 import type { PlatformConfig, PlatformCapabilities, CookieResult } from './platform/base/types';
 import type { PrePublishContext, PrePublishCheckResult, RuleOptimizationContext, RuleOptimizationResult, CostRecord } from './ai/types';
 import type { Material, MaterialGroup, ListQuery, ListResult, BatchDeleteResult } from './services/types/material';
+import type {
+  AutomationBatch,
+  AutomationBatchDetail,
+  AutomationCoordinate,
+  AutomationExportSettings,
+  AutomationSheetMapping,
+  AutomationStartRequest,
+  AutomationTemplate,
+  AutomationWorkbookPreview,
+} from './services/types/automation';
 
 type Invoke<T> = Promise<IpcResult<T>>;
+
+function optionalNumber(value: unknown): number | undefined {
+  return value === undefined || value === null || value === ''
+    ? undefined
+    : Number(value);
+}
+
+/**
+ * Keep this runtime helper inside preload.ts. The BrowserWindow preload runs
+ * with sandbox=true, where requiring another local runtime module would abort
+ * the entire preload and prevent window.matrixflow from being exposed.
+ */
+function createCloneSafeAutomationStartRequest(
+  request: AutomationStartRequest,
+): AutomationStartRequest {
+  const mappings = Array.from(request.sheetMappings ?? [], (mapping): AutomationSheetMapping => ({
+    sheetName: String(mapping.sheetName ?? ''),
+    accountIds: Array.from(mapping.accountIds ?? [], (accountId) => String(accountId)),
+  }));
+
+  return {
+    filePath: String(request.filePath ?? ''),
+    publicAudioDir: String(request.publicAudioDir ?? ''),
+    draftOutputDir: String(request.draftOutputDir ?? ''),
+    videoOutputDir: String(request.videoOutputDir ?? ''),
+    exportWaitSeconds: Number(request.exportWaitSeconds),
+    openWaitSeconds: optionalNumber(request.openWaitSeconds),
+    homeWaitSeconds: optionalNumber(request.homeWaitSeconds),
+    stepPauseSeconds: optionalNumber(request.stepPauseSeconds),
+    sheetMappings: mappings,
+  };
+}
 
 const ALLOWED_CHANNELS = new Set([
   'publish:status',
@@ -32,6 +74,7 @@ const ALLOWED_CHANNELS = new Set([
   'update:status',
   'update:progress',
   'material:upload-progress',
+  'automation:progress',
   'watchdog:warn',
   'watchdog:escalate',
   'watchdog:abandon',
@@ -387,6 +430,38 @@ const api = {
   dialog: {
     openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }): Promise<string | string[] | null> =>
       ipcRenderer.invoke('dialog:openFile', options),
+  },
+
+  automation: {
+    listTemplates: (): Invoke<AutomationTemplate[]> =>
+      ipcRenderer.invoke('automation:template:list'),
+    chooseTemplate: (): Invoke<AutomationTemplate | null> =>
+      ipcRenderer.invoke('automation:template:choose'),
+    registerTemplate: (draftPath: string, name?: string): Invoke<AutomationTemplate> =>
+      ipcRenderer.invoke('automation:template:register', { draftPath, name }),
+    deleteTemplate: (id: string): Invoke<boolean> =>
+      ipcRenderer.invoke('automation:template:delete', id),
+    analyze: (filePath: string): Invoke<AutomationWorkbookPreview> =>
+      ipcRenderer.invoke('automation:analyze', filePath),
+    start: (request: AutomationStartRequest): Invoke<AutomationBatchDetail> =>
+      ipcRenderer.invoke(
+        'automation:start',
+        createCloneSafeAutomationStartRequest(request),
+      ),
+    listBatches: (): Invoke<AutomationBatch[]> =>
+      ipcRenderer.invoke('automation:listBatches'),
+    getBatch: (batchId: string): Invoke<AutomationBatchDetail> =>
+      ipcRenderer.invoke('automation:getBatch', batchId),
+    resumeBatch: (batchId: string): Invoke<null> =>
+      ipcRenderer.invoke('automation:resumeBatch', batchId),
+    retryItem: (itemId: string): Invoke<null> =>
+      ipcRenderer.invoke('automation:retryItem', itemId),
+    cancelBatch: (batchId: string): Invoke<null> =>
+      ipcRenderer.invoke('automation:cancelBatch', batchId),
+    getExportSettings: (): Invoke<AutomationExportSettings> =>
+      ipcRenderer.invoke('automation:exportSettings'),
+    captureCoordinate: (key: AutomationCoordinate['key']): Invoke<AutomationExportSettings> =>
+      ipcRenderer.invoke('automation:captureCoordinate', key),
   },
 
   material: {

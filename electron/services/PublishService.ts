@@ -179,6 +179,13 @@ function buildUploadContextFromTask(
     };
   }
 
+  if (dbTask.platform === 'bilibili') {
+    return {
+      ...uploadContext,
+      declaration: uploadContext.declaration || 'original',
+    };
+  }
+
   return uploadContext;
 }
 

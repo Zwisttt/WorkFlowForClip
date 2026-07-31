@@ -97,7 +97,7 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
-  List, Calendar, Document, VideoCamera,
+  List, Calendar, Document, VideoCamera, MagicStick,
 } from '@element-plus/icons-vue';
 import { useTaskStore } from '@/renderer/stores/task';
 import type { Task } from '@/renderer/stores/task';
@@ -113,6 +113,7 @@ const navItems = [
   { path: '/publish/tasks', label: '任务列表', icon: List },
   { path: '/publish/drafts', label: '草稿', icon: Document },
   { path: '/publish/video', label: '视频发布', icon: VideoCamera },
+  { path: '/publish/automation', label: '自动剪辑发布', icon: MagicStick },
 ];
 
 function isActive(path: string) {

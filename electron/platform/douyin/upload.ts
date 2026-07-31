@@ -50,6 +50,12 @@ function normalizeLocalFilePath(value?: string | null): string | undefined {
   return value.replace(/^local-file:\/\//, '');
 }
 
+function normalizeDouyinDeclaration(value?: string): string {
+  const normalized = (value ?? '').trim();
+  if (!normalized || normalized === '0' || normalized === 'none') return 'none';
+  return normalized;
+}
+
 function shouldDebugSteps(ctx: UploadContext): boolean {
   return ctx.debugSteps === true && process.env.NODE_ENV !== 'production';
 }
@@ -348,7 +354,7 @@ async function uploadVideoInEmbeddedBrowser(ctx: UploadContext): Promise<UploadR
     });
 
     // Handle declaration (自主声明)
-    const declaration = ctx.declaration || 'none';
+    const declaration = normalizeDouyinDeclaration(ctx.declaration);
     if (declaration && declaration !== 'none') {
       await runEmbeddedDebugStep(wc, ctx, '设置自主声明', async () => {
         await setEmbeddedDeclaration(wc, declaration);
@@ -1468,7 +1474,7 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
       await handleEmbeddedCover(wc, ctx.coverPath);
     });
 
-    const declaration = ctx.declaration || 'none';
+    const declaration = normalizeDouyinDeclaration(ctx.declaration);
     if (declaration && declaration !== 'none') {
       await runEmbeddedDebugStep(wc, ctx, '设置自主声明', async () => {
         await setEmbeddedDeclaration(wc, declaration);

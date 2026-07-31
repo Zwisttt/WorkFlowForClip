@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, session as electronSession } from 'electron';
+import { app, ipcMain, BrowserWindow, dialog, session as electronSession } from 'electron';
 import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -24,7 +24,9 @@ import { proxyService } from '../services/ProxyService';
 import { materialService } from '../services/MaterialService';
 import { SessionManager } from '../services/session-manager';
 import { accountPublishPresetService } from '../services/AccountPublishPresetService';
+import { automationService } from '../services/AutomationService';
 import type { PublishPreset, SavePublishPresetInput } from '../services/AccountPublishPresetService';
+import type { AutomationStartRequest, AutomationCoordinate } from '../services/types/automation';
 import { fingerprintTemplateRepo } from '../data/repositories/FingerprintTemplateRepository';
 import { getIPLimitSettingsService } from '../services/ip-limit-settings';
 import { getAIRiskSettingsService } from '../services/ai-risk-settings';
@@ -228,6 +230,19 @@ const CHANNEL = {
   MATERIAL_GROUP_DELETE: 'materialGroup:delete',
 
   DIALOG_OPEN_FILE: 'dialog:openFile',
+  AUTOMATION_TEMPLATE_LIST: 'automation:template:list',
+  AUTOMATION_TEMPLATE_CHOOSE: 'automation:template:choose',
+  AUTOMATION_TEMPLATE_REGISTER: 'automation:template:register',
+  AUTOMATION_TEMPLATE_DELETE: 'automation:template:delete',
+  AUTOMATION_ANALYZE: 'automation:analyze',
+  AUTOMATION_START: 'automation:start',
+  AUTOMATION_LIST_BATCHES: 'automation:listBatches',
+  AUTOMATION_GET_BATCH: 'automation:getBatch',
+  AUTOMATION_RESUME_BATCH: 'automation:resumeBatch',
+  AUTOMATION_RETRY_ITEM: 'automation:retryItem',
+  AUTOMATION_CANCEL_BATCH: 'automation:cancelBatch',
+  AUTOMATION_EXPORT_SETTINGS: 'automation:exportSettings',
+  AUTOMATION_CAPTURE_COORDINATE: 'automation:captureCoordinate',
   BROWSER_OPEN_URL: 'browser:openUrl',
   ACCOUNT_OPEN_BROWSER: 'account:openBrowser',
 
@@ -1275,16 +1290,113 @@ export function registerIpcHandlers(): void {
     return wrap(() => publishService.getPublishHistory(filters));
   });
 
+  // ─── 自动剪辑发布 ────────────────────────────────────
+
+  ipcMain.handle(CHANNEL.AUTOMATION_TEMPLATE_LIST, async () => {
+    return wrap(() => automationService.listTemplates());
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_TEMPLATE_CHOOSE, async () => {
+    return wrap(async () => {
+      const win = getMainWindow();
+      const jianyingDraftRoot = path.join(
+        app.getPath('home'),
+        'Movies',
+        'JianyingPro',
+        'User Data',
+        'Projects',
+        'com.lveditor.draft',
+      );
+      const options: Electron.OpenDialogOptions = {
+        title: '选择一个剪映模板草稿目录',
+        buttonLabel: '导入该模板',
+        defaultPath: fs.existsSync(jianyingDraftRoot) ? jianyingDraftRoot : app.getPath('home'),
+        properties: ['openDirectory'],
+      };
+      const result = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options);
+      if (result.canceled || result.filePaths.length === 0) return null;
+      return automationService.registerTemplate(result.filePaths[0]);
+    });
+  });
+
+  ipcMain.handle(
+    CHANNEL.AUTOMATION_TEMPLATE_REGISTER,
+    async (_e, payload: { draftPath: string; name?: string }) => {
+      if (!payload?.draftPath || typeof payload.draftPath !== 'string') {
+        return fail('模板目录不能为空');
+      }
+      return wrap(() => automationService.registerTemplate(payload.draftPath, payload.name));
+    },
+  );
+
+  ipcMain.handle(CHANNEL.AUTOMATION_TEMPLATE_DELETE, async (_e, id: string) => {
+    return wrap(() => automationService.deleteTemplate(id));
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_ANALYZE, async (_e, filePath: string) => {
+    if (!filePath || typeof filePath !== 'string') return fail('Excel 文件路径不能为空');
+    return wrap(() => automationService.analyzeWorkbook(filePath));
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_START, async (_e, request: AutomationStartRequest) => {
+    return wrap(() => automationService.startBatch(request));
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_LIST_BATCHES, async () => {
+    return wrap(() => automationService.listBatches());
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_GET_BATCH, async (_e, batchId: string) => {
+    return wrap(() => automationService.getBatch(batchId));
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_RESUME_BATCH, async (_e, batchId: string) => {
+    return wrap(async () => {
+      await automationService.resumeBatch(batchId);
+      return null;
+    });
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_RETRY_ITEM, async (_e, itemId: string) => {
+    return wrap(async () => {
+      await automationService.retryItem(itemId);
+      return null;
+    });
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_CANCEL_BATCH, async (_e, batchId: string) => {
+    return wrap(async () => {
+      await automationService.cancelBatch(batchId);
+      return null;
+    });
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_EXPORT_SETTINGS, async () => {
+    return ok(automationService.getExportSettings());
+  });
+
+  ipcMain.handle(
+    CHANNEL.AUTOMATION_CAPTURE_COORDINATE,
+    async (_e, key: AutomationCoordinate['key']) => {
+      return wrap(() => automationService.captureExportCoordinate(key));
+    },
+  );
+
   // ─── 原生对话框 ──────────────────────────────────────
 
   ipcMain.handle(CHANNEL.DIALOG_OPEN_FILE, async (_e, options?: { title?: string; properties?: string[]; filters?: Electron.FileFilter[] }) => {
     const win = getMainWindow();
     const props = (options?.properties ?? ['openFile']) as Electron.OpenDialogOptions['properties'];
-    const result = await dialog.showOpenDialog(win!, {
+    const dialogOptions: Electron.OpenDialogOptions = {
       title: options?.title,
       properties: props,
       filters: options?.filters,
-    });
+    };
+    const result = win
+      ? await dialog.showOpenDialog(win, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths.length === 1 ? result.filePaths[0] : result.filePaths;
   });

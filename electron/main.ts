@@ -36,6 +36,7 @@ import { publishService } from './services/PublishService';
 import { accountService } from './services/AccountService';
 import { materialService } from './services/MaterialService';
 import { browserManager } from './services/embedded-browser/browser-manager';
+import { automationService } from './services/AutomationService';
 
 const logger = new Logger('Main');
 
@@ -63,6 +64,10 @@ async function createWindow() {
 
   mainWindow.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
     callback({ requestHeaders: { ...details.requestHeaders, 'Cache-Control': 'no-cache' } });
+  });
+
+  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
+    logger.error(`Preload 加载失败: ${preloadPath}`, error);
   });
 
   mainWindow.once('ready-to-show', () => {
@@ -233,6 +238,9 @@ app.whenReady().then(async () => {
   await accountService.initialize();
   logger.info('账号管理服务已初始化');
 
+  await automationService.initialize();
+  logger.info('自动剪辑发布服务已初始化');
+
   registerIpcHandlers();
   registerAccountLoginHandlers();
 
@@ -261,6 +269,9 @@ app.on('before-quit', async () => {
 
   materialService.dispose();
   logger.info('素材管理服务已停止');
+
+  automationService.dispose();
+  logger.info('自动剪辑发布服务已停止');
 
   browserManager.dispose();
   logger.info('内嵌浏览器已关闭');

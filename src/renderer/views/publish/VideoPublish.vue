@@ -156,7 +156,7 @@
 import { ref, computed, reactive, toRaw, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { List, Document, VideoCamera, Promotion, Plus } from '@element-plus/icons-vue';
+import { List, Document, VideoCamera, Promotion, Plus, MagicStick } from '@element-plus/icons-vue';
 import VideoUploadCard from '@/renderer/components/publish/VideoUploadCard.vue';
 import VideoCommonForm from '@/renderer/components/publish/VideoCommonForm.vue';
 import PlatformAccountBar from '@/renderer/components/publish/PlatformAccountBar.vue';
@@ -177,6 +177,7 @@ const navItems = [
   { path: '/publish/tasks', label: '任务列表', icon: List },
   { path: '/publish/drafts', label: '草稿', icon: Document },
   { path: '/publish/video', label: '视频发布', icon: VideoCamera },
+  { path: '/publish/automation', label: '自动剪辑发布', icon: MagicStick },
 ];
 
 function isActive(path: string) {
@@ -815,6 +816,12 @@ function getDefaultPlatformConfig(platform?: string): PlatformConfig {
   if (platform === 'channels') {
     return {
       location: '',
+    };
+  }
+  if (platform === 'bilibili') {
+    return {
+      declaration: 'original',
+      coverRatio: '16:9',
     };
   }
   return {};

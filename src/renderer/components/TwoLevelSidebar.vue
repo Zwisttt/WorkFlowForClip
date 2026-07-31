@@ -75,6 +75,7 @@ const menuItems: NavItem[] = [
     icon: Calendar,
     children: [
       { id: 'publish-calendar', label: '发布日历', path: '/publish' },
+      { id: 'publish-automation', label: '自动剪辑发布', path: '/publish/automation' },
       { id: 'publish-tasks', label: '任务管理', path: '/tasks' },
       { id: 'publish-drafts', label: '草稿管理', path: '/drafts' },
     ],

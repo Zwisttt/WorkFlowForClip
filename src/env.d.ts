@@ -255,6 +255,22 @@ interface MatrixFlowAPI {
     openFile: (options?: { title?: string; properties?: string[]; filters?: { name: string; extensions: string[] }[] }) => Promise<string | string[] | null>;
   };
 
+  automation: {
+    listTemplates: () => Promise<IpcResult<any[]>>;
+    chooseTemplate: () => Promise<IpcResult<any | null>>;
+    registerTemplate: (draftPath: string, name?: string) => Promise<IpcResult<any>>;
+    deleteTemplate: (id: string) => Promise<IpcResult<boolean>>;
+    analyze: (filePath: string) => Promise<IpcResult<any>>;
+    start: (request: any) => Promise<IpcResult<any>>;
+    listBatches: () => Promise<IpcResult<any[]>>;
+    getBatch: (batchId: string) => Promise<IpcResult<any>>;
+    resumeBatch: (batchId: string) => Promise<IpcResult<null>>;
+    retryItem: (itemId: string) => Promise<IpcResult<null>>;
+    cancelBatch: (batchId: string) => Promise<IpcResult<null>>;
+    getExportSettings: () => Promise<IpcResult<any>>;
+    captureCoordinate: (key: 'search' | 'result' | 'export' | 'confirm' | 'close' | 'home') => Promise<IpcResult<any>>;
+  };
+
   material: {
     list: (query?: any) => Promise<IpcResult<any>>;
     get: (id: string) => Promise<IpcResult<any>>;
