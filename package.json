@@ -4,11 +4,11 @@
   "description": "MatrixFlow — 多平台内容分发桌面应用",
   "main": "dist/electron/main.js",
   "scripts": {
-    "dev": "concurrently --kill-others \"vite\" \"wait-on http://localhost:5173 && npm run build:electron && NODE_ENV=development electron .\"",
+    "dev": "concurrently --kill-others \"vite\" \"wait-on http://localhost:5173 && npm run build:electron && node scripts/start-electron-dev.mjs\"",
     "dev:vite": "vite",
     "dev:electron": "npm run build:electron && electron .",
     "build": "npm run build:electron && vite build",
-    "build:electron": "tsc -p tsconfig.electron.json && mkdir -p dist/electron/data/migrations dist/electron/services/embedded-browser dist/electron/automation/python && cp -r electron/data/migrations/*.sql dist/electron/data/migrations/ && cp -r electron/browser-ui dist/electron/browser-ui && cp -r electron/services/embedded-browser/stealth-scripts dist/electron/services/embedded-browser/stealth-scripts && cp -r electron/automation/python/* dist/electron/automation/python/",
+    "build:electron": "tsc -p tsconfig.electron.json && node scripts/copy-electron-assets.mjs",
     "start": "npm run build && electron .",
     "preview": "vite preview",
     "lint": "eslint . --ext .ts,.vue",

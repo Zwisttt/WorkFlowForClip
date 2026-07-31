@@ -885,11 +885,29 @@ export class AutomationService {
   }
 
   private async registerBundledLocalTemplates(): Promise<void> {
-    const roots = [
-      ['Luna', '/Users/mac/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/Luna'],
-      ['luna纯文案', '/Users/mac/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/luna纯文案'],
-      ['Stella纯文案', '/Users/mac/Movies/JianyingPro/User Data/Projects/com.lveditor.draft/Stella纯文案'],
-    ] as const;
+    const draftRoot = process.platform === 'darwin'
+      ? path.join(
+          process.env.HOME ?? '',
+          'Movies',
+          'JianyingPro',
+          'User Data',
+          'Projects',
+          'com.lveditor.draft',
+        )
+      : process.platform === 'win32'
+        ? path.join(
+            process.env.LOCALAPPDATA ?? path.join(process.env.USERPROFILE ?? '', 'AppData', 'Local'),
+            'JianyingPro',
+            'User Data',
+            'Projects',
+            'com.lveditor.draft',
+          )
+        : '';
+    if (!draftRoot) return;
+
+    const roots = ['Luna', 'luna纯文案', 'Stella纯文案'].map(
+      (name) => [name, path.join(draftRoot, name)] as const,
+    );
     for (const [name, draftPath] of roots) {
       if (!fs.existsSync(draftPath)) continue;
       try {

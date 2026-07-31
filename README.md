@@ -119,6 +119,25 @@ npm test             # 单元 + 集成测试
 npm run typecheck    # TypeScript 类型检查
 ```
 
+### Windows 一键启动
+
+从 GitHub 克隆或拉取完整仓库后，直接双击项目根目录的：
+
+```text
+start-windows.bat
+```
+
+启动器会依次检查 Node.js 18+、npm、Python 3、FFmpeg、项目依赖、
+Patchright Chrome 与剪映自动导出 Python 库。已安装且版本未变化的项目会自动跳过，
+缺失项目会通过 winget、npm 或 pip 安装，全部通过后自动执行 `npm run dev`。
+
+如果 Windows 没有 `winget`，请先从 Microsoft Store 安装“应用安装程序”。
+启动成功后请使用自动打开的 MatrixFlow Electron 桌面窗口，不要在浏览器中直接打开
+`http://localhost:5173`。
+
+首次换机不会同步账号 Cookie、本地数据库和素材绝对路径，需要在新电脑上重新登录账号、
+导入剪映模板，并在 Excel 中填写 Windows 绝对路径。
+
 ### 打包
 
 ```bash

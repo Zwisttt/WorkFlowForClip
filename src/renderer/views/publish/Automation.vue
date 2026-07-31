@@ -433,7 +433,7 @@ const liveProgress = reactive({
 const form = reactive({
   filePath: '',
   publicAudioDir: '',
-  draftOutputDir: '/Users/mac/Movies/JianyingPro/User Data/Projects/com.lveditor.draft',
+  draftOutputDir: '',
   videoOutputDir: '',
   exportWaitSeconds: 90,
 });
