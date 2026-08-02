@@ -62,6 +62,7 @@ test-video.mp4
 
 # Browser runtime data (Patchright)
 storage/
+.matrixflow-bootstrap/
 
 # Runtime data (root level only)
 /data/

@@ -41,6 +41,7 @@ import type {
   TaskListResult,
 } from './types/publish';
 import { PublishEvent } from './types/publish';
+import { resolvePublishTaskTitle } from './publish-task-metadata';
 import type { PublishEvent as BusPublishEvent } from '../core/types/eventbus';
 import type { TaskStatus } from '../core/types/task';
 import { toPlatformError, type PlatformId } from '../platform/base/PlatformError';
@@ -112,7 +113,10 @@ function buildUploadContextFromTask(
 ): UploadContext {
   const contentId = dbTask.content_id;
   const headless = taskMeta.headless === true;
-  const taskTitle = (dbTask as any).title || `video_${contentId.slice(0, 8)}`;
+  // An empty title is intentional for automation publishing. Do not replace
+  // it with a path-derived fallback such as "video_/Users/m".
+  const rawTitle = (dbTask as any).title;
+  const taskTitle = resolvePublishTaskTitle(rawTitle, contentId);
   const taskDescription = (dbTask as any).description || undefined;
   const taskTags = parseTaskTags((dbTask as any).tags);
   const presetTags = browserRuntime.tags;

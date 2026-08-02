@@ -7,6 +7,10 @@ import type {
 } from './types/automation';
 
 type DraftData = Record<string, any>;
+type DraftRootData = {
+  all_draft_store?: Record<string, any>[];
+  [key: string]: any;
+};
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp']);
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.aac', '.flac']);
@@ -78,6 +82,13 @@ function sanitizeName(value: string): string {
     .replace(/[. ]+$/g, '')
     .trim();
   return name || '未命名作品';
+}
+
+function directorySize(directory: string): number {
+  return fs.readdirSync(directory, { withFileTypes: true }).reduce((total, entry) => {
+    const entryPath = path.join(directory, entry.name);
+    return total + (entry.isDirectory() ? directorySize(entryPath) : fs.statSync(entryPath).size);
+  }, 0);
 }
 
 function replaceText(material: Record<string, any>, text: string): void {
@@ -211,12 +222,14 @@ export class JianyingTemplateService {
     },
   ): string {
     const resolvedOutputRoot = path.resolve(outputRoot);
-    const safeWorkName = sanitizeName(workName);
+    const displayWorkName = workName.trim() || '未命名作品';
+    const safeWorkName = sanitizeName(displayWorkName);
     const destination = path.join(resolvedOutputRoot, safeWorkName);
     if (fs.existsSync(destination)) {
       throw new JianyingTemplateError(`草稿目录已存在：${destination}`);
     }
     fs.mkdirSync(resolvedOutputRoot, { recursive: true });
+    this.removeStaleDraftRootEntry(resolvedOutputRoot, destination);
     const workingDirectory = path.join(
       resolvedOutputRoot,
       `.${safeWorkName}.matrixflow-${randomUUID()}.tmp`,
@@ -253,11 +266,32 @@ export class JianyingTemplateService {
       replaceByKey(template.audioSlotKey, values.bgmPath, 'audio');
 
       fs.writeFileSync(draftFile, JSON.stringify(data), 'utf8');
-      this.tryUpdateMetaName(workingDirectory, safeWorkName);
+      const draftId = randomUUID().toUpperCase();
+      this.writeDraftMeta(
+        workingDirectory,
+        resolvedOutputRoot,
+        destination,
+        displayWorkName,
+        draftId,
+        data,
+      );
       if (fs.existsSync(destination)) {
         throw new JianyingTemplateError(`草稿目录已存在：${destination}`);
       }
       fs.renameSync(workingDirectory, destination);
+      try {
+        this.registerInDraftRoot(
+          resolvedOutputRoot,
+          template.draftPath,
+          destination,
+          displayWorkName,
+          draftId,
+          data,
+        );
+      } catch (error) {
+        fs.rmSync(destination, { recursive: true, force: true });
+        throw error;
+      }
       return destination;
     } catch (error) {
       fs.rmSync(workingDirectory, { recursive: true, force: true });
@@ -265,18 +299,160 @@ export class JianyingTemplateService {
     }
   }
 
-  private tryUpdateMetaName(draftPath: string, workName: string): void {
+  private writeDraftMeta(
+    draftPath: string,
+    draftRoot: string,
+    destination: string,
+    workName: string,
+    draftId: string,
+    data: DraftData,
+  ): void {
     const metaPath = path.join(draftPath, 'draft_meta_info.json');
-    if (!fs.existsSync(metaPath)) return;
+    const nowMicros = Date.now() * 1_000;
+    const meta: Record<string, any> = {
+      cloud_package_completed_time: '',
+      draft_cloud_capcut_purchase_info: '',
+      draft_cloud_last_action_download: false,
+      draft_cloud_materials: [],
+      draft_cloud_purchase_info: '',
+      draft_cloud_template_id: '',
+      draft_cloud_tutorial_info: '',
+      draft_cloud_videocut_purchase_info: '',
+      draft_cover: fs.existsSync(path.join(draftPath, 'draft_cover.jpg'))
+        ? path.join(destination, 'draft_cover.jpg')
+        : '',
+      draft_deeplink_url: '',
+      draft_enterprise_info: {
+        draft_enterprise_extra: '',
+        draft_enterprise_id: '',
+        draft_enterprise_name: '',
+        enterprise_material: [],
+      },
+      draft_fold_path: destination,
+      draft_id: draftId,
+      draft_is_ai_packaging_used: false,
+      draft_is_ai_shorts: false,
+      draft_is_ai_translate: false,
+      draft_is_article_video_draft: false,
+      draft_is_from_deeplink: 'false',
+      draft_is_invisible: false,
+      draft_materials: [0, 1, 2, 3, 6, 7, 8].map((type) => ({ type, value: [] })),
+      draft_materials_copied_info: [],
+      draft_name: workName,
+      draft_new_version: String(data.new_version ?? ''),
+      draft_removable_storage_device: '',
+      draft_root_path: draftRoot,
+      draft_segment_extra_info: [],
+      draft_type: '',
+      name: workName,
+      tm_draft_cloud_completed: '',
+      tm_draft_cloud_modified: 0,
+      tm_draft_create: nowMicros,
+      tm_draft_modified: nowMicros,
+      tm_draft_removed: 0,
+      tm_duration: Number(data.duration ?? 0),
+    };
+    fs.writeFileSync(metaPath, JSON.stringify(meta), 'utf8');
+  }
+
+  private registerInDraftRoot(
+    draftRoot: string,
+    templatePath: string,
+    destination: string,
+    workName: string,
+    draftId: string,
+    data: DraftData,
+  ): void {
+    const rootMetaPath = path.join(draftRoot, 'root_meta_info.json');
+    if (!fs.existsSync(rootMetaPath)) return;
+
+    let root: DraftRootData;
     try {
-      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as Record<string, any>;
-      for (const key of ['draft_name', 'name']) {
-        if (key in meta) meta[key] = workName;
-      }
-      fs.writeFileSync(metaPath, JSON.stringify(meta), 'utf8');
-    } catch {
-      // Newer Jianying versions encrypt this file; the folder name remains authoritative.
+      root = JSON.parse(fs.readFileSync(rootMetaPath, 'utf8')) as DraftRootData;
+    } catch (error) {
+      throw new JianyingTemplateError(
+        `剪映草稿索引无法解析：${error instanceof Error ? error.message : String(error)}`,
+      );
     }
+
+    const entries = Array.isArray(root.all_draft_store) ? root.all_draft_store : [];
+    const normalizedDestination = path.resolve(destination);
+    if (entries.some((entry) =>
+      String(entry.draft_id) === draftId
+      || path.resolve(String(entry.draft_fold_path || '')) === normalizedDestination
+    )) {
+      throw new JianyingTemplateError(`剪映草稿索引已存在：${workName}`);
+    }
+
+    const sourceEntry = entries.find(
+      (entry) => path.resolve(String(entry.draft_fold_path || '')) === path.resolve(templatePath),
+    ) ?? {};
+    const nowMicros = Date.now() * 1_000;
+    const entry: Record<string, any> = {
+      ...sourceEntry,
+      cloud_draft_cover: false,
+      cloud_draft_sync: false,
+      draft_cloud_last_action_download: false,
+      draft_cloud_purchase_info: '',
+      draft_cloud_template_id: '',
+      draft_cloud_tutorial_info: '',
+      draft_cloud_videocut_purchase_info: '',
+      draft_cover: fs.existsSync(path.join(destination, 'draft_cover.jpg'))
+        ? path.join(destination, 'draft_cover.jpg')
+        : '',
+      draft_fold_path: destination,
+      draft_id: draftId,
+      draft_is_cloud_temp_draft: false,
+      draft_is_invisible: false,
+      draft_json_file: path.join(destination, path.basename(getDraftFile(destination))),
+      draft_name: workName,
+      draft_new_version: String(data.new_version ?? sourceEntry.draft_new_version ?? ''),
+      draft_root_path: draftRoot,
+      draft_timeline_materials_size: directorySize(destination),
+      streaming_edit_draft_ready: true,
+      tm_draft_cloud_completed: '',
+      tm_draft_cloud_entry_id: 0,
+      tm_draft_cloud_modified: 0,
+      tm_draft_cloud_parent_entry_id: -1,
+      tm_draft_create: nowMicros,
+      tm_draft_modified: nowMicros,
+      tm_draft_removed: 0,
+      tm_duration: Number(data.duration ?? sourceEntry.tm_duration ?? 0),
+    };
+    entries.push(entry);
+    root.all_draft_store = entries;
+
+    const temporary = `${rootMetaPath}.matrixflow-${randomUUID()}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(root), 'utf8');
+    fs.renameSync(temporary, rootMetaPath);
+  }
+
+  private removeStaleDraftRootEntry(draftRoot: string, destination: string): void {
+    const rootMetaPath = path.join(draftRoot, 'root_meta_info.json');
+    if (!fs.existsSync(rootMetaPath)) return;
+
+    let root: DraftRootData;
+    try {
+      root = JSON.parse(fs.readFileSync(rootMetaPath, 'utf8')) as DraftRootData;
+    } catch (error) {
+      throw new JianyingTemplateError(
+        `剪映草稿索引无法解析：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    const entries = Array.isArray(root.all_draft_store) ? root.all_draft_store : [];
+    const normalizedDestination = path.resolve(destination);
+    const retainedEntries = entries.filter((entry) => {
+      const rawPath = String(entry.draft_fold_path || '').trim();
+      if (!rawPath || path.resolve(rawPath) !== normalizedDestination) return true;
+      return fs.existsSync(normalizedDestination);
+    });
+    if (retainedEntries.length === entries.length) return;
+
+    root.all_draft_store = retainedEntries;
+    const temporary = `${rootMetaPath}.matrixflow-${randomUUID()}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(root), 'utf8');
+    fs.renameSync(temporary, rootMetaPath);
   }
 }
 

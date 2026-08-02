@@ -44,6 +44,7 @@ def export_one(payload_path: str):
     open_wait = max(1, float(payload.get("openWaitSeconds", 8)))
     export_wait = max(1, float(payload.get("exportWaitSeconds", 60)))
     home_wait = max(1, float(payload.get("homeWaitSeconds", 5)))
+    clear_previous_search = bool(payload.get("clearPreviousSearch", False))
     pyautogui.PAUSE = 0.15
 
     def click(key: str):
@@ -52,6 +53,12 @@ def export_one(payload_path: str):
         time.sleep(pause)
 
     emit("progress", stage="search", message=f"搜索草稿：{draft_name}")
+    if clear_previous_search:
+        # After a search, Jianying changes this position into a clear button.
+        # Clear the previous query first, then click again to focus the empty
+        # search field. This mirrors the proven Auto_Clip workflow.
+        emit("progress", stage="clear_search", message="清空上一条草稿搜索")
+        click("search")
     click("search")
     modifier = "command" if sys.platform == "darwin" else "ctrl"
     pyautogui.hotkey(modifier, "a")

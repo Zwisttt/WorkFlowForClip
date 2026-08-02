@@ -105,13 +105,34 @@
 
       <div class="timing-row">
         <label>
-          <span>单条导出等待</span>
-          <el-input-number v-model="form.exportWaitSeconds" :min="10" :max="1800" :step="10" />
+          <span>打开剪辑页等待</span>
+          <el-input-number v-model="form.openWaitSeconds" :min="3" :max="60" :step="1" />
           <small>秒</small>
         </label>
-        <div class="timing-note">
-          同账号撞期会自动顺延：抖音间隔 10 分钟，小红书间隔 15 分钟。
-        </div>
+        <label>
+          <span>导出读条等待</span>
+          <el-input-number v-model="form.exportWaitSeconds" :min="10" :max="3600" :step="1" />
+          <small>秒</small>
+        </label>
+        <label>
+          <span>关闭剪辑页后等待</span>
+          <el-input-number v-model="form.homeWaitSeconds" :min="1" :max="120" :step="1" />
+          <small>秒</small>
+        </label>
+        <label>
+          <span>全局步骤停顿</span>
+          <el-input-number
+            v-model="form.stepPauseSeconds"
+            :min="0.1"
+            :max="30"
+            :step="0.1"
+            :precision="1"
+          />
+          <small>秒</small>
+        </label>
+      </div>
+      <div class="timing-note">
+        导出读条需覆盖最长视频的完整导出时间；同账号撞期会自动顺延：抖音 10 分钟，小红书 15 分钟。
       </div>
     </section>
 
@@ -238,7 +259,17 @@
           <h2>批次与进度</h2>
           <p>任务状态和逐行错误会持久保存，应用重启后仍可查看与恢复。</p>
         </div>
-        <el-button plain @click="refreshBatches">刷新</el-button>
+        <div class="panel__actions">
+          <el-button
+            type="danger"
+            plain
+            :loading="stoppingExports"
+            @click="stopAllExports"
+          >
+            停止所有导出
+          </el-button>
+          <el-button plain @click="refreshBatches">刷新</el-button>
+        </div>
       </div>
 
       <div v-if="liveProgress.visible" class="live-progress">
@@ -270,7 +301,7 @@
           <template #default="{ row }">
             <el-button link type="primary" @click="showBatch(row.id)">详情</el-button>
             <el-button
-              v-if="row.status === 'awaiting_export_setup' || row.status === 'partial_failed'"
+              v-if="['paused', 'awaiting_export_setup', 'partial_failed'].includes(row.status)"
               link
               type="success"
               @click="resumeBatch(row.id)"
@@ -298,7 +329,7 @@
       <el-table v-if="batchDetail" :data="batchDetail.items" size="small" max-height="520">
         <el-table-column prop="sheetName" label="账号 Sheet" width="120" />
         <el-table-column prop="rowNumber" label="行" width="60" />
-        <el-table-column prop="resolvedWorkName" label="作品名字" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="workName" label="作品名字" min-width="160" show-overflow-tooltip />
         <el-table-column prop="templateName" label="模板" width="130" />
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
@@ -341,7 +372,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElButton, ElInput, ElMessage, ElMessageBox } from 'element-plus';
 
 type CoordinateKey = 'search' | 'result' | 'export' | 'confirm' | 'close' | 'home';
@@ -370,6 +401,7 @@ interface Issue {
 }
 
 interface Preview {
+  filePath: string;
   sheets: Array<{ name: string; rowCount: number; matchedAccounts: Account[] }>;
   rows: any[];
   issues: Issue[];
@@ -407,6 +439,7 @@ const PathField = defineComponent({
 });
 
 const flowSteps = ['导入表格', '校验排期', '生成草稿', '剪映导出', '自动发布'];
+const PATH_SETTINGS_KEY = 'automation.savedPaths';
 const activeStep = ref(0);
 const desktopApiAvailable = ref(Boolean(window.matrixflow));
 const templates = ref<Template[]>([]);
@@ -415,6 +448,7 @@ const preview = ref<Preview | null>(null);
 const sheetMappings = reactive<Record<string, string[]>>({});
 const analyzing = ref(false);
 const starting = ref(false);
+const stoppingExports = ref(false);
 const capturingCoordinate = ref('');
 const batches = ref<any[]>([]);
 const batchDetail = ref<any | null>(null);
@@ -435,10 +469,15 @@ const form = reactive({
   publicAudioDir: '',
   draftOutputDir: '',
   videoOutputDir: '',
-  exportWaitSeconds: 90,
+  openWaitSeconds: 10,
+  exportWaitSeconds: 12,
+  homeWaitSeconds: 5,
+  stepPauseSeconds: 1,
 });
 let pollingTimer: ReturnType<typeof setInterval> | undefined;
+let savePathsTimer: ReturnType<typeof setTimeout> | undefined;
 let unsubscribeProgress: (() => void) | undefined;
+let savedPathsLoaded = false;
 
 const errorCount = computed(() =>
   preview.value?.issues.filter((issue) => issue.severity === 'error').length ?? 0
@@ -467,6 +506,96 @@ function getMatrixFlow() {
   }
   return window.matrixflow;
 }
+
+async function loadSavedPaths() {
+  let restoredFromBatch = false;
+  try {
+    const saved = await getMatrixFlow().settings.get(PATH_SETTINGS_KEY) as Partial<typeof form> | null;
+    if (saved && typeof saved === 'object') {
+      for (const key of ['filePath', 'publicAudioDir', 'draftOutputDir', 'videoOutputDir'] as const) {
+        if (typeof saved[key] === 'string') form[key] = saved[key];
+      }
+      for (const key of ['openWaitSeconds', 'exportWaitSeconds', 'homeWaitSeconds', 'stepPauseSeconds'] as const) {
+        if (typeof saved[key] === 'number' && Number.isFinite(saved[key])) form[key] = saved[key];
+      }
+    } else {
+      // Existing installations could not persist this key because the old IPC
+      // queried non-existent database columns. Recover the last-used paths and
+      // timings from the latest durable automation batch once.
+      const recent = unwrap<any[]>(await getMatrixFlow().automation.listBatches(), []);
+      const latest = recent[0];
+      if (latest) {
+        if (typeof latest.sourceFile === 'string') form.filePath = latest.sourceFile;
+        if (typeof latest.publicAudioDir === 'string') form.publicAudioDir = latest.publicAudioDir;
+        if (typeof latest.draftOutputDir === 'string') form.draftOutputDir = latest.draftOutputDir;
+        if (typeof latest.videoOutputDir === 'string') form.videoOutputDir = latest.videoOutputDir;
+        for (const key of ['openWaitSeconds', 'exportWaitSeconds', 'homeWaitSeconds', 'stepPauseSeconds'] as const) {
+          const value = latest.exportSettings?.[key];
+          if (typeof value === 'number' && Number.isFinite(value)) form[key] = value;
+        }
+        restoredFromBatch = true;
+      }
+    }
+  } catch (error) {
+    ElMessage.error(`上次的路径和导出参数加载失败：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    savedPathsLoaded = true;
+  }
+  if (restoredFromBatch) await saveAutomationPreferences();
+}
+
+async function saveAutomationPreferences(showError = true): Promise<boolean> {
+  try {
+    const result = await getMatrixFlow().settings.set(PATH_SETTINGS_KEY, {
+      filePath: form.filePath,
+      publicAudioDir: form.publicAudioDir,
+      draftOutputDir: form.draftOutputDir,
+      videoOutputDir: form.videoOutputDir,
+      openWaitSeconds: form.openWaitSeconds,
+      exportWaitSeconds: form.exportWaitSeconds,
+      homeWaitSeconds: form.homeWaitSeconds,
+      stepPauseSeconds: form.stepPauseSeconds,
+    });
+    if (!result?.success) throw new Error(result?.message || '数据库写入失败');
+    return true;
+  } catch (error) {
+    if (showError) {
+      ElMessage.error(`路径和导出参数保存失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+    return false;
+  }
+}
+
+watch(
+  () => [
+    form.filePath,
+    form.publicAudioDir,
+    form.draftOutputDir,
+    form.videoOutputDir,
+    form.openWaitSeconds,
+    form.exportWaitSeconds,
+    form.homeWaitSeconds,
+    form.stepPauseSeconds,
+  ],
+  () => {
+    if (!savedPathsLoaded) return;
+    if (savePathsTimer) clearTimeout(savePathsTimer);
+    savePathsTimer = setTimeout(() => {
+      void saveAutomationPreferences();
+    }, 250);
+  },
+);
+
+watch(
+  () => form.filePath,
+  (filePath) => {
+    if (preview.value && preview.value.filePath !== filePath) {
+      preview.value = null;
+      activeStep.value = 0;
+      for (const key of Object.keys(sheetMappings)) delete sheetMappings[key];
+    }
+  },
+);
 
 async function loadTemplates(showError = false): Promise<boolean> {
   try {
@@ -576,7 +705,10 @@ async function startBatch() {
       publicAudioDir: form.publicAudioDir,
       draftOutputDir: form.draftOutputDir,
       videoOutputDir: form.videoOutputDir,
+      openWaitSeconds: form.openWaitSeconds,
       exportWaitSeconds: form.exportWaitSeconds,
+      homeWaitSeconds: form.homeWaitSeconds,
+      stepPauseSeconds: form.stepPauseSeconds,
       sheetMappings: preview.value.sheets.map((sheet) => ({
         sheetName: sheet.name,
         accountIds: [...(sheetMappings[sheet.name] ?? [])],
@@ -656,6 +788,39 @@ async function cancelBatch(id: string) {
   await refreshBatches();
 }
 
+async function stopAllExports() {
+  await ElMessageBox.confirm(
+    '确定立即停止所有剪映导出？鼠标控制会终止，已生成的草稿和视频不会删除，暂停的批次可以稍后继续。',
+    '停止所有导出',
+    {
+      type: 'warning',
+      confirmButtonText: '立即停止',
+      cancelButtonText: '暂不停止',
+    },
+  );
+  stoppingExports.value = true;
+  try {
+    const result = unwrap(await getMatrixFlow().automation.stopAllExports(), {
+      stoppedWorker: false,
+      pausedBatches: 0,
+      pausedItems: 0,
+    });
+    liveProgress.visible = true;
+    liveProgress.stage = 'paused';
+    liveProgress.message = result.pausedBatches > 0
+      ? `已停止导出并暂停 ${result.pausedBatches} 个批次`
+      : result.stoppedWorker
+        ? '已停止残留的剪映导出进程'
+        : '当前没有正在执行的剪映导出';
+    await refreshBatches();
+    ElMessage.success(liveProgress.message);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error));
+  } finally {
+    stoppingExports.value = false;
+  }
+}
+
 function rowIssues(row: any): Issue[] {
   return preview.value?.issues.filter((issue) =>
     issue.sheetName === row.sheetName && issue.rowNumber === row.rowNumber
@@ -702,6 +867,7 @@ function batchStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     validated: '已校验',
     running: '执行中',
+    paused: '已暂停',
     awaiting_export_setup: '等待标定',
     completed: '已完成',
     partial_failed: '部分失败',
@@ -713,7 +879,7 @@ function batchStatusLabel(status: string): string {
 function batchStatusType(status: string): '' | 'success' | 'warning' | 'info' | 'danger' {
   if (status === 'completed') return 'success';
   if (status === 'partial_failed') return 'danger';
-  if (status === 'cancelled') return 'info';
+  if (status === 'cancelled' || status === 'paused') return 'info';
   return 'warning';
 }
 
@@ -723,6 +889,7 @@ onMounted(async () => {
     return;
   }
   desktopApiAvailable.value = true;
+  await loadSavedPaths();
   await Promise.allSettled([loadTemplates(true), loadAccounts(), loadExportSettings(), refreshBatches()]);
   unsubscribeProgress = getMatrixFlow().on('automation:progress', (payload: any) => {
     liveProgress.visible = true;
@@ -739,6 +906,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (pollingTimer) clearInterval(pollingTimer);
+  if (savePathsTimer) clearTimeout(savePathsTimer);
+  if (savedPathsLoaded) void saveAutomationPreferences(false);
   unsubscribeProgress?.();
 });
 </script>
@@ -895,6 +1064,12 @@ onBeforeUnmount(() => {
   margin-bottom: 18px;
 }
 
+.panel__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
 .panel h2 {
   margin: 0 0 5px;
   font-size: 18px;
@@ -927,8 +1102,9 @@ onBeforeUnmount(() => {
 
 .timing-row {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
   align-items: center;
-  justify-content: space-between;
   margin-top: 18px;
   padding-top: 16px;
   border-top: 1px solid #eef0f4;
@@ -943,10 +1119,18 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.timing-row :deep(.el-input-number) {
+  width: 126px;
+}
+
 .timing-row small,
 .timing-note {
   color: var(--muted);
   font-size: 12px;
+}
+
+.timing-note {
+  margin-top: 10px;
 }
 
 .summary-badges {

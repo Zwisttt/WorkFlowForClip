@@ -36,8 +36,13 @@ export async function fillVideoMetadata(
   const titleInput = page.locator(UPLOAD_SELECTORS.titleInput).first();
   await titleInput.waitFor({ state: 'visible', timeout: 10000 });
   await rc.humanClick(UPLOAD_SELECTORS.titleInput);
-  await rc.humanType(UPLOAD_SELECTORS.titleInput, title);
-  logger.info(`标题已填写: ${title}`);
+  await titleInput.fill('');
+  if (title.trim()) {
+    await rc.humanType(UPLOAD_SELECTORS.titleInput, title.trim());
+    logger.info(`标题已填写: ${title.trim()}`);
+  } else {
+    logger.info('作品标题已清空，发布文案仅写入作品简介');
+  }
 
   if (description) {
     const descInput = page.locator(UPLOAD_SELECTORS.descriptionEditor);

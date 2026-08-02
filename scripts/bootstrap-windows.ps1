@@ -161,6 +161,14 @@ try {
     Write-Host '[跳过] Patchright Chrome 已完成安装检查' -ForegroundColor DarkGreen
   }
 
+  $jianyingCandidates = @(
+    (Join-Path $env:LOCALAPPDATA 'JianyingPro\JianyingPro.exe'),
+    (Join-Path $env:LOCALAPPDATA 'JianyingPro\Apps')
+  )
+  if (-not ($jianyingCandidates | Where-Object { Test-Path $_ })) {
+    Write-Warning '未找到剪映专业版；MatrixFlow 可以启动，但自动剪辑导出前需要先安装剪映专业版。'
+  }
+
   Write-Step '环境检查完成，正在启动 MatrixFlow'
   Write-Host '请使用自动打开的桌面窗口，不要在浏览器中打开 localhost:5173。' -ForegroundColor Yellow
   Invoke-Checked 'npm.cmd' @('run', 'dev')

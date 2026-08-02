@@ -146,6 +146,14 @@ describe('PublishTaskRepository', () => {
 
       expect(result.status).toBe('completed');
       expect(result.result).toBe('success');
+      expect(runStmt.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'completed',
+          result: 'success',
+          error_message: null,
+          id: 'pt-1',
+        })
+      );
     });
   });
 

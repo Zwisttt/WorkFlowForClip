@@ -15,6 +15,7 @@ export type AutomationItemStatus =
 export type AutomationBatchStatus =
   | 'validated'
   | 'running'
+  | 'paused'
   | 'awaiting_export_setup'
   | 'completed'
   | 'partial_failed'
@@ -176,4 +177,10 @@ export interface AutomationCoordinate {
 export interface AutomationExportSettings {
   coordinates: AutomationCoordinate[];
   ready: boolean;
+}
+
+export interface AutomationStopExportsResult {
+  stoppedWorker: boolean;
+  pausedBatches: number;
+  pausedItems: number;
 }

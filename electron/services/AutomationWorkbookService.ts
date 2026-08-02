@@ -57,6 +57,15 @@ function normalizeTemplateName(value: string): string {
   return raw;
 }
 
+function normalizeWorkName(value: string): string {
+  const raw = value.trim();
+  const compactTime = raw.match(/^(.*)_(\d{2})(\d{2})$/);
+  if (compactTime) return `${compactTime[1]} ${compactTime[2]}:${compactTime[3]}`;
+  const separatedTime = raw.match(/^(.*)_(\d{1,2}):(\d{2})$/);
+  if (separatedTime) return `${separatedTime[1]} ${separatedTime[2]}:${separatedTime[3]}`;
+  return raw;
+}
+
 function parseTopics(raw: string): string[] {
   const result: string[] = [];
   for (const part of raw.split(/[#＃,，\s]+/)) {
@@ -69,9 +78,9 @@ function parseTopics(raw: string): string[] {
 function datePart(value: ExcelJS.CellValue): string | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return [
-      value.getFullYear(),
-      String(value.getMonth() + 1).padStart(2, '0'),
-      String(value.getDate()).padStart(2, '0'),
+      value.getUTCFullYear(),
+      String(value.getUTCMonth() + 1).padStart(2, '0'),
+      String(value.getUTCDate()).padStart(2, '0'),
     ].join('-');
   }
   const raw = cellText(value);
@@ -82,7 +91,10 @@ function datePart(value: ExcelJS.CellValue): string | null {
 
 function timePart(value: ExcelJS.CellValue): string | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+    // Excel stores a time-only cell as a fraction of a UTC-based serial day.
+    // Local getters add the machine timezone (e.g. +8 hours in China), which
+    // can also roll the value into the following day.
+    return `${String(value.getUTCHours()).padStart(2, '0')}:${String(value.getUTCMinutes()).padStart(2, '0')}`;
   }
   if (typeof value === 'number' && value >= 0 && value < 1) {
     const totalMinutes = Math.round(value * 24 * 60);
@@ -107,9 +119,7 @@ function combineDateTime(date: ExcelJS.CellValue, time: ExcelJS.CellValue): stri
 
 function splitPublishCopy(copy: string): { title: string; description: string } {
   const trimmed = copy.trim();
-  return Array.from(trimmed).length < 30
-    ? { title: trimmed, description: '' }
-    : { title: '', description: trimmed };
+  return { title: '', description: trimmed };
 }
 
 function normalizeAccountName(value: string): string {
@@ -172,7 +182,7 @@ export class AutomationWorkbookService {
         const get = (header: typeof REQUIRED_HEADERS[number]) =>
           row.getCell(headers.get(header)!).value;
         const script = cellText(get('脚本'));
-        const workName = cellText(get('作品名字'));
+        const workName = normalizeWorkName(cellText(get('作品名字')));
         const templateName = normalizeTemplateName(cellText(get('模版名')));
         const publishCopy = cellText(get('发布文案'));
         const scheduledAt = combineDateTime(get('发布日期'), get('当天发布时间'));
@@ -270,4 +280,4 @@ export class AutomationWorkbookService {
 }
 
 export const automationWorkbookService = new AutomationWorkbookService();
-export { splitPublishCopy, parseTopics };
+export { combineDateTime, splitPublishCopy, parseTopics, normalizeWorkName };

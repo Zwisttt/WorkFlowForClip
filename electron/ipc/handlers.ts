@@ -28,6 +28,7 @@ import { automationService } from '../services/AutomationService';
 import type { PublishPreset, SavePublishPresetInput } from '../services/AccountPublishPresetService';
 import type { AutomationStartRequest, AutomationCoordinate } from '../services/types/automation';
 import { fingerprintTemplateRepo } from '../data/repositories/FingerprintTemplateRepository';
+import { platformConfigRepo } from '../data/repositories/PlatformConfigRepository';
 import { getIPLimitSettingsService } from '../services/ip-limit-settings';
 import { getAIRiskSettingsService } from '../services/ai-risk-settings';
 import { normalizePlatformId } from '../services/platform-normalizer';
@@ -241,6 +242,7 @@ const CHANNEL = {
   AUTOMATION_RESUME_BATCH: 'automation:resumeBatch',
   AUTOMATION_RETRY_ITEM: 'automation:retryItem',
   AUTOMATION_CANCEL_BATCH: 'automation:cancelBatch',
+  AUTOMATION_STOP_ALL_EXPORTS: 'automation:stopAllExports',
   AUTOMATION_EXPORT_SETTINGS: 'automation:exportSettings',
   AUTOMATION_CAPTURE_COORDINATE: 'automation:captureCoordinate',
   BROWSER_OPEN_URL: 'browser:openUrl',
@@ -812,14 +814,12 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.SETTINGS_GET, async (_e, key: string) => {
     try {
-      const db = getDatabase();
-      const stmt = db.prepare('SELECT value FROM platform_configs WHERE key = ?');
-      const row = stmt.get(key) as any;
-      if (row?.value) {
+      const row = await platformConfigRepo.findByKey('app', key);
+      if (row?.config_value) {
         try {
-          return JSON.parse(row.value);
+          return JSON.parse(row.config_value);
         } catch {
-          return row.value;
+          return row.config_value;
         }
       }
       return null;
@@ -830,13 +830,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(CHANNEL.SETTINGS_SET, async (_e, key: string, value: any) => {
     try {
-      const db = getDatabase();
-      const stmt = db.prepare(`
-        INSERT INTO platform_configs (key, value, updated_at)
-        VALUES (?, ?, datetime('now'))
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
-      `);
-      stmt.run(key, JSON.stringify(value));
+      await platformConfigRepo.upsert('app', key, JSON.stringify(value));
       return { success: true };
     } catch (error) {
       return { success: false, message: `${error}` };
@@ -1371,6 +1365,10 @@ export function registerIpcHandlers(): void {
       await automationService.cancelBatch(batchId);
       return null;
     });
+  });
+
+  ipcMain.handle(CHANNEL.AUTOMATION_STOP_ALL_EXPORTS, async () => {
+    return wrap(() => automationService.stopAllExports());
   });
 
   ipcMain.handle(CHANNEL.AUTOMATION_EXPORT_SETTINGS, async () => {

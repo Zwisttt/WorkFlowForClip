@@ -43,7 +43,11 @@ export class PublishTaskRepository extends BaseRepository<PublishTask> {
   }
 
   async markCompleted(id: string, result: string): Promise<PublishTask> {
-    return this.update(id, { status: 'completed', result } as Partial<PublishTask>);
+    return this.update(id, {
+      status: 'completed',
+      result,
+      error_message: null,
+    } as Partial<PublishTask>);
   }
 
   async markFailed(id: string, errorMessage: string): Promise<PublishTask> {

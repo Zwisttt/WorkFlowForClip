@@ -29,6 +29,8 @@ vi.mock('../../../electron/data/repositories/AutomationRepository', () => ({
 
 import {
   AutomationWorkbookService,
+  combineDateTime,
+  normalizeWorkName,
   splitPublishCopy,
 } from '../../../electron/services/AutomationWorkbookService';
 
@@ -41,10 +43,33 @@ afterEach(() => {
 });
 
 describe('AutomationWorkbookService', () => {
-  it('按 30 个 Unicode 字符拆分标题和描述', () => {
-    expect(splitPublishCopy('二十九字以内')).toEqual({ title: '二十九字以内', description: '' });
+  it('将发布文案全部放入作品简介并保持标题为空', () => {
+    expect(splitPublishCopy('二十九字以内')).toEqual({ title: '', description: '二十九字以内' });
     const longCopy = '星'.repeat(30);
     expect(splitPublishCopy(longCopy)).toEqual({ title: '', description: longCopy });
+  });
+
+  it('移除 Excel 作品名中错误的时间分隔字符', () => {
+    expect(normalizeWorkName('Stella 2026.7.29_1805')).toBe('Stella 2026.7.29 18:05');
+    expect(normalizeWorkName('luna 2026.7.31_1000')).toBe('luna 2026.7.31 10:00');
+    expect(normalizeWorkName('Stella 2026.7.29_0:20')).toBe('Stella 2026.7.29 0:20');
+    expect(normalizeWorkName('Stella 2026.7.29 09:20')).toBe('Stella 2026.7.29 09:20');
+  });
+
+  it('按 Excel UTC 序列时间解析，不受本机时区偏移', () => {
+    const dateCell = new Date(Date.UTC(2026, 7, 3));
+    const timeCell = new Date(Date.UTC(1899, 11, 30, 17, 32));
+    const parsed = combineDateTime(dateCell, timeCell);
+
+    expect(parsed).not.toBeNull();
+    const local = new Date(parsed!);
+    expect([
+      local.getFullYear(),
+      local.getMonth() + 1,
+      local.getDate(),
+      local.getHours(),
+      local.getMinutes(),
+    ]).toEqual([2026, 8, 3, 17, 32]);
   });
 
   it('读取新版表头、规范模板名并精确匹配 Sheet 账号', async () => {
@@ -92,8 +117,8 @@ describe('AutomationWorkbookService', () => {
     ]);
     expect(preview.rows[0]).toEqual(expect.objectContaining({
       templateName: 'Stella纯文案',
-      title: '短标题',
-      description: '',
+      title: '',
+      description: '短标题',
       topics: ['星座', '运势', '测试'],
       workName: '测试作品',
     }));

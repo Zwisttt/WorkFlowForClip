@@ -23,6 +23,7 @@ import type {
   AutomationExportSettings,
   AutomationItem,
   AutomationStartRequest,
+  AutomationStopExportsResult,
   AutomationTemplate,
   AutomationWorkbookPreview,
 } from './types/automation';
@@ -121,15 +122,37 @@ function isAuthOrRiskError(message: string): boolean {
   return /登录|Cookie|验证码|风控|账号异常|重新登录|安全验证/i.test(message);
 }
 
+export function earliestNativeScheduleTime(
+  startedAt: number,
+  rowCount: number,
+  exportWaitSeconds: number,
+  openWaitSeconds = 8,
+  homeWaitSeconds = 5,
+  stepPauseSeconds = 1,
+): number {
+  const perItemSeconds = Math.max(10, exportWaitSeconds)
+    + Math.max(1, openWaitSeconds)
+    + Math.max(1, homeWaitSeconds)
+    + Math.max(0.1, stepPauseSeconds) * 8;
+  const estimatedExportDone = startedAt
+    + Math.max(1, rowCount) * perItemSeconds * 1000
+    + 10 * 60 * 1000;
+  return estimatedExportDone + 2 * 60 * 60_000;
+}
+
 export class AutomationService {
   private runningBatches = new Set<string>();
+  private pausedBatches = new Set<string>();
   private localTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private stoppedAccounts = new Set<string>();
 
   async initialize(): Promise<void> {
+    // A force-quit can leave the Python worker alive. Stop the tracked process
+    // before inspecting recoverable tasks so startup never controls the mouse.
+    jianyingExportService.stop();
     await this.registerBundledLocalTemplates();
     const recoverable = await automationItemRepo.findRecoverable();
-    const batchesToResume = new Set<string>();
+    const batchesToPause = new Set<string>();
     for (const row of recoverable) {
       let item = itemFromRow(row);
       if (item.status === 'generating') {
@@ -151,12 +174,17 @@ export class AutomationService {
       const requiresPipeline = ['ready', 'draft_ready', 'video_ready'].includes(item.status)
         || item.accountPlans.some((plan) => plan.mode === 'native_schedule' && plan.status === 'ready');
       if (requiresPipeline) {
-        batchesToResume.add(item.batchId);
+        batchesToPause.add(item.batchId);
       } else {
         for (const plan of item.accountPlans) this.schedulePlan(item, plan);
       }
     }
-    for (const batchId of batchesToResume) void this.runBatch(batchId);
+    for (const batchId of batchesToPause) {
+      this.pausedBatches.add(batchId);
+      await automationBatchRepo.update(batchId, {
+        status: 'paused',
+      } as Partial<AutomationBatchRow>);
+    }
   }
 
   dispose(): void {
@@ -164,6 +192,7 @@ export class AutomationService {
     for (const timer of this.localTimers.values()) clearTimeout(timer);
     this.localTimers.clear();
     this.runningBatches.clear();
+    this.pausedBatches.clear();
   }
 
   async registerTemplate(draftPath: string, name?: string): Promise<AutomationTemplate> {
@@ -242,9 +271,15 @@ export class AutomationService {
     const lastTimeByAccount = new Map<string, number>();
     const batchWarnings: string[] = [];
     const now = Date.now();
-    const estimatedExportDone = now
-      + Math.max(1, preview.rows.length) * Math.max(10, request.exportWaitSeconds) * 1000
-      + 10 * 60 * 1000;
+    const earliestDouyinSchedule = earliestNativeScheduleTime(
+      now,
+      preview.rows.length,
+      request.exportWaitSeconds,
+      request.openWaitSeconds,
+      request.homeWaitSeconds,
+      request.stepPauseSeconds,
+    );
+    const estimatedExportDone = earliestDouyinSchedule - 2 * 60 * 60_000;
     const itemRows: Array<Omit<AutomationItemRow, 'created_at' | 'updated_at'>> = [];
 
     const sortedRows = [...preview.rows].sort((a, b) =>
@@ -294,8 +329,10 @@ export class AutomationService {
           );
         }
         if (account.platform === 'douyin') {
-          if (effectiveTime < now + 2 * 60 * 60_000) {
-            rowErrors.push(`发布时间：抖音账号 ${account.name} 必须至少提前 2 小时`);
+          if (effectiveTime < earliestDouyinSchedule) {
+            rowErrors.push(
+              `发布时间：抖音账号 ${account.name} 需晚于预计全部导出完成时间，并再预留 2 小时`,
+            );
           }
           if (effectiveTime > now + 30 * 24 * 60 * 60_000) {
             rowErrors.push(`发布时间：抖音账号 ${account.name} 最多提前 30 天`);
@@ -315,14 +352,18 @@ export class AutomationService {
         });
       }
 
-      const resolvedName = this.resolveUniqueName(
-        row.workName,
-        request.draftOutputDir,
-        request.videoOutputDir,
-        usedNames,
-      );
-      if (resolvedName !== sanitizeStem(row.workName)) {
-        rowWarnings.push(`作品同名，已由“${row.workName}”自动改为“${resolvedName}”`);
+      const resolvedName = sanitizeStem(row.workName);
+      const normalizedResolvedName = resolvedName.toLocaleLowerCase();
+      if (usedNames.has(normalizedResolvedName)) {
+        rowErrors.push(`作品名字：表格中存在重复名称“${resolvedName}”`);
+      }
+      if (fs.existsSync(path.join(request.draftOutputDir, resolvedName))) {
+        rowErrors.push(`作品名字：剪映草稿目录已存在“${resolvedName}”，请改名或先处理原草稿`);
+      }
+      if (this.listFiles(request.videoOutputDir, VIDEO_EXTENSIONS).some(
+        (file) => path.basename(file, path.extname(file)).toLocaleLowerCase() === normalizedResolvedName
+      )) {
+        rowErrors.push(`作品名字：视频导出目录已存在“${resolvedName}”，请改名或移走原视频`);
       }
       usedNames.add(resolvedName.toLocaleLowerCase());
       batchWarnings.push(...rowWarnings);
@@ -417,7 +458,10 @@ export class AutomationService {
   }
 
   async resumeBatch(batchId: string): Promise<void> {
-    if (this.runningBatches.has(batchId)) return;
+    if (this.runningBatches.has(batchId)) {
+      throw new Error('批次正在停止，请稍后再继续');
+    }
+    this.pausedBatches.delete(batchId);
     void this.runBatch(batchId);
   }
 
@@ -438,6 +482,7 @@ export class AutomationService {
   }
 
   async cancelBatch(batchId: string): Promise<void> {
+    this.pausedBatches.add(batchId);
     jianyingExportService.stop();
     for (const [key, timer] of this.localTimers) {
       if (key.startsWith(`${batchId}:`)) {
@@ -456,7 +501,49 @@ export class AutomationService {
       completed_at: nowISO(),
     } as Partial<AutomationBatchRow>);
     this.runningBatches.delete(batchId);
+    this.pausedBatches.delete(batchId);
     this.emitProgress(batchId, 'cancelled', '批次已取消');
+  }
+
+  async stopAllExports(): Promise<AutomationStopExportsResult> {
+    const activeBatches = await automationBatchRepo.findActive();
+    let pausedItems = 0;
+
+    // Mark batches first so a worker close event cannot advance to the next item.
+    for (const batch of activeBatches) this.pausedBatches.add(batch.id);
+    const stoppedWorker = jianyingExportService.stop();
+
+    for (const batch of activeBatches) {
+      const items = await automationItemRepo.findByBatch(batch.id);
+      for (const item of items) {
+        if (item.status !== 'exporting') continue;
+        await automationItemRepo.update(item.id, {
+          status: 'draft_ready',
+          error_stage: null,
+          error_message: null,
+          error_at: null,
+        } as Partial<AutomationItemRow>);
+        await automationItemRepo.recordEvent(
+          batch.id,
+          item.id,
+          'warning',
+          'export',
+          '剪映导出已由用户停止，可稍后继续批次',
+        );
+        pausedItems += 1;
+      }
+      await automationBatchRepo.update(batch.id, {
+        status: 'paused',
+        completed_at: null,
+      } as Partial<AutomationBatchRow>);
+      this.emitProgress(batch.id, 'paused', '所有剪映导出已停止，批次已暂停');
+    }
+
+    return {
+      stoppedWorker,
+      pausedBatches: activeBatches.length,
+      pausedItems,
+    };
   }
 
   async listBatches(): Promise<AutomationBatch[]> {
@@ -471,7 +558,7 @@ export class AutomationService {
   }
 
   private async runBatch(batchId: string): Promise<void> {
-    if (this.runningBatches.has(batchId)) return;
+    if (this.runningBatches.has(batchId) || this.pausedBatches.has(batchId)) return;
     this.runningBatches.add(batchId);
     try {
       const batchRow = await automationBatchRepo.findById(batchId);
@@ -485,8 +572,31 @@ export class AutomationService {
       let items = (await automationItemRepo.findByBatch(batchId)).map(itemFromRow);
       const templates = new Map((await this.listTemplates()).map((template) => [template.name, template]));
       const publicAudios = this.listFiles(batch.publicAudioDir, AUDIO_EXTENSIONS);
+      const readyItems = items.filter((value) => value.status === 'ready');
+      let generatedDraftCount = 0;
 
-      for (const item of items.filter((value) => value.status === 'ready')) {
+      if (readyItems.length > 0) {
+        try {
+          this.emitProgress(
+            batchId,
+            'prepare_generation',
+            '正在安全关闭剪映，避免草稿名被追加时间后缀',
+          );
+          await jianyingExportService.prepareForDraftGeneration();
+        } catch (error) {
+          await automationBatchRepo.update(batchId, {
+            status: 'awaiting_export_setup',
+          } as Partial<AutomationBatchRow>);
+          this.emitProgress(
+            batchId,
+            'awaiting_export_setup',
+            error instanceof Error ? error.message : String(error),
+          );
+          return;
+        }
+      }
+
+      for (const item of readyItems) {
         await this.updateItem(item.id, { status: 'generating' }, 'generate', '正在生成剪映草稿');
         const template = templates.get(item.templateName);
         if (!template) {
@@ -502,6 +612,7 @@ export class AutomationService {
             'generate',
             `草稿已生成：${draftPath}`,
           );
+          generatedDraftCount += 1;
         } catch (error) {
           await this.failItem(item, 'generate', error instanceof Error ? error.message : String(error));
         }
@@ -510,8 +621,22 @@ export class AutomationService {
 
       items = (await automationItemRepo.findByBatch(batchId)).map(itemFromRow);
       const exportCandidates = items.filter((item) => item.status === 'draft_ready');
+      if (this.pausedBatches.has(batchId)) {
+        await automationBatchRepo.update(batchId, {
+          status: 'paused',
+        } as Partial<AutomationBatchRow>);
+        return;
+      }
       if (exportCandidates.length > 0) {
         try {
+          if (generatedDraftCount > 0) {
+            this.emitProgress(
+              batchId,
+              'draft_refresh_wait',
+              `全部 ${generatedDraftCount} 个草稿已生成，正在启动剪映并等待 10 秒加载草稿`,
+            );
+            await jianyingExportService.launchEditorAndWait(10);
+          }
           await jianyingExportService.checkReady();
         } catch (error) {
           await automationBatchRepo.update(batchId, {
@@ -526,12 +651,14 @@ export class AutomationService {
         }
       }
 
-      for (const item of exportCandidates) {
+      for (const [exportIndex, item] of exportCandidates.entries()) {
+        if (this.pausedBatches.has(batchId)) break;
         const startedAt = Date.now();
         await this.updateItem(item.id, { status: 'exporting' }, 'export', '正在控制剪映导出');
         try {
           await jianyingExportService.exportOne({
-            draftName: item.resolvedWorkName,
+            draftName: item.workName,
+            clearPreviousSearch: exportIndex > 0,
             openWaitSeconds: Number(batch.exportSettings.openWaitSeconds ?? 8),
             exportWaitSeconds: Number(batch.exportSettings.exportWaitSeconds ?? 60),
             homeWaitSeconds: Number(batch.exportSettings.homeWaitSeconds ?? 5),
@@ -539,7 +666,7 @@ export class AutomationService {
           }, (stage, message) => this.emitProgress(batchId, stage, message, item.id));
           const videoPath = this.findExportedVideo(
             batch.videoOutputDir,
-            item.resolvedWorkName,
+            [item.workName, item.resolvedWorkName],
             startedAt,
           );
           if (!videoPath) {
@@ -554,6 +681,15 @@ export class AutomationService {
             `视频已就绪：${videoPath}`,
           );
         } catch (error) {
+          if (this.pausedBatches.has(batchId)) {
+            await automationItemRepo.update(item.id, {
+              status: 'draft_ready',
+              error_stage: null,
+              error_message: null,
+              error_at: null,
+            } as Partial<AutomationItemRow>);
+            break;
+          }
           await this.failItem(item, 'export', error instanceof Error ? error.message : String(error));
         }
         await this.refreshProgress(batchId);
@@ -588,7 +724,7 @@ export class AutomationService {
         return jianyingTemplateService.generate(
           template,
           batch.draftOutputDir,
-          item.resolvedWorkName,
+          item.workName,
           {
             script: item.script,
             backgroundPath: item.backgroundPath,
@@ -651,6 +787,16 @@ export class AutomationService {
     const oldTimer = this.localTimers.get(key);
     if (oldTimer) clearTimeout(oldTimer);
     const remaining = new Date(plan.scheduledAt).getTime() - Date.now();
+    if (plan.mode === 'local_schedule' && plan.status === 'ready' && remaining <= 0) {
+      void this.updatePlan(
+        item,
+        plan,
+        'failed',
+        undefined,
+        `已错过定时发布时间 ${new Date(plan.scheduledAt).toLocaleString()}，未自动改为立即发布`,
+      ).then(() => this.syncItemPlanStatus(item.id));
+      return;
+    }
     const timeout = Math.max(0, Math.min(remaining, LOCAL_TIMER_MAX_MS));
     const timer = setTimeout(() => {
       this.localTimers.delete(key);
@@ -831,35 +977,16 @@ export class AutomationService {
     this.emitProgress(batchId, 'progress', `批次进度 ${progress}%`);
   }
 
-  private resolveUniqueName(
-    workName: string,
-    draftOutputDir: string,
-    videoOutputDir: string,
-    usedNames: Set<string>,
-  ): string {
-    const base = sanitizeStem(workName);
-    let candidate = base;
-    let suffix = 2;
-    const exists = (name: string) => {
-      if (usedNames.has(name.toLocaleLowerCase())) return true;
-      if (fs.existsSync(path.join(draftOutputDir, name))) return true;
-      return this.listFiles(videoOutputDir, VIDEO_EXTENSIONS).some(
-        (file) => path.basename(file, path.extname(file)).toLocaleLowerCase() === name.toLocaleLowerCase(),
-      );
-    };
-    while (exists(candidate)) {
-      candidate = `${base}_${String(suffix).padStart(3, '0')}`;
-      suffix += 1;
-    }
-    return candidate;
-  }
-
-  private findExportedVideo(directory: string, workName: string, startedAt: number): string | undefined {
-    const normalized = workName.toLocaleLowerCase();
+  private findExportedVideo(directory: string, workNames: string[], startedAt: number): string | undefined {
+    const normalizedNames = workNames.map((workName) => workName.toLocaleLowerCase());
     return this.listFiles(directory, VIDEO_EXTENSIONS)
       .filter((file) => {
         const stem = path.basename(file, path.extname(file)).toLocaleLowerCase();
-        return stem === normalized || stem.startsWith(`${normalized}_`) || stem.startsWith(`${normalized} `);
+        return normalizedNames.some(
+          (normalized) => stem === normalized
+            || stem.startsWith(`${normalized}_`)
+            || stem.startsWith(`${normalized} `),
+        );
       })
       .filter((file) => fs.statSync(file).mtimeMs >= startedAt - 5_000)
       .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];

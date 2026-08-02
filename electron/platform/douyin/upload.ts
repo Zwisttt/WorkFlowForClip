@@ -13,6 +13,8 @@ import { toPlatformError, NetworkError, AuthError, SelectorError, ValidationErro
 import { getDebugRecorder } from '../base/DebugRecorder';
 import { formatScheduleDateTime, isScheduleDateTimeValueApplied } from '../base/utils/schedule';
 import { PRE_PUBLISH_CONFIRMATION_DELAY_MS, PRE_PUBLISH_CONFIRMATION_DELAY_SECONDS } from '../base/publishTiming';
+import { typeEmbeddedInputValue, typeEmbeddedScheduleTime } from './schedule-input';
+import { calendarNavigationDirection, parseSemiCalendarMonthLabel } from './schedule-calendar';
 import { browserManager } from '../../services/embedded-browser/browser-manager';
 import { createBrowserLauncher } from '../../services/browser-launcher';
 import type { IBrowserLauncher, BrowserConfig } from '../../services/types';
@@ -61,8 +63,8 @@ function shouldDebugSteps(ctx: UploadContext): boolean {
 }
 
 function shouldKeepBrowserOnPublishFailure(): boolean {
-  return process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === '1'
-    || process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL === 'true';
+  const configured = process.env.MATRIXFLOW_KEEP_BROWSER_ON_FAIL?.toLocaleLowerCase();
+  return configured !== '0' && configured !== 'false';
 }
 
 function errorMessage(error: unknown): string {
@@ -378,12 +380,14 @@ async function uploadVideoInEmbeddedBrowser(ctx: UploadContext): Promise<UploadR
 
     // Handle schedule if needed
     const scheduleMode = ctx.scheduleMode || (ctx.scheduledAt ? 'scheduled' : 'immediate');
+    let expectedScheduleTime: string | undefined;
     if (scheduleMode === 'scheduled') {
       const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
       if (scheduleTime) {
+        expectedScheduleTime = scheduleTime;
         await runEmbeddedDebugStep(wc, ctx, '设置定时发布', async () => {
           const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
-          if (!mapped) throw new ValidationError('未映射抖音定时发布时间', undefined, 'douyin');
+          if (!mapped) throw new ValidationError('抖音定时发布时间设置失败，已停止发布以避免使用错误时间', undefined, 'douyin');
         });
       }
     }
@@ -399,6 +403,17 @@ async function uploadVideoInEmbeddedBrowser(ctx: UploadContext): Promise<UploadR
     });
 
     if (publishState === 'success') {
+      if (expectedScheduleTime) {
+        const verified = await verifyEmbeddedPublishedSchedule(
+          wc,
+          expectedScheduleTime,
+          path.basename(videoPath, path.extname(videoPath)),
+        );
+        if (verified === false) {
+          failureMessage = `抖音作品管理页的实际定时时间与计划不一致：${expectedScheduleTime}`;
+          return { success: false, message: failureMessage };
+        }
+      }
       publishSucceeded = true;
       logger.info('账号浏览器弹窗抖音发布成功');
       return { success: true, message: '视频发布成功', videoId: extractVideoId(wc.getURL()) };
@@ -895,12 +910,14 @@ async function fillEmbeddedDescriptionAndTags(
 ): Promise<void> {
   logger.info('在内嵌浏览器中填写抖音视频标题、描述和话题...');
 
-  const titleText = (title || '未命名视频').trim();
+  const titleText = title.trim();
   const normalizedTags = TopicSanitizer.cleanTopics(tags ?? [], { maxTopics: 5, platform: 'douyin' });
   const descriptionText = description?.trim() ?? '';
   const riskControl = new EmbeddedRiskControl(wc);
 
-  // Fill title
+  // Always write the requested title, including an empty string. Douyin may
+  // prefill the video filename, so skipping this field would leave a title
+  // behind even when the workbook intentionally requests an empty title.
   const titleSet = await setEmbeddedTextFieldByLabel(
     wc,
     [/标题/, /^标题$/],
@@ -908,11 +925,11 @@ async function fillEmbeddedDescriptionAndTags(
     titleText,
   );
   if (!titleSet) {
-    logger.warn('未找到抖音标题输入框，将标题合并到描述中');
+    logger.warn('未找到抖音标题输入框');
   }
 
   // Fill description
-  const descContent = titleSet
+  const descContent = titleSet || !titleText
     ? descriptionText
     : [titleText, descriptionText].filter(Boolean).join('\n');
 
@@ -1035,6 +1052,71 @@ async function realClickEmbeddedByText(wc: WebContents, targetText: string): Pro
   return true;
 }
 
+async function realClickEmbeddedSelector(
+  wc: WebContents,
+  selector: string,
+  expectedText?: string,
+): Promise<boolean> {
+  const coords = await wc.executeJavaScript(`
+    (() => {
+      const selector = ${JSON.stringify(selector)};
+      const expectedText = ${JSON.stringify(expectedText ?? '')};
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const element = Array.from(document.querySelectorAll(selector)).find((el) => {
+        if (!(el instanceof HTMLElement) || !isVisible(el)) return false;
+        if (!expectedText) return true;
+        const text = (el.textContent || '').trim();
+        return text === expectedText || text.startsWith(expectedText + ' ');
+      });
+      if (!(element instanceof HTMLElement)) return null;
+      element.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = element.getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+    })()
+  `, true).catch(() => null) as { x: number; y: number } | null;
+  if (!coords) return false;
+  wc.sendInputEvent({ type: 'mouseMove', x: coords.x, y: coords.y } as Electron.MouseInputEvent);
+  await sleep(50);
+  wc.sendInputEvent({ type: 'mouseDown', x: coords.x, y: coords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+  await sleep(30);
+  wc.sendInputEvent({ type: 'mouseUp', x: coords.x, y: coords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+  return true;
+}
+
+async function realClickEmbeddedDateTimeInput(wc: WebContents): Promise<boolean> {
+  const coords = await wc.executeJavaScript(`
+    (() => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const input = Array.from(document.querySelectorAll('input')).find((el) => {
+        if (!(el instanceof HTMLInputElement) || !isVisible(el) || el.disabled) return false;
+        const placeholder = el.getAttribute('placeholder') || '';
+        return /日期和时间/.test(placeholder)
+          || el.type === 'datetime-local'
+          || /^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2} +[0-9]{1,2}:[0-9]{2}$/.test(el.value.trim());
+      });
+      if (!(input instanceof HTMLInputElement)) return null;
+      input.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = input.getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+    })()
+  `, true).catch(() => null) as { x: number; y: number } | null;
+  if (!coords) return false;
+  wc.sendInputEvent({ type: 'mouseMove', x: coords.x, y: coords.y } as Electron.MouseInputEvent);
+  await sleep(50);
+  wc.sendInputEvent({ type: 'mouseDown', x: coords.x, y: coords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+  await sleep(30);
+  wc.sendInputEvent({ type: 'mouseUp', x: coords.x, y: coords.y, button: 'left', clickCount: 1 } as Electron.MouseInputEvent);
+  return true;
+}
+
 async function setEmbeddedDeclaration(wc: WebContents, declarationValue: string): Promise<void> {
   const targetText = DOUYIN_DECLARATION_MAP[declarationValue];
   if (!targetText) {
@@ -1101,7 +1183,196 @@ async function setEmbeddedSavePermission(wc: WebContents, allowSave: boolean): P
   await sleep(500);
 }
 
+async function focusEmbeddedSchedulePart(
+  wc: WebContents,
+  part: 'date' | 'time',
+): Promise<boolean> {
+  return await wc.executeJavaScript(`
+    (() => {
+      const part = ${JSON.stringify(part)};
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const candidates = Array.from(document.querySelectorAll('input'))
+        .filter((el) => el instanceof HTMLInputElement && isVisible(el) && !el.disabled && !el.readOnly)
+        .map((el) => {
+          const value = el.value.trim();
+          const attrs = [
+            el.getAttribute('placeholder') || '',
+            el.getAttribute('aria-label') || '',
+            el.getAttribute('type') || '',
+          ].join(' ');
+          const classes = (el.getAttribute('class') || '') + ' '
+            + (el.parentElement?.getAttribute('class') || '');
+          const inPicker = Boolean(el.closest('[class*="datepicker"], [class*="date-picker"], [class*="picker"]'));
+          let score = 0;
+          if (part === 'date') {
+            if (/^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}$/.test(value)) score += 160;
+            if (/选择日期|^日期$|date/i.test(attrs)) score += 80;
+            if (/time/i.test(attrs) || /^[0-9]{1,2}:[0-9]{2}$/.test(value)) score -= 200;
+          } else {
+            if (/^[0-9]{1,2}:[0-9]{2}$/.test(value)) score += 160;
+            if (/选择时间|^时间$|time/i.test(attrs)) score += 80;
+            if (/date/i.test(attrs) || /^[0-9]{4}[-/]/.test(value)) score -= 200;
+          }
+          if (inPicker) score += 100;
+          if (/datepicker|date-time|datetime|time-picker/i.test(classes)) score += 40;
+          return { el, score };
+        })
+        .filter((candidate) => candidate.score >= 120)
+        .sort((a, b) => b.score - a.score);
+      const input = candidates[0]?.el;
+      if (!(input instanceof HTMLInputElement)) return false;
+      input.scrollIntoView({ block: 'center', inline: 'nearest' });
+      input.click();
+      input.focus();
+      return document.activeElement === input;
+    })()
+  `, true).catch(() => false) as boolean;
+}
+
 async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): Promise<boolean> {
+  logger.info(`按日历面板设置抖音定时发布时间: ${scheduleTime}`);
+  const match = scheduleTime.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2}) +([0-9]{2}):([0-9]{2})$/);
+  if (!match) return false;
+  const [, rawYear, rawMonth, rawDay, hour, minute] = match;
+  const year = Number(rawYear);
+  const month = Number(rawMonth);
+  const dateIso = `${rawYear}-${rawMonth}-${rawDay}`;
+
+  // The label text is nested inside Douyin's custom radio. A coordinate click
+  // on the innermost span can be swallowed; the existing DOM click helper
+  // resolves the clickable ancestor and reliably fires the radio's handler.
+  const selected = await clickEmbeddedText(wc, [/^定时发布$/, /^定时$/])
+    || await realClickEmbeddedByText(wc, '定时发布');
+  await sleep(800);
+
+  const focusDateInput = async (): Promise<boolean> => realClickEmbeddedDateTimeInput(wc);
+
+  if (!selected && !(await focusDateInput())) {
+    logger.warn('未找到抖音定时发布入口或日期和时间输入框');
+    return false;
+  }
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    let inputOpened = false;
+    for (let waitAttempt = 0; waitAttempt < 10 && !inputOpened; waitAttempt += 1) {
+      inputOpened = await focusDateInput();
+      if (!inputOpened) await sleep(300);
+    }
+    if (!inputOpened) {
+      logger.warn(`等待抖音日期和时间输入框超时，attempt=${attempt}`);
+      continue;
+    }
+    await sleep(attempt === 1 ? 800 : 400);
+
+    const panelVisible = await wc.executeJavaScript(`
+      (() => {
+        const panel = document.querySelector('.semi-datepicker-month-grid')?.closest('.semi-datepicker');
+        if (!(panel instanceof HTMLElement)) return false;
+        const rect = panel.getBoundingClientRect();
+        const style = window.getComputedStyle(panel);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      })()
+    `, true).catch(() => false) as boolean;
+    if (!panelVisible) {
+      logger.warn(`抖音日历面板未出现，回退文本输入，attempt=${attempt}`);
+      return setEmbeddedScheduleTimeLegacy(wc, scheduleTime);
+    }
+
+    for (let navigation = 0; navigation < 24; navigation += 1) {
+      const monthLabel = await wc.executeJavaScript(`
+        (() => {
+          const panel = document.querySelector('.semi-datepicker-month-grid')?.closest('.semi-datepicker');
+          const label = panel?.querySelector('.semi-datepicker-navigation-month');
+          return (label?.textContent || '').trim();
+        })()
+      `, true).catch(() => '') as string;
+      const current = parseSemiCalendarMonthLabel(monthLabel);
+      if (!current) {
+        logger.warn(`无法解析抖音日历月份标题: ${monthLabel}`);
+        break;
+      }
+      const direction = calendarNavigationDirection(current, { year, month });
+      if (direction === 'done') break;
+      const moved = await realClickEmbeddedSelector(wc,
+        direction === 'next'
+          ? '.semi-datepicker-month-grid .semi-datepicker-navigation button:last-of-type'
+          : '.semi-datepicker-month-grid .semi-datepicker-navigation button:first-of-type',
+      );
+      if (!moved) break;
+      await sleep(300);
+    }
+
+    const dayClicked = await realClickEmbeddedSelector(
+      wc,
+      `.semi-datepicker-month-grid .semi-datepicker-day[title="${dateIso}"]:not(.semi-datepicker-day-disabled)`,
+    );
+    if (!dayClicked) {
+      logger.warn(`抖音日历未找到目标日期: ${dateIso}, attempt=${attempt}`);
+      continue;
+    }
+    await sleep(300);
+
+    const timePanelOpened = await realClickEmbeddedSelector(
+      wc,
+      '.semi-datepicker-month-grid .semi-datepicker-switch-time',
+    );
+    if (timePanelOpened) await sleep(300);
+
+    const hourSelected = await realClickEmbeddedSelector(
+      wc,
+      '.semi-datepicker-month-grid .undefined-list-hour li, .semi-datepicker-month-grid .semi-timepicker-list-hour [role="option"], .semi-datepicker-month-grid .semi-timepicker-list-hour li',
+      hour,
+    );
+    if (hourSelected) await sleep(200);
+    const minuteSelected = await realClickEmbeddedSelector(
+      wc,
+      '.semi-datepicker-month-grid .undefined-list-minute li, .semi-datepicker-month-grid .semi-timepicker-list-minute [role="option"], .semi-datepicker-month-grid .semi-timepicker-list-minute li',
+      minute,
+    );
+    const timeSelected = hourSelected && minuteSelected;
+    if (!timeSelected) {
+      logger.warn(`抖音时间面板未选中 ${hour}:${minute}, attempt=${attempt}`);
+      continue;
+    }
+    await sleep(300);
+
+    const confirmed = await realClickEmbeddedSelector(
+      wc,
+      '.semi-datepicker-month-grid .semi-datepicker-footer button.semi-button-solid',
+    ) || await realClickEmbeddedByText(wc, '确定')
+      || await realClickEmbeddedByText(wc, '确认')
+      || await realClickEmbeddedByText(wc, '完成');
+    if (!confirmed) {
+      wc.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+      wc.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+    }
+    await sleep(500);
+
+    const actual = await wc.executeJavaScript(`
+      (() => {
+        const input = Array.from(document.querySelectorAll('input')).find((el) =>
+          el instanceof HTMLInputElement && (
+            /日期和时间/.test(el.getAttribute('placeholder') || '')
+            || el.type === 'datetime-local'
+            || /^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2} +[0-9]{1,2}:[0-9]{2}$/.test(el.value.trim())
+          )
+        );
+        return input instanceof HTMLInputElement ? input.value : '';
+      })()
+    `, true).catch(() => '') as string;
+    logger.info(`抖音日历定时回读: 期望=${scheduleTime} 实际=${actual} attempt=${attempt}`);
+    if (isScheduleDateTimeValueApplied(actual, scheduleTime)) return true;
+  }
+
+  logger.warn(`抖音日历定时时间未成功写入: ${scheduleTime}`);
+  return false;
+}
+
+async function setEmbeddedScheduleTimeLegacy(wc: WebContents, scheduleTime: string): Promise<boolean> {
   logger.info(`设置内嵌抖音定时发布时间: ${scheduleTime}`);
 
   const selected = await clickEmbeddedText(wc, [/定时发布/, /^定时$/]);
@@ -1118,9 +1389,11 @@ async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): P
           el.getAttribute('placeholder') || '',
           el.getAttribute('aria-label') || '',
           el.getAttribute('type') || '',
-          el.getAttribute('class') || '',
         ].join(' ');
-        return /日期和时间|日期|时间|datetime-local|semi-input/.test(attrs);
+        const classes = (el.getAttribute('class') || '') + ' ' + (el.parentElement?.getAttribute('class') || '');
+        return /日期和时间|选择日期|发布时间|datetime-local|date|time/i.test(attrs)
+          || /datepicker|date-time|datetime/i.test(classes)
+          || /^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2} +[0-9]{1,2}:[0-9]{2}$/.test(el.value.trim());
       });
     })()
   `, true).catch(() => false);
@@ -1131,9 +1404,8 @@ async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): P
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     await sleep(attempt === 1 ? 800 : 400);
-    const result = await wc.executeJavaScript(`
+    const focused = await wc.executeJavaScript(`
       (() => {
-        const value = ${JSON.stringify(scheduleTime)};
         const isVisible = (el) => {
           const rect = el.getBoundingClientRect();
           const style = window.getComputedStyle(el);
@@ -1141,53 +1413,102 @@ async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): P
         };
         const findInput = () => Array.from(document.querySelectorAll('input'))
           .filter((el) => el instanceof HTMLInputElement && isVisible(el) && !el.disabled && !el.readOnly)
-          .find((el) => {
+          .map((el) => {
             const attrs = [
               el.getAttribute('placeholder') || '',
               el.getAttribute('aria-label') || '',
               el.getAttribute('type') || '',
-              el.getAttribute('class') || '',
             ].join(' ');
-            return /日期和时间|日期|时间|datetime-local|semi-input/.test(attrs);
-          });
-        const dispatchValue = (input, nextValue) => {
-          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-          if (setter) {
-            setter.call(input, nextValue);
-          } else {
-            input.value = nextValue;
-          }
-          input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: nextValue }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-        };
+            const classes = (el.getAttribute('class') || '') + ' ' + (el.parentElement?.getAttribute('class') || '');
+            let context = '';
+            let node = el.parentElement;
+            for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
+              const text = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+              if (text.length <= 300) context += ' ' + text;
+            }
+            let score = 0;
+            if (/日期和时间|选择日期|发布时间/i.test(attrs)) score += 120;
+            if (/datetime-local|date|time/i.test(el.type)) score += 120;
+            if (/^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2} +[0-9]{1,2}:[0-9]{2}$/.test(el.value.trim())) score += 100;
+            if (/datepicker|date-time|datetime/i.test(classes)) score += 80;
+            if (/定时发布|发布时间/.test(context)) score += 60;
+            return { el, score };
+          })
+          .filter((candidate) => candidate.score >= 60)
+          .sort((a, b) => b.score - a.score)[0]?.el;
         const input = findInput();
-        if (!(input instanceof HTMLInputElement)) {
-          return { found: false, value: '' };
-        }
+        if (!(input instanceof HTMLInputElement)) return false;
         input.scrollIntoView({ block: 'center', inline: 'nearest' });
         input.click();
         input.focus();
-        dispatchValue(input, '');
-        dispatchValue(input, value);
-        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
-        input.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true }));
+        return document.activeElement === input;
+      })()
+    `, true).catch(() => false) as boolean;
 
+    if (!focused) {
+      logger.warn(`未找到抖音定时发布时间输入框，attempt=${attempt}`);
+      continue;
+    }
+
+    // Douyin's current DatePicker has an outer combined field and two inner
+    // fields in the popup. Fill the date and time independently; typing the
+    // combined value into the outer field can update only the date while the
+    // time silently stays at the default earliest slot.
+    const parts = scheduleTime.match(/^([0-9]{4}-[0-9]{2}-[0-9]{2}) +([0-9]{2}:[0-9]{2})$/);
+    let structuredInputApplied = false;
+    if (parts && await focusEmbeddedSchedulePart(wc, 'date')) {
+      typeEmbeddedInputValue(wc, parts[1], 'Tab');
+      await sleep(300);
+      if (await focusEmbeddedSchedulePart(wc, 'time')) {
+        typeEmbeddedInputValue(wc, parts[2], 'Enter');
+        structuredInputApplied = true;
+      }
+    }
+    if (!structuredInputApplied) {
+      logger.warn('未找到抖音日期弹窗的独立日期/时间输入框，回退到组合输入');
+      const combinedFocused = await wc.executeJavaScript(`
+        (() => {
+          const isVisible = (el) => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+          };
+          const input = Array.from(document.querySelectorAll('input')).find((el) =>
+            el instanceof HTMLInputElement
+            && isVisible(el)
+            && /^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2} +[0-9]{1,2}:[0-9]{2}$/.test(el.value.trim())
+          );
+          if (!(input instanceof HTMLInputElement)) return false;
+          input.click();
+          input.focus();
+          return document.activeElement === input;
+        })()
+      `, true).catch(() => false);
+      if (combinedFocused) typeEmbeddedScheduleTime(wc, scheduleTime);
+    }
+    await sleep(500);
+
+    await wc.executeJavaScript(`
+      (() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
         const confirmBtn = Array.from(document.querySelectorAll('.semi-datepicker-footer button, button, [role="button"]'))
           .find((el) => {
             if (!(el instanceof HTMLElement) || !isVisible(el)) return false;
             const text = (el.innerText || el.textContent || '').trim();
             return /^确定$|^确认$|^完成$/.test(text);
           });
-        if (confirmBtn instanceof HTMLElement) confirmBtn.click();
-        input.blur();
-        return { found: true, value: input.value };
+        if (confirmBtn instanceof HTMLElement) {
+          confirmBtn.click();
+          return true;
+        }
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        return false;
       })()
-    `, true).catch(() => ({ found: false, value: '' })) as { found: boolean; value: string };
-
-    if (!result.found) {
-      logger.warn(`未找到抖音定时发布时间输入框，attempt=${attempt}`);
-      continue;
-    }
+    `, true).catch(() => false);
 
     await sleep(500);
     const actual = await wc.executeJavaScript(`
@@ -1199,27 +1520,100 @@ async function setEmbeddedScheduleTime(wc: WebContents, scheduleTime: string): P
         };
         const input = Array.from(document.querySelectorAll('input'))
           .filter((el) => el instanceof HTMLInputElement && isVisible(el))
-          .find((el) => {
+          .map((el) => {
             const attrs = [
               el.getAttribute('placeholder') || '',
               el.getAttribute('aria-label') || '',
               el.getAttribute('type') || '',
-              el.getAttribute('class') || '',
             ].join(' ');
-            return /日期和时间|日期|时间|datetime-local|semi-input/.test(attrs);
-          });
+            const classes = (el.getAttribute('class') || '') + ' ' + (el.parentElement?.getAttribute('class') || '');
+            let context = '';
+            let node = el.parentElement;
+            for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
+              const text = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+              if (text.length <= 300) context += ' ' + text;
+            }
+            let score = 0;
+            if (/日期和时间|选择日期|发布时间/i.test(attrs)) score += 120;
+            if (/datetime-local|date|time/i.test(el.type)) score += 120;
+            if (/^[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2} +[0-9]{1,2}:[0-9]{2}$/.test(el.value.trim())) score += 100;
+            if (/datepicker|date-time|datetime/i.test(classes)) score += 80;
+            if (/定时发布|发布时间/.test(context)) score += 60;
+            return { el, score };
+          })
+          .filter((candidate) => candidate.score >= 60)
+          .sort((a, b) => b.score - a.score)[0]?.el;
         return input instanceof HTMLInputElement ? input.value : '';
       })()
-    `, true).catch(() => result.value) as string;
+    `, true).catch(() => '') as string;
 
-    logger.info(`抖音定时发布回读: 期望=${scheduleTime} 实际=${actual || result.value} attempt=${attempt}`);
-    if (isScheduleDateTimeValueApplied(actual || result.value, scheduleTime)) {
+    logger.info(`抖音定时发布回读: 期望=${scheduleTime} 实际=${actual} attempt=${attempt}`);
+    if (isScheduleDateTimeValueApplied(actual, scheduleTime)) {
       return true;
     }
   }
 
   logger.warn(`抖音定时发布时间未成功写入: ${scheduleTime}`);
   return false;
+}
+
+async function verifyEmbeddedPublishedSchedule(
+  wc: WebContents,
+  expected: string,
+  workName: string,
+): Promise<boolean | undefined> {
+  const match = expected.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
+  if (!match) return undefined;
+  const [, year, month, day, hour, minute] = match;
+  const variants = [
+    expected,
+    `${year}/${month}/${day} ${hour}:${minute}`,
+    `${year}年${month}月${day}日 ${hour}:${minute}`,
+    `${year}年${Number(month)}月${Number(day)}日 ${Number(hour)}:${minute}`,
+  ];
+  const workNameVariants = [
+    workName,
+    workName.replace(/_(\d{2})$/, ':$1'),
+    workName.replace(/_/g, ' '),
+  ];
+  let sawManageSchedule = false;
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (wc.isDestroyed()) return undefined;
+    const state = await wc.executeJavaScript(`
+      (() => {
+        const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+        const workNames = ${JSON.stringify(workNameVariants)};
+        const candidates = Array.from(document.querySelectorAll('article, li, [class*="card"], [class*="item"], div'))
+          .map((el) => normalize(el.innerText || el.textContent))
+          .filter((text) => workNames.some((name) => text.includes(name)) && text.length <= 4000)
+          .sort((a, b) => a.length - b.length);
+        return {
+          url: location.href,
+          text: normalize(document.body?.innerText),
+          itemText: candidates[0] || '',
+        };
+      })()
+    `, true).catch(() => ({ url: wc.getURL(), text: '', itemText: '' })) as {
+      url: string;
+      text: string;
+      itemText: string;
+    };
+    if (state.itemText && variants.some((value) => state.itemText.includes(value))) {
+      logger.info(`抖音作品管理页定时时间校验通过: ${expected}`);
+      return true;
+    }
+    if (state.url.includes('/content/manage') && state.itemText && /定时发布中|定时：/.test(state.itemText)) {
+      sawManageSchedule = true;
+    }
+    await sleep(500);
+  }
+  if (sawManageSchedule) {
+    logger.error(`抖音作品管理页未找到期望定时时间: ${expected}`);
+    return false;
+  }
+  logger.warn(`未能在抖音作品管理页复核定时时间: ${expected}`);
+  return undefined;
 }
 
 async function clickEmbeddedText(wc: WebContents, patterns: TextPattern[]): Promise<boolean> {
@@ -1495,12 +1889,14 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     }
 
     const scheduleMode = ctx.scheduleMode || (ctx.scheduledAt ? 'scheduled' : 'immediate');
+    let expectedScheduleTime: string | undefined;
     if (scheduleMode === 'scheduled') {
       const scheduleTime = formatScheduleDateTime(ctx.scheduledAt);
       if (scheduleTime) {
+        expectedScheduleTime = scheduleTime;
         await runEmbeddedDebugStep(wc, ctx, '设置定时发布', async () => {
           const mapped = await setEmbeddedScheduleTime(wc, scheduleTime);
-          if (!mapped) throw new ValidationError('未映射抖音定时发布时间', undefined, 'douyin');
+          if (!mapped) throw new ValidationError('抖音定时发布时间设置失败，已停止发布以避免使用错误时间', undefined, 'douyin');
         });
       }
     }
@@ -1512,6 +1908,19 @@ async function uploadVideoInStandaloneBrowser(ctx: UploadContext): Promise<Uploa
     });
 
     if (publishState === 'success') {
+      if (expectedScheduleTime) {
+        const verified = await verifyEmbeddedPublishedSchedule(
+          wc,
+          expectedScheduleTime,
+          path.basename(videoPath, path.extname(videoPath)),
+        );
+        if (verified === false) {
+          return {
+            success: false,
+            message: `抖音作品管理页的实际定时时间与计划不一致：${expectedScheduleTime}`,
+          };
+        }
+      }
       publishSucceeded = true;
       logger.info('账号浏览器弹窗抖音发布成功');
       return { success: true, message: '视频发布成功', videoId: extractVideoId(wc.getURL()) };
@@ -1694,8 +2103,13 @@ async function fillVideoMetadata(
       const titleInput = page.locator(UPLOAD_SELECTORS.titleInput).first();
       await titleInput.waitFor({ state: 'visible', timeout: 10000 });
       await rc.humanClick(UPLOAD_SELECTORS.titleInput);
-      await rc.humanType(UPLOAD_SELECTORS.titleInput, title);
-      logger.info(`标题已填写: ${title}`);
+      await titleInput.fill('');
+      if (title.trim()) {
+        await rc.humanType(UPLOAD_SELECTORS.titleInput, title.trim());
+        logger.info(`标题已填写: ${title.trim()}`);
+      } else {
+        logger.info('作品标题已清空，发布文案仅写入作品简介');
+      }
 
       if (description) {
         try {

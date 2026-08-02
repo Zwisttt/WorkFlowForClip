@@ -43,7 +43,6 @@ const logger = new Logger('Main');
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 app.commandLine.appendSwitch('disable-features', 'AutomationControlled');
 app.commandLine.appendSwitch('force-webrtc-ip-handling-policy', 'default_public_interface_only');
-
 let mainWindow: BrowserWindow | null = null;
 
 async function createWindow() {

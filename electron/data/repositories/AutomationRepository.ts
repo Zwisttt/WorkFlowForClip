@@ -105,6 +105,14 @@ export class AutomationBatchRepository extends BaseRepository<AutomationBatchRow
       'SELECT * FROM automation_batches ORDER BY created_at DESC LIMIT ?'
     ).all(limit) as AutomationBatchRow[]);
   }
+
+  async findActive(): Promise<AutomationBatchRow[]> {
+    return runAsync((db) => db.prepare(`
+      SELECT * FROM automation_batches
+      WHERE status IN ('validated', 'running', 'awaiting_export_setup')
+      ORDER BY created_at ASC
+    `).all() as AutomationBatchRow[]);
+  }
 }
 
 export class AutomationItemRepository extends BaseRepository<AutomationItemRow> {

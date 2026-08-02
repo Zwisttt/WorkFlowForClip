@@ -66,6 +66,15 @@ describe('JianyingTemplateService', () => {
     fs.writeFileSync(newBackground, 'new-image');
     fs.writeFileSync(newChart, 'new-chart');
     fs.writeFileSync(newAudio, 'new-audio');
+    fs.writeFileSync(path.join(outputRoot, 'root_meta_info.json'), JSON.stringify({
+      root_path: outputRoot,
+      all_draft_store: [{
+        draft_id: 'template-draft-id',
+        draft_name: `测试模板-${imageCount}`,
+        draft_fold_path: templateRoot,
+        draft_root_path: outputRoot,
+      }],
+    }));
 
     const template = service.inspect(templateRoot, `测试模板-${imageCount}`);
     expect(template.imageSlotKeys).toHaveLength(imageCount);
@@ -91,8 +100,98 @@ describe('JianyingTemplateService', () => {
       expect(draft.materials.videos[1].material_name).toBe('new-chart.png');
     }
     expect(draft.materials.audios[0].material_name).toBe('new-audio.mp3');
-    expect(JSON.parse(fs.readFileSync(path.join(destination, 'draft_meta_info.json'), 'utf8')).draft_name)
-      .toBe('作品 A');
+    const meta = JSON.parse(fs.readFileSync(path.join(destination, 'draft_meta_info.json'), 'utf8'));
+    expect(meta.draft_name).toBe('作品 A');
+    expect(meta.draft_id).toMatch(/^[0-9A-F-]{36}$/);
+    expect(meta.draft_fold_path).toBe(destination);
+
+    const rootMeta = JSON.parse(fs.readFileSync(path.join(outputRoot, 'root_meta_info.json'), 'utf8'));
+    const registered = rootMeta.all_draft_store.find((entry: Record<string, any>) =>
+      entry.draft_name === '作品 A'
+    );
+    expect(registered).toMatchObject({
+      draft_id: meta.draft_id,
+      draft_fold_path: destination,
+      draft_root_path: outputRoot,
+    });
+  });
+
+  it('草稿显示名保留原文，仅目录名替换非法字符', () => {
+    const service = new JianyingTemplateService();
+    const templateRoot = createFixture(1);
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'matrixflow-output-'));
+    temporaryRoots.push(outputRoot);
+    const imagePath = path.join(outputRoot, 'image.png');
+    const audioPath = path.join(outputRoot, 'audio.mp3');
+    fs.writeFileSync(imagePath, 'image');
+    fs.writeFileSync(audioPath, 'audio');
+    fs.writeFileSync(path.join(outputRoot, 'root_meta_info.json'), JSON.stringify({
+      root_path: outputRoot,
+      all_draft_store: [],
+    }));
+
+    const template = service.inspect(templateRoot, '测试模板');
+    const destination = service.generate(template, outputRoot, 'Stella 2026.7.30 09:20', {
+      script: '测试脚本',
+      backgroundPath: imagePath,
+      bgmPath: audioPath,
+    });
+
+    expect(path.basename(destination)).toBe('Stella 2026.7.30 09_20');
+    const meta = JSON.parse(fs.readFileSync(path.join(destination, 'draft_meta_info.json'), 'utf8'));
+    expect(meta.draft_name).toBe('Stella 2026.7.30 09:20');
+    const rootMeta = JSON.parse(fs.readFileSync(path.join(outputRoot, 'root_meta_info.json'), 'utf8'));
+    expect(rootMeta.all_draft_store).toContainEqual(expect.objectContaining({
+      draft_name: 'Stella 2026.7.30 09:20',
+      draft_fold_path: destination,
+      draft_id: meta.draft_id,
+    }));
+  });
+
+  it('目录已删除时自动移除同路径失效索引并重新生成', () => {
+    const service = new JianyingTemplateService();
+    const templateRoot = createFixture(1);
+    const outputRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'matrixflow-output-'));
+    temporaryRoots.push(outputRoot);
+    const imagePath = path.join(outputRoot, 'image.png');
+    const audioPath = path.join(outputRoot, 'audio.mp3');
+    fs.writeFileSync(imagePath, 'image');
+    fs.writeFileSync(audioPath, 'audio');
+    const destination = path.join(outputRoot, '作品 A');
+    fs.writeFileSync(path.join(outputRoot, 'root_meta_info.json'), JSON.stringify({
+      root_path: outputRoot,
+      all_draft_store: [
+        {
+          draft_id: 'template-draft-id',
+          draft_name: '测试模板',
+          draft_fold_path: templateRoot,
+        },
+        {
+          draft_id: 'stale-draft-id',
+          draft_name: '作品 A',
+          draft_fold_path: destination,
+        },
+      ],
+    }));
+
+    const template = service.inspect(templateRoot, '测试模板');
+    service.generate(template, outputRoot, '作品 A', {
+      script: '重新生成的脚本',
+      backgroundPath: imagePath,
+      bgmPath: audioPath,
+    });
+
+    const rootMeta = JSON.parse(fs.readFileSync(path.join(outputRoot, 'root_meta_info.json'), 'utf8'));
+    expect(rootMeta.all_draft_store).toContainEqual(expect.objectContaining({
+      draft_id: 'template-draft-id',
+      draft_fold_path: templateRoot,
+    }));
+    const generatedEntries = rootMeta.all_draft_store.filter(
+      (entry: Record<string, any>) => entry.draft_fold_path === destination,
+    );
+    expect(generatedEntries).toHaveLength(1);
+    expect(generatedEntries[0].draft_id).not.toBe('stale-draft-id');
+    expect(fs.existsSync(path.join(destination, 'draft_info.json'))).toBe(true);
   });
 
   it('拒绝超过首期边界的模板结构', () => {

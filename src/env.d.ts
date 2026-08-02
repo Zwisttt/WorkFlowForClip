@@ -267,6 +267,11 @@ interface MatrixFlowAPI {
     resumeBatch: (batchId: string) => Promise<IpcResult<null>>;
     retryItem: (itemId: string) => Promise<IpcResult<null>>;
     cancelBatch: (batchId: string) => Promise<IpcResult<null>>;
+    stopAllExports: () => Promise<IpcResult<{
+      stoppedWorker: boolean;
+      pausedBatches: number;
+      pausedItems: number;
+    }>>;
     getExportSettings: () => Promise<IpcResult<any>>;
     captureCoordinate: (key: 'search' | 'result' | 'export' | 'confirm' | 'close' | 'home') => Promise<IpcResult<any>>;
   };

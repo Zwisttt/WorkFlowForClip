@@ -19,4 +19,11 @@ describe('publish browser preservation policy', () => {
       '视频号原创声明未完成',
     )).toBe(false);
   });
+
+  it('preserves the Douyin browser when scheduled time interaction fails', () => {
+    expect(shouldPreserveStandaloneBrowserAfterFailure(
+      'douyin',
+      '上传失败: 账号浏览器弹窗发布过程出错: 抖音定时发布时间设置失败，已停止发布以避免使用错误时间',
+    )).toBe(true);
+  });
 });

@@ -17,6 +17,7 @@ import type {
   AutomationExportSettings,
   AutomationSheetMapping,
   AutomationStartRequest,
+  AutomationStopExportsResult,
   AutomationTemplate,
   AutomationWorkbookPreview,
 } from './services/types/automation';
@@ -458,6 +459,8 @@ const api = {
       ipcRenderer.invoke('automation:retryItem', itemId),
     cancelBatch: (batchId: string): Invoke<null> =>
       ipcRenderer.invoke('automation:cancelBatch', batchId),
+    stopAllExports: (): Invoke<AutomationStopExportsResult> =>
+      ipcRenderer.invoke('automation:stopAllExports'),
     getExportSettings: (): Invoke<AutomationExportSettings> =>
       ipcRenderer.invoke('automation:exportSettings'),
     captureCoordinate: (key: AutomationCoordinate['key']): Invoke<AutomationExportSettings> =>
