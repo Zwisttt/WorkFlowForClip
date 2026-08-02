@@ -127,10 +127,27 @@ NPM_MARKER="$STATE_ROOT/npm-lock.sha256"
 SAVED_NPM_HASH="$(test -f "$NPM_MARKER" && tr -d '[:space:]' < "$NPM_MARKER" || true)"
 if [ ! -x node_modules/.bin/electron ] || [ "$SAVED_NPM_HASH" != "$LOCK_HASH" ]; then
   step '正在安装/更新 Node.js 项目依赖'
-  npm ci
+  npm ci --legacy-peer-deps
   printf '%s\n' "$LOCK_HASH" > "$NPM_MARKER"
 else
   printf '[跳过] Node.js 项目依赖已安装且版本未变化\n'
+fi
+
+ELECTRON_VERSION="$(node -p "require('./node_modules/electron/package.json').version")"
+NATIVE_FINGERPRINT="$LOCK_HASH-electron-$ELECTRON_VERSION"
+NATIVE_MARKER="$STATE_ROOT/native-modules.sha256"
+SAVED_NATIVE_FINGERPRINT="$(test -f "$NATIVE_MARKER" && tr -d '[:space:]' < "$NATIVE_MARKER" || true)"
+NATIVE_MODULE_READY=false
+if ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron -e "require('better-sqlite3')" >/dev/null 2>&1; then
+  NATIVE_MODULE_READY=true
+fi
+if [ "$SAVED_NATIVE_FINGERPRINT" != "$NATIVE_FINGERPRINT" ] || [ "$NATIVE_MODULE_READY" != true ]; then
+  step "正在为 Electron $ELECTRON_VERSION 重编译数据库原生模块"
+  npx electron-rebuild --force --which-module better-sqlite3
+  ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron -e "require('better-sqlite3'); console.log('[通过] Electron 数据库模块可用')"
+  printf '%s\n' "$NATIVE_FINGERPRINT" > "$NATIVE_MARKER"
+else
+  printf '[跳过] Electron 数据库原生模块已匹配当前版本\n'
 fi
 
 PATCHRIGHT_MARKER="$STATE_ROOT/patchright-lock.sha256"
@@ -143,10 +160,13 @@ else
   printf '[跳过] Patchright Chrome 已完成安装检查\n'
 fi
 
-if [ ! -d /Applications/VideoFusion-macOS.app ]; then
+if [ ! -d /Applications/VideoFusion-macOS.app ] \
+  && [ ! -d '/Applications/剪映专业版.app' ] \
+  && [ ! -d /Applications/JianyingPro.app ] \
+  && [ ! -d /Applications/CapCut.app ]; then
   printf '[提醒] 未在 /Applications 找到剪映专业版；MatrixFlow 可以启动，但自动剪辑导出前需要安装剪映。\n'
 fi
 
 step '环境检查完成，正在启动 MatrixFlow'
-printf '请使用自动打开的桌面窗口，不要在浏览器中打开 localhost:5173。\n'
-npm run dev
+printf '正在构建并以桌面模式启动；首次构建可能需要几分钟。\n'
+npm start

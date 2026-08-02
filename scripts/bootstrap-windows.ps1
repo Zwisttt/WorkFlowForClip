@@ -126,10 +126,44 @@ try {
 
   if ((-not (Test-Path $electronCommand)) -or $savedNpmHash -ne $lockHash) {
     Write-Step '正在安装/更新 Node.js 项目依赖'
-    Invoke-Checked 'npm.cmd' @('ci')
+    Invoke-Checked 'npm.cmd' @('ci', '--legacy-peer-deps')
     Set-Content -Path $npmMarker -Value $lockHash -Encoding ASCII
   } else {
     Write-Host '[跳过] Node.js 项目依赖已安装且版本未变化' -ForegroundColor DarkGreen
+  }
+
+  $electronVersion = (& node.exe -p "require('./node_modules/electron/package.json').version").Trim()
+  $nativeFingerprint = "$lockHash-electron-$electronVersion"
+  $nativeMarker = Join-Path $StateRoot 'native-modules.sha256'
+  $savedNativeFingerprint = if (Test-Path $nativeMarker) {
+    (Get-Content $nativeMarker -Raw).Trim()
+  } else {
+    ''
+  }
+  $nativeModuleWorks = $false
+  if (Test-Path $electronCommand) {
+    $previousElectronRunAsNode = $env:ELECTRON_RUN_AS_NODE
+    try {
+      $env:ELECTRON_RUN_AS_NODE = '1'
+      & $electronCommand '-e' "require('better-sqlite3')" *> $null
+      $nativeModuleWorks = $LASTEXITCODE -eq 0
+    } finally {
+      $env:ELECTRON_RUN_AS_NODE = $previousElectronRunAsNode
+    }
+  }
+  if ($savedNativeFingerprint -ne $nativeFingerprint -or -not $nativeModuleWorks) {
+    Write-Step "正在为 Electron $electronVersion 重编译数据库原生模块"
+    Invoke-Checked 'npx.cmd' @('electron-rebuild', '--force', '--which-module', 'better-sqlite3')
+    $previousElectronRunAsNode = $env:ELECTRON_RUN_AS_NODE
+    try {
+      $env:ELECTRON_RUN_AS_NODE = '1'
+      Invoke-Checked $electronCommand @('-e', "require('better-sqlite3'); console.log('[通过] Electron 数据库模块可用')")
+    } finally {
+      $env:ELECTRON_RUN_AS_NODE = $previousElectronRunAsNode
+    }
+    Set-Content -Path $nativeMarker -Value $nativeFingerprint -Encoding ASCII
+  } else {
+    Write-Host '[跳过] Electron 数据库原生模块已匹配当前版本' -ForegroundColor DarkGreen
   }
 
   $pythonCheckArgs = $pythonPrefix + @('-c', 'import pyautogui, pyperclip')
@@ -170,8 +204,8 @@ try {
   }
 
   Write-Step '环境检查完成，正在启动 MatrixFlow'
-  Write-Host '请使用自动打开的桌面窗口，不要在浏览器中打开 localhost:5173。' -ForegroundColor Yellow
-  Invoke-Checked 'npm.cmd' @('run', 'dev')
+  Write-Host '正在构建并以桌面模式启动；首次构建可能需要几分钟。' -ForegroundColor Yellow
+  Invoke-Checked 'npm.cmd' @('start')
 } catch {
   Write-Host ""
   Write-Host "启动失败：$($_.Exception.Message)" -ForegroundColor Red
