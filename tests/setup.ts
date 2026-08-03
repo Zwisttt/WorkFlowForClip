@@ -2,6 +2,7 @@ import { vi } from 'vitest';
 
 // Mock electron 模块
 vi.mock('electron', () => ({
+  dialog: { showMessageBox: vi.fn().mockResolvedValue({ response: 0 }) },
   app: {
     getPath: vi.fn((name: string) => {
       const paths: Record<string, string> = {

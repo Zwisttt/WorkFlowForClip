@@ -2201,7 +2201,7 @@ async function clickPublish(page: Page, maxRetries: number = 3): Promise<boolean
       for (let retry = 0; retry < maxRetries; retry++) {
         const publishBtn = page.locator(UPLOAD_SELECTORS.publishButton).first();
         await publishBtn.waitFor({ state: 'visible', timeout: 10000 });
-        await rc.humanClick(UPLOAD_SELECTORS.publishButton);
+        await rc.humanClick(UPLOAD_SELECTORS.publishButton, { waitForVerificationAfter: true });
         logger.info(`发布按钮已点击（第 ${retry + 1} 次）`);
 
         await page.waitForTimeout(2000);

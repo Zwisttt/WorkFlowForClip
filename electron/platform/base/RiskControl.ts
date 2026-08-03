@@ -37,6 +37,8 @@ export interface HumanizedClickOptions extends HumanizedActionOptions {
   hoverBefore?: boolean;
   /** 悬停持续时间 (ms) */
   hoverDurationMs?: number;
+  /** Only use for the final publish action; waits if that click opens a captcha. */
+  waitForVerificationAfter?: boolean;
 }
 
 export interface HumanizedScrollOptions extends HumanizedActionOptions {
@@ -95,6 +97,42 @@ const DEFAULT_OPTIONS: Required<RiskControlOptions> = {
   stepIntervalSec: { min: 2.0, max: 3.0 },
   scrollSpeedPxPerSec: { min: 200, max: 500 },
 };
+
+/** Selectors shared by the desktop publishing pages for human verification. */
+const HUMAN_VERIFICATION_SELECTOR = [
+  '.captcha-container',
+  '[class*="captcha"]',
+  '[id*="captcha"]',
+  'input[placeholder*="验证码"]',
+  'text=/请完成验证|请进行安全验证|拖动滑块完成验证/i',
+].join(', ');
+
+/**
+ * Pauses page automation while a platform asks the user to complete a human
+ * verification. The browser stays open and the caller resumes only after the
+ * verification prompt has disappeared.
+ */
+export async function waitForHumanVerification(page: Page): Promise<void> {
+  const verification = page.locator(HUMAN_VERIFICATION_SELECTOR).first();
+  const isVisible = async () => verification.isVisible().catch(() => false);
+
+  while (await isVisible()) {
+    const { dialog } = await import('electron');
+    await dialog.showMessageBox({
+      type: 'warning',
+      title: '需要手动完成验证码',
+      message: '检测到平台验证码或安全验证',
+      detail: '请在发布浏览器中完成验证。验证提示消失后，点击“已完成验证，继续”，任务将从当前位置继续，不会标记为失败。',
+      buttons: ['已完成验证，继续'],
+      defaultId: 0,
+      noLink: true,
+    });
+
+    // A completed dialog click alone is not enough: keep the task paused if
+    // the platform still displays the challenge.
+    await page.waitForTimeout(300);
+  }
+}
 
 function escapeRegExpText(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -384,6 +422,7 @@ export class PageRiskControl extends FengkongAbstractClass {
       options?.maxDelayMs ?? this.options.clickDelayMs?.max ?? 300,
     ));
     await loc.click();
+    if (options?.waitForVerificationAfter) await waitForHumanVerification(this.page);
   }
 
   async humanHover(

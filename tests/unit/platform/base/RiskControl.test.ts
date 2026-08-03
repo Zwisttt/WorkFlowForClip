@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { PageRiskControl, normalizeRiskTags } from '@electron/platform/base/RiskControl';
+import { PageRiskControl, normalizeRiskTags, waitForHumanVerification } from '@electron/platform/base/RiskControl';
 
 function createMockPage() {
   const mockLocator = {
@@ -16,9 +16,13 @@ function createMockPage() {
     dragTo: vi.fn(() => Promise.resolve()),
     count: vi.fn(() => 1),
   };
+  const verificationLocator = {
+    ...mockLocator,
+    isVisible: vi.fn(() => Promise.resolve(false)),
+  };
 
   const page = {
-    locator: vi.fn(() => mockLocator),
+    locator: vi.fn((selector: string) => selector.includes('captcha-container') ? verificationLocator : mockLocator),
     waitForTimeout: vi.fn(() => Promise.resolve()),
     keyboard: {
       type: vi.fn(() => Promise.resolve()),
@@ -32,6 +36,19 @@ function createMockPage() {
 }
 
 describe('PageRiskControl', () => {
+  it('pauses for a visible human verification and resumes after it disappears', async () => {
+    const { page, mockLocator } = createMockPage();
+    const visibility = [true, false];
+    mockLocator.isVisible.mockImplementation(() => Promise.resolve(visibility.shift() ?? false));
+    (page.locator as any).mockImplementation(() => mockLocator);
+
+    await waitForHumanVerification(page);
+
+    const { dialog } = await import('electron');
+    expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+    expect(page.waitForTimeout).toHaveBeenCalledWith(300);
+  });
+
   describe('normalizeRiskTags', () => {
     it('removes undefined pollution before kuaishou topic input', () => {
       expect(normalizeRiskTags([

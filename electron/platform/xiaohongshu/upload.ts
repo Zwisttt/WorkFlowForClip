@@ -2143,7 +2143,7 @@ async function clickPublish(page: Page, hasSchedule = false): Promise<boolean> {
     if (hasSchedule) {
       const scheduleBtn = page.locator(UPLOAD_SELECTORS.publishScheduledBtn).first();
       if (await scheduleBtn.count()) {
-        await rc.humanClick(UPLOAD_SELECTORS.publishScheduledBtn);
+        await rc.humanClick(UPLOAD_SELECTORS.publishScheduledBtn, { waitForVerificationAfter: true });
         logger.info('已点击定时发布按钮');
         await page.waitForTimeout(3000);
         const successToast = page.getByText('发布成功', { exact: false });
@@ -2158,9 +2158,9 @@ async function clickPublish(page: Page, hasSchedule = false): Promise<boolean> {
         logger.error('未找到发布按钮');
         return false;
       }
-      await rc.humanClick(UPLOAD_SELECTORS.publishButtonPrimary);
+      await rc.humanClick(UPLOAD_SELECTORS.publishButtonPrimary, { waitForVerificationAfter: true });
     } else {
-      await rc.humanClick(UPLOAD_SELECTORS.publishButton);
+      await rc.humanClick(UPLOAD_SELECTORS.publishButton, { waitForVerificationAfter: true });
     }
 
     logger.info('已点击发布按钮');

@@ -32,11 +32,36 @@ function loadJson(filePath: string): DraftData {
 }
 
 function getDraftFile(draftPath: string): string {
-  for (const name of ['draft_info.json', 'draft_content.json']) {
+  // Modern Jianying stores the editable timeline in draft_content.json. The
+  // accompanying draft_info.json may be present but is metadata only, so
+  // changing it does not alter the draft opened by Jianying.
+  for (const name of ['draft_content.json', 'draft_info.json']) {
     const candidate = path.join(draftPath, name);
     if (fs.existsSync(candidate)) return candidate;
   }
   throw new JianyingTemplateError('未找到 draft_info.json 或 draft_content.json');
+}
+
+/**
+ * Some Jianying versions keep two timeline files in a draft.  Which one is
+ * opened is version-dependent, so updating only the preferred file can leave
+ * the editor displaying the original template assets.
+ */
+function getTimelineDraftFiles(draftPath: string): string[] {
+  return ['draft_content.json', 'draft_info.json']
+    .map((name) => path.join(draftPath, name))
+    .filter((candidate) => fs.existsSync(candidate));
+}
+
+function getDraftRootMetaPath(draftOutputRoot: string): string | undefined {
+  const candidates = [
+    path.join(draftOutputRoot, 'root_meta_info.json'),
+    path.join(
+      process.env.LOCALAPPDATA ?? '',
+      'JianyingPro', 'User Data', 'Projects', 'com.lveditor.draft', 'root_meta_info.json',
+    ),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate));
 }
 
 function parseTextPreview(material: Record<string, any>): string {
@@ -237,43 +262,40 @@ export class JianyingTemplateService {
     fs.cpSync(template.draftPath, workingDirectory, { recursive: true });
 
     try {
-      const draftFile = path.join(workingDirectory, template.draftFile);
-      const data = loadJson(draftFile);
-      const materials = data.materials ?? {};
-      const textId = template.textSlotKey.replace(/^text:/, '');
-      const textMaterial = (materials.texts ?? []).find(
-        (item: Record<string, any>) => String(item.id) === textId,
-      );
-      if (!textMaterial) throw new JianyingTemplateError('模板文字槽已失效，请重新解析模板');
-      replaceText(textMaterial, values.script);
-
-      const mediaCollections = [
-        ...(materials.videos ?? []),
-        ...(materials.audios ?? []),
-      ] as Record<string, any>[];
-      const replaceByKey = (key: string, asset: string, type: 'image' | 'audio') => {
-        const id = key.replace(/^material:/, '');
-        const material = mediaCollections.find((item) => String(item.id) === id);
-        if (!material) throw new JianyingTemplateError(`模板素材槽已失效：${key}`);
-        replaceMedia(material, asset, workingDirectory, type);
-      };
-
-      replaceByKey(template.imageSlotKeys[0], values.backgroundPath, 'image');
-      if (template.imageSlotKeys.length > 1) {
-        if (!values.chartPath) throw new JianyingTemplateError('双图模板必须填写星盘图片');
-        replaceByKey(template.imageSlotKeys[1], values.chartPath, 'image');
-      }
-      replaceByKey(template.audioSlotKey, values.bgmPath, 'audio');
-
-      fs.writeFileSync(draftFile, JSON.stringify(data), 'utf8');
+      // Do not trust the file name saved when the template was registered.
+      // Existing templates may still store the legacy draft_info.json even
+      // though Jianying now reads draft_content.json.
+      const draftFile = getDraftFile(workingDirectory);
       const draftId = randomUUID().toUpperCase();
+      const timelineFiles = getTimelineDraftFiles(workingDirectory);
+      let primaryData: DraftData | undefined;
+      for (const file of timelineFiles) {
+        const current = loadJson(file);
+        // draft_info.json is metadata in some Jianying versions.  Do not
+        // mistake it for a second timeline just because it is JSON.
+        if (!this.hasTemplateSlots(current, template)) {
+          if (file === draftFile) {
+            throw new JianyingTemplateError('模板时间线槽已失效，请重新解析模板');
+          }
+          continue;
+        }
+        this.replaceTemplateValues(current, template, values, workingDirectory);
+        // A copied draft must not keep the template's content id. Jianying uses
+        // this id as part of its in-memory/cache identity; if it differs from
+        // draft_meta_info.json/root_meta_info.json, opening the new card can
+        // resolve to the original template timeline instead.
+        current.id = draftId;
+        fs.writeFileSync(file, JSON.stringify(current), 'utf8');
+        if (file === draftFile) primaryData = current;
+      }
+      if (!primaryData) throw new JianyingTemplateError('未找到可编辑的剪映时间线文件');
       this.writeDraftMeta(
         workingDirectory,
         resolvedOutputRoot,
         destination,
         displayWorkName,
         draftId,
-        data,
+        primaryData,
       );
       if (fs.existsSync(destination)) {
         throw new JianyingTemplateError(`草稿目录已存在：${destination}`);
@@ -286,7 +308,7 @@ export class JianyingTemplateService {
           destination,
           displayWorkName,
           draftId,
-          data,
+          primaryData,
         );
       } catch (error) {
         fs.rmSync(destination, { recursive: true, force: true });
@@ -299,6 +321,56 @@ export class JianyingTemplateService {
     }
   }
 
+  private replaceTemplateValues(
+    data: DraftData,
+    template: AutomationTemplate,
+    values: { script: string; backgroundPath: string; chartPath?: string; bgmPath: string },
+    destination: string,
+  ): void {
+    const materials = data.materials ?? {};
+    const textId = template.textSlotKey.replace(/^text:/, '');
+    const textMaterial = (materials.texts ?? []).find(
+      (item: Record<string, any>) => String(item.id) === textId,
+    );
+    if (!textMaterial) throw new JianyingTemplateError('模板文字槽已失效，请重新解析模板');
+    replaceText(textMaterial, values.script);
+
+    const mediaCollections = [
+      ...(materials.videos ?? []),
+      ...(materials.audios ?? []),
+    ] as Record<string, any>[];
+    const replaceByKey = (key: string, asset: string, type: 'image' | 'audio') => {
+      const id = key.replace(/^material:/, '');
+      const material = mediaCollections.find((item) => String(item.id) === id);
+      if (!material) throw new JianyingTemplateError(`模板素材槽已失效：${key}`);
+      replaceMedia(material, asset, destination, type);
+    };
+
+    replaceByKey(template.imageSlotKeys[0], values.backgroundPath, 'image');
+    if (template.imageSlotKeys.length > 1) {
+      if (!values.chartPath) throw new JianyingTemplateError('双图模板必须填写星盘图片');
+      replaceByKey(template.imageSlotKeys[1], values.chartPath, 'image');
+    }
+    replaceByKey(template.audioSlotKey, values.bgmPath, 'audio');
+  }
+
+  private hasTemplateSlots(data: DraftData, template: AutomationTemplate): boolean {
+    const materials = data.materials ?? {};
+    const textId = template.textSlotKey.replace(/^text:/, '');
+    const mediaIds = [
+      ...template.imageSlotKeys,
+      template.audioSlotKey,
+    ].map((key) => key.replace(/^material:/, ''));
+    const textExists = (materials.texts ?? []).some(
+      (item: Record<string, any>) => String(item.id) === textId,
+    );
+    const presentMediaIds = new Set(
+      [...(materials.videos ?? []), ...(materials.audios ?? [])]
+        .map((item: Record<string, any>) => String(item.id)),
+    );
+    return textExists && mediaIds.every((id) => presentMediaIds.has(id));
+  }
+
   private writeDraftMeta(
     draftPath: string,
     draftRoot: string,
@@ -309,6 +381,35 @@ export class JianyingTemplateService {
   ): void {
     const metaPath = path.join(draftPath, 'draft_meta_info.json');
     const nowMicros = Date.now() * 1_000;
+    // Jianying 11+ may store this metadata encrypted. Replacing it with a
+    // hand-written JSON object makes the draft card visible but prevents the
+    // editor from opening it. In that case the copied metadata is already
+    // valid for the cloned project and must remain byte-for-byte intact.
+    if (fs.existsSync(metaPath)) {
+      const original = fs.readFileSync(metaPath, 'utf8');
+      try {
+        const meta = JSON.parse(original) as Record<string, any>;
+        Object.assign(meta, {
+          draft_cover: fs.existsSync(path.join(draftPath, 'draft_cover.jpg'))
+            ? path.join(destination, 'draft_cover.jpg')
+            : '',
+          draft_fold_path: destination,
+          draft_id: draftId,
+          draft_name: workName,
+          name: workName,
+          draft_root_path: draftRoot,
+          draft_new_version: String(data.new_version ?? meta.draft_new_version ?? ''),
+          tm_draft_create: nowMicros,
+          tm_draft_modified: nowMicros,
+          tm_duration: Number(data.duration ?? meta.tm_duration ?? 0),
+        });
+        fs.writeFileSync(metaPath, JSON.stringify(meta), 'utf8');
+      } catch {
+        return;
+      }
+      return;
+    }
+
     const meta: Record<string, any> = {
       cloud_package_completed_time: '',
       draft_cloud_capcut_purchase_info: '',
@@ -363,8 +464,8 @@ export class JianyingTemplateService {
     draftId: string,
     data: DraftData,
   ): void {
-    const rootMetaPath = path.join(draftRoot, 'root_meta_info.json');
-    if (!fs.existsSync(rootMetaPath)) return;
+    const rootMetaPath = getDraftRootMetaPath(draftRoot);
+    if (!rootMetaPath) return;
 
     let root: DraftRootData;
     try {
@@ -428,8 +529,8 @@ export class JianyingTemplateService {
   }
 
   private removeStaleDraftRootEntry(draftRoot: string, destination: string): void {
-    const rootMetaPath = path.join(draftRoot, 'root_meta_info.json');
-    if (!fs.existsSync(rootMetaPath)) return;
+    const rootMetaPath = getDraftRootMetaPath(draftRoot);
+    if (!rootMetaPath) return;
 
     let root: DraftRootData;
     try {
