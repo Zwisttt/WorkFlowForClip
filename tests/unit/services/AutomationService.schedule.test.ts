@@ -19,7 +19,10 @@ vi.mock('../../../electron/data/repositories/AutomationRepository', () => ({
   automationTemplateRepo: {},
 }));
 
-import { earliestNativeScheduleTime } from '../../../electron/services/AutomationService';
+import {
+  earliestNativeScheduleTime,
+  resolveJianyingSearchName,
+} from '../../../electron/services/AutomationService';
 
 describe('AutomationService schedule planning', () => {
   it('为全部导出和抖音的两小时提前量预留时间', () => {
@@ -35,5 +38,16 @@ describe('AutomationService schedule planning', () => {
     expect(earliestNativeScheduleTime(startedAt, 0, 1, 1, 1, 0.1)).toBe(
       startedAt + 12_800 + 10 * 60_000 + 2 * 60 * 60_000,
     );
+  });
+
+  it('uses the Windows-safe draft name when searching Jianying', () => {
+    expect(resolveJianyingSearchName(
+      'luna 2026.7.31 20:00',
+      'luna 2026.7.31 20_00',
+    )).toBe('luna 2026.7.31 20_00');
+  });
+
+  it('derives a Windows-safe search name for older items without a resolved name', () => {
+    expect(resolveJianyingSearchName('luna 2026.7.31 20:00')).toBe('luna 2026.7.31 20_00');
   });
 });

@@ -118,6 +118,14 @@ function sanitizeStem(value: string): string {
   return value.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_').replace(/[. ]+$/g, '').trim() || '未命名作品';
 }
 
+/**
+ * Jianying identifies generated drafts by their Windows-safe directory name,
+ * not the original spreadsheet title stored in draft metadata.
+ */
+export function resolveJianyingSearchName(workName: string, resolvedWorkName?: string): string {
+  return resolvedWorkName || sanitizeStem(workName);
+}
+
 function isAuthOrRiskError(message: string): boolean {
   return /登录|Cookie|验证码|风控|账号异常|重新登录|安全验证/i.test(message);
 }
@@ -657,7 +665,7 @@ export class AutomationService {
         await this.updateItem(item.id, { status: 'exporting' }, 'export', '正在控制剪映导出');
         try {
           await jianyingExportService.exportOne({
-            draftName: item.workName,
+            draftName: resolveJianyingSearchName(item.workName, item.resolvedWorkName),
             clearPreviousSearch: exportIndex > 0,
             openWaitSeconds: Number(batch.exportSettings.openWaitSeconds ?? 8),
             exportWaitSeconds: Number(batch.exportSettings.exportWaitSeconds ?? 60),
