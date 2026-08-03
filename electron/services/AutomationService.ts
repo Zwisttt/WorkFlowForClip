@@ -1020,6 +1020,27 @@ export class AutomationService {
   }
 
   private async registerBundledLocalTemplates(): Promise<void> {
+    // 优先使用未加密的模板目录
+    const unencryptedTemplateRoot = '/Users/mac/Desktop/模版文件';
+
+    // 如果未加密模板目录存在，优先使用
+    if (fs.existsSync(unencryptedTemplateRoot)) {
+      const templates = ['Luna', 'luna纯文案', 'Stella纯文案'].map(
+        (name) => [name, path.join(unencryptedTemplateRoot, name)] as const,
+      );
+      for (const [name, draftPath] of templates) {
+        if (!fs.existsSync(draftPath)) continue;
+        try {
+          await this.registerTemplate(draftPath, name);
+          console.log(`[AutomationService] 已注册未加密模板: ${name}`);
+        } catch (error) {
+          console.error(`[AutomationService] 注册模板失败: ${name}`, error);
+        }
+      }
+      return; // 使用未加密模板后直接返回
+    }
+
+    // 如果未加密模板不存在，回退到剪映草稿目录（可能是加密的）
     const draftRoot = process.platform === 'darwin'
       ? path.join(
           process.env.HOME ?? '',

@@ -20,7 +20,7 @@ export class JianyingTemplateError extends Error {}
 function loadJson(filePath: string): DraftData | null {
   const raw = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
   if (!raw.trimStart().startsWith('{')) {
-    return null; // 返回 null 表示文件已加密，调用方应跳过
+    throw new JianyingTemplateError('剪映草稿内容已加密，无法安全替换');
   }
   try {
     return JSON.parse(raw) as DraftData;
@@ -208,9 +208,6 @@ export class JianyingTemplateService {
 
     const draftFilePath = getDraftFile(normalizedPath);
     const data = loadJson(draftFilePath);
-    if (data === null) {
-      throw new JianyingTemplateError('模板文件已加密，无法解析。请使用未加密的剪映草稿作为模板。');
-    }
     const materials = data.materials ?? {};
 
     const textIds = usedMaterialIds(data, 'text');
@@ -302,13 +299,6 @@ export class JianyingTemplateService {
     );
     fs.cpSync(template.draftPath, workingDirectory, { recursive: true });
 
-    // 删除 Timelines 子目录，因为它可能包含加密的文件，剪映会优先读取这些文件
-    const timelinesDir = path.join(workingDirectory, 'Timelines');
-    if (fs.existsSync(timelinesDir)) {
-      console.log('[JianyingTemplate] 删除 Timelines 目录（包含加密文件）');
-      fs.rmSync(timelinesDir, { recursive: true, force: true });
-    }
-
     try {
       // Do not trust the file name saved when the template was registered.
       // Existing templates may still store the legacy draft_info.json even
@@ -321,11 +311,6 @@ export class JianyingTemplateService {
       for (const file of timelineFiles) {
         console.log('[JianyingTemplate] 处理文件:', file);
         const current = loadJson(file);
-        // 跳过加密文件
-        if (current === null) {
-          console.log('[JianyingTemplate] 文件已加密，跳过:', file);
-          continue;
-        }
         // draft_info.json is metadata in some Jianying versions.  Do not
         // mistake it for a second timeline just because it is JSON.
         if (!this.hasTemplateSlots(current, template)) {
