@@ -191,8 +191,8 @@ try {
     throw 'Python 3 is unavailable. Please follow the solutions above.'
   }
 
-  $pythonCommand = [string]$python.Command
-  $pythonPrefix = [string[]]$python.Prefix
+  $pythonCommand = $python.Command
+  $pythonPrefix = $python.Prefix
   $pythonVersion = & $pythonCommand @pythonPrefix --version
   Write-Host "[OK] $pythonVersion" -ForegroundColor DarkGreen
 
@@ -286,15 +286,23 @@ try {
   }
 
   $pythonCheckArgs = $pythonPrefix + @('-c', 'import pyautogui, pyperclip')
-  & $pythonCommand @pythonCheckArgs *> $null
-  if ($LASTEXITCODE -ne 0) {
+  Write-Host 'Checking Python automation dependencies...' -ForegroundColor Gray
+
+  try {
+    & $pythonCommand @pythonCheckArgs 2>&1 | Out-Null
+    $pythonCheckPassed = $LASTEXITCODE -eq 0
+  } catch {
+    $pythonCheckPassed = $false
+  }
+
+  if (-not $pythonCheckPassed) {
     Write-Step 'Installing Python dependencies for automated export'
     $requirements = Join-Path $ProjectRoot 'electron\automation\python\requirements.txt'
 
     # First upgrade pip to avoid compatibility issues
     Write-Host 'Upgrading pip...' -ForegroundColor Gray
     $pipUpgradeArgs = $pythonPrefix + @('-m', 'pip', 'install', '--upgrade', 'pip', '--disable-pip-version-check')
-    & $pythonCommand @pipUpgradeArgs | Out-Null
+    & $pythonCommand @pipUpgradeArgs 2>&1 | Out-Null
 
     # Install requirements with detailed error output
     $pipArgs = $pythonPrefix + @(
