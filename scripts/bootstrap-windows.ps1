@@ -202,20 +202,21 @@ try {
   # Test if better-sqlite3 works in Electron context
   $nativeModuleWorks = $false
   if (Test-Path $electronCommand) {
-    Write-Host 'Testing better-sqlite3 module...' -ForegroundColor Gray
+    Write-Host 'Testing better-sqlite3 in Electron context...' -ForegroundColor Gray
+    $testScript = "const path = require('path'); process.chdir(path.join(__dirname, '..')); try { const db = require('better-sqlite3')(':memory:'); db.close(); console.log('OK'); process.exit(0); } catch(e) { console.error('FAIL:', e.message); process.exit(1); }"
     $previousElectronRunAsNode = $env:ELECTRON_RUN_AS_NODE
     try {
       $env:ELECTRON_RUN_AS_NODE = '1'
-      # Suppress all output and capture result
-      $testOutput = & $electronCommand '-e' "try { require('better-sqlite3'); process.exit(0); } catch(e) { console.error('Test failed:', e.message); process.exit(1); }" 2>&1
+      $testOutput = & $electronCommand '-e' $testScript 2>&1
       $nativeModuleWorks = $LASTEXITCODE -eq 0
       if ($nativeModuleWorks) {
-        Write-Host '[OK] better-sqlite3 module test passed' -ForegroundColor DarkGreen
+        Write-Host '[OK] better-sqlite3 works in Electron' -ForegroundColor DarkGreen
       } else {
-        Write-Host '[WARN] better-sqlite3 module test failed, will rebuild' -ForegroundColor Yellow
+        Write-Host '[WARN] better-sqlite3 test failed in Electron:' -ForegroundColor Yellow
+        Write-Host $testOutput -ForegroundColor Yellow
       }
     } catch {
-      Write-Host '[WARN] better-sqlite3 module test exception, will rebuild' -ForegroundColor Yellow
+      Write-Host '[WARN] better-sqlite3 test exception, will rebuild' -ForegroundColor Yellow
       $nativeModuleWorks = $false
     } finally {
       $env:ELECTRON_RUN_AS_NODE = $previousElectronRunAsNode
