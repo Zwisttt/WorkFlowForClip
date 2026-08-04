@@ -183,7 +183,8 @@ try {
 
   if ((-not (Test-Path $electronCommand)) -or $savedNpmHash -ne $lockHash) {
     Write-Step 'Installing or updating Node.js dependencies'
-    Invoke-Checked 'npm.cmd' @('ci', '--legacy-peer-deps')
+    # Force rebuild of better-sqlite3 during npm ci
+    Invoke-Checked 'npm.cmd' @('ci', '--legacy-peer-deps', '--foreground-scripts')
     Set-Content -Path $npmMarker -Value $lockHash -Encoding ASCII
   } else {
     Write-Host '[Skip] Node.js dependencies are installed and unchanged' -ForegroundColor DarkGreen
@@ -197,25 +198,44 @@ try {
   } else {
     ''
   }
+
+  # Test if better-sqlite3 works in Electron context
   $nativeModuleWorks = $false
   if (Test-Path $electronCommand) {
+    Write-Host 'Testing better-sqlite3 module...' -ForegroundColor Gray
     $previousElectronRunAsNode = $env:ELECTRON_RUN_AS_NODE
     try {
       $env:ELECTRON_RUN_AS_NODE = '1'
-      & $electronCommand '-e' "require('better-sqlite3')" *> $null
+      # Suppress all output and capture result
+      $testOutput = & $electronCommand '-e' "try { require('better-sqlite3'); process.exit(0); } catch(e) { console.error('Test failed:', e.message); process.exit(1); }" 2>&1
       $nativeModuleWorks = $LASTEXITCODE -eq 0
+      if ($nativeModuleWorks) {
+        Write-Host '[OK] better-sqlite3 module test passed' -ForegroundColor DarkGreen
+      } else {
+        Write-Host '[WARN] better-sqlite3 module test failed, will rebuild' -ForegroundColor Yellow
+      }
+    } catch {
+      Write-Host '[WARN] better-sqlite3 module test exception, will rebuild' -ForegroundColor Yellow
+      $nativeModuleWorks = $false
     } finally {
       $env:ELECTRON_RUN_AS_NODE = $previousElectronRunAsNode
     }
   }
+
   if ($savedNativeFingerprint -ne $nativeFingerprint -or -not $nativeModuleWorks) {
     Install-VisualStudioCppBuildTools
     Write-Step "Rebuilding the database native module for Electron $electronVersion"
     Invoke-Checked 'npx.cmd' @('electron-rebuild', '--force', '--which-module', 'better-sqlite3')
+
+    # Verify the rebuild succeeded
     $previousElectronRunAsNode = $env:ELECTRON_RUN_AS_NODE
     try {
       $env:ELECTRON_RUN_AS_NODE = '1'
-      Invoke-Checked $electronCommand @('-e', "require('better-sqlite3'); console.log('[OK] Electron database module is available')")
+      $verifyOutput = & $electronCommand '-e' "try { require('better-sqlite3'); console.log('[OK] Electron database module is available'); process.exit(0); } catch(e) { console.error('[FAIL] Database module error:', e.message); process.exit(1); }" 2>&1
+      Write-Host $verifyOutput
+      if ($LASTEXITCODE -ne 0) {
+        throw "better-sqlite3 verification failed after rebuild. Try deleting node_modules and run start-windows.bat again."
+      }
     } finally {
       $env:ELECTRON_RUN_AS_NODE = $previousElectronRunAsNode
     }
@@ -255,10 +275,16 @@ try {
 
   $jianyingCandidates = @(
     (Join-Path $env:LOCALAPPDATA 'JianyingPro\JianyingPro.exe'),
-    (Join-Path $env:LOCALAPPDATA 'JianyingPro\Apps')
+    (Join-Path $env:LOCALAPPDATA 'JianyingPro\Apps\JianyingPro.exe'),
+    (Join-Path $env:LOCALAPPDATA 'CapCut\CapCut.exe'),
+    (Join-Path ${env:ProgramFiles} 'JianyingPro\JianyingPro.exe'),
+    (Join-Path ${env:ProgramFiles(x86)} 'JianyingPro\JianyingPro.exe')
   )
-  if (-not ($jianyingCandidates | Where-Object { Test-Path $_ })) {
-    Write-Warning 'Jianying Pro was not found. MatrixFlow can start, but install it before automated editing and export.'
+  $jianyingFound = $jianyingCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($null -eq $jianyingFound) {
+    Write-Warning 'Jianying Pro (or CapCut) was not found. MatrixFlow can start, but install it before automated editing and export.'
+  } else {
+    Write-Host "[OK] Jianying Pro found: $jianyingFound" -ForegroundColor DarkGreen
   }
 
   Write-Step 'Environment checks complete. Starting MatrixFlow'
