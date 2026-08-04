@@ -107,18 +107,32 @@ function Test-Node {
 }
 
 function Find-Python {
-  if (Test-Command 'py.exe') {
-    & py.exe -3 --version *> $null
-    if ($LASTEXITCODE -eq 0) {
-      return @{ Command = 'py.exe'; Prefix = @('-3') }
-    }
-  }
+  # Try python.exe first (direct installation)
   if (Test-Command 'python.exe') {
-    & python.exe --version *> $null
-    if ($LASTEXITCODE -eq 0) {
-      return @{ Command = 'python.exe'; Prefix = @() }
+    try {
+      $version = & python.exe --version 2>&1
+      if ($LASTEXITCODE -eq 0 -and $version -match 'Python 3') {
+        Write-Host "[Detected] $version via python.exe" -ForegroundColor Gray
+        return @{ Command = 'python.exe'; Prefix = @() }
+      }
+    } catch {
+      # Continue to try py.exe
     }
   }
+
+  # Try py.exe launcher (may be installed even without Python)
+  if (Test-Command 'py.exe') {
+    try {
+      $version = & py.exe -3 --version 2>&1
+      if ($LASTEXITCODE -eq 0 -and $version -match 'Python 3') {
+        Write-Host "[Detected] $version via py.exe launcher" -ForegroundColor Gray
+        return @{ Command = 'py.exe'; Prefix = @('-3') }
+      }
+    } catch {
+      # py.exe exists but Python 3 is not available
+    }
+  }
+
   return $null
 }
 
@@ -146,11 +160,37 @@ try {
   $python = Find-Python
   if ($null -eq $python) {
     Install-WingetPackage 'Python.Python.3.12' 'Python 3.12'
-    $python = Find-Python
+
+    # Wait for Python to be registered and refresh PATH
+    Write-Host 'Waiting for Python to be registered...' -ForegroundColor Gray
+    Refresh-ProcessPath
+    Start-Sleep -Seconds 3
+
+    # Try to find Python again with more attempts
+    $maxAttempts = 5
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+      $python = Find-Python
+      if ($null -ne $python) {
+        break
+      }
+      if ($attempt -lt $maxAttempts) {
+        Write-Host "Python not detected yet, waiting... (attempt $attempt/$maxAttempts)" -ForegroundColor Gray
+        Start-Sleep -Seconds 2
+        Refresh-ProcessPath
+      }
+    }
   }
+
   if ($null -eq $python) {
-    throw 'Python 3 is still unavailable after installation. Restart Windows and run start-windows.bat again.'
+    Write-Host ""
+    Write-Host "Python 3 could not be detected after installation." -ForegroundColor Red
+    Write-Host "Possible solutions:" -ForegroundColor Yellow
+    Write-Host "  1. Restart Windows to refresh the system PATH" -ForegroundColor Yellow
+    Write-Host "  2. Manually install Python 3.12 from python.org and check 'Add Python to PATH'" -ForegroundColor Yellow
+    Write-Host "  3. Run start-windows.bat again after restarting" -ForegroundColor Yellow
+    throw 'Python 3 is unavailable. Please follow the solutions above.'
   }
+
   $pythonCommand = [string]$python.Command
   $pythonPrefix = [string[]]$python.Prefix
   $pythonVersion = & $pythonCommand @pythonPrefix --version
@@ -250,12 +290,24 @@ try {
   if ($LASTEXITCODE -ne 0) {
     Write-Step 'Installing Python dependencies for automated export'
     $requirements = Join-Path $ProjectRoot 'electron\automation\python\requirements.txt'
+
+    # First upgrade pip to avoid compatibility issues
+    Write-Host 'Upgrading pip...' -ForegroundColor Gray
+    $pipUpgradeArgs = $pythonPrefix + @('-m', 'pip', 'install', '--upgrade', 'pip', '--disable-pip-version-check')
+    & $pythonCommand @pipUpgradeArgs | Out-Null
+
+    # Install requirements with detailed error output
     $pipArgs = $pythonPrefix + @(
       '-m', 'pip', 'install',
       '--disable-pip-version-check',
       '-r', $requirements
     )
-    Invoke-Checked $pythonCommand $pipArgs
+    Write-Host "Running: $pythonCommand $($pipArgs -join ' ')" -ForegroundColor Gray
+    & $pythonCommand @pipArgs
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "Python dependencies installation failed. Check the error message above for details. You may need to install Visual C++ Build Tools or update Python to 3.10+."
+    }
   } else {
     Write-Host '[Skip] Python automation dependencies already installed' -ForegroundColor DarkGreen
   }
@@ -268,8 +320,18 @@ try {
   }
   if ($savedPatchrightHash -ne $lockHash) {
     Write-Step 'Checking and installing Patchright Chrome'
-    Invoke-Checked 'npx.cmd' @('patchright', 'install', 'chrome')
-    Set-Content -Path $patchrightMarker -Value $lockHash -Encoding ASCII
+    Write-Host 'This may take a few minutes on first run...' -ForegroundColor Gray
+
+    # Run with visible output to help diagnose issues
+    & npx.cmd patchright install chrome
+
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warning 'Patchright Chrome installation encountered an error, but continuing...'
+      Write-Warning 'You may need to run "npx patchright install chrome" manually later.'
+    } else {
+      Set-Content -Path $patchrightMarker -Value $lockHash -Encoding ASCII
+      Write-Host '[OK] Patchright Chrome installed successfully' -ForegroundColor DarkGreen
+    }
   } else {
     Write-Host '[Skip] Patchright Chrome installation already checked' -ForegroundColor DarkGreen
   }
@@ -294,6 +356,18 @@ try {
 } catch {
   Write-Host ""
   Write-Host "Startup failed: $($_.Exception.Message)" -ForegroundColor Red
+
+  # Show full error details if available
+  if ($_.Exception.InnerException) {
+    Write-Host ""
+    Write-Host "Details: $($_.Exception.InnerException.Message)" -ForegroundColor Red
+  }
+  if ($_.ScriptStackTrace) {
+    Write-Host ""
+    Write-Host "Location: $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+  }
+
+  Write-Host ""
   Write-Host "Keep this window open and follow the detailed message above." -ForegroundColor Yellow
   exit 1
 }
