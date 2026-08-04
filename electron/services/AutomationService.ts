@@ -759,6 +759,7 @@ export class AutomationService {
     }
     const copy = splitPublishCopy(item.publishCopy);
     try {
+      this.emitProgress(item.batchId, 'publish', `${plan.accountName}：正在创建定时发布任务`, item.id);
       const task = await publishService.createPublishTask({
         contentId: item.videoPath,
         platform: plan.platform,
@@ -778,7 +779,8 @@ export class AutomationService {
         },
       });
       taskScheduler.cancel(task.id);
-      const result = await this.executePublishWithRetry(task.id);
+      this.emitProgress(item.batchId, 'publish', `${plan.accountName}：正在执行定时发布设置`, item.id);
+      const result = await this.executePublishWithRetry(task.id, item, plan);
       if (!result.success) throw new Error(result.error || '抖音定时发布设置失败');
       await this.updatePlan(item, plan, 'scheduled', task.id);
       this.schedulePlan(item, { ...plan, status: 'scheduled', publishTaskId: task.id });
@@ -836,6 +838,7 @@ export class AutomationService {
     const copy = splitPublishCopy(item.publishCopy);
     await this.updatePlan(item, plan, 'publishing');
     try {
+      this.emitProgress(item.batchId, 'publish', `${plan.accountName}：正在创建立即发布任务`, item.id);
       const task = await publishService.createPublishTask({
         contentId: item.videoPath,
         platform: plan.platform,
@@ -852,7 +855,8 @@ export class AutomationService {
           scheduleMode: 'immediate',
         },
       });
-      const result = await this.executePublishWithRetry(task.id);
+      this.emitProgress(item.batchId, 'publish', `${plan.accountName}：正在执行视频发布`, item.id);
+      const result = await this.executePublishWithRetry(task.id, item, plan);
       if (!result.success) throw new Error(result.error || '小红书发布失败');
       await this.updatePlan(item, plan, 'completed', task.id);
     } catch (error) {
@@ -863,11 +867,25 @@ export class AutomationService {
     await this.syncItemPlanStatus(item.id);
   }
 
-  private async executePublishWithRetry(taskId: string): Promise<{ success: boolean; error?: string }> {
-    const waits = [0, 60_000, 5 * 60_000];
+  private async executePublishWithRetry(
+    taskId: string,
+    item: AutomationItem,
+    plan: AutomationAccountPlan,
+  ): Promise<{ success: boolean; error?: string }> {
+    const waits = [0, 30_000, 90_000]; // 0秒、30秒、90秒
     let lastError = '';
     for (let attempt = 0; attempt < waits.length; attempt += 1) {
-      if (waits[attempt] > 0) await delay(waits[attempt]);
+      if (waits[attempt] > 0) {
+        const waitSeconds = Math.round(waits[attempt] / 1000);
+        this.emitProgress(
+          item.batchId,
+          'retry_wait',
+          `${plan.accountName}：发布失败，${waitSeconds}秒后进行第${attempt + 1}次重试`,
+          item.id,
+        );
+        await delay(waits[attempt]);
+      }
+      this.emitProgress(item.batchId, 'publish', `${plan.accountName}：正在发布视频（尝试 ${attempt + 1}/3）`, item.id);
       const result = await publishService.executeNow(taskId, { finalOnFailure: attempt === waits.length - 1 });
       if (result.success) return result;
       lastError = result.error || '发布失败';
