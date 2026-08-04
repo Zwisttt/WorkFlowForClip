@@ -201,7 +201,7 @@ export class PublishService implements IPublishService {
   private executingTasks = new Set<string>();
   private stuckTaskMonitorTimer: ReturnType<typeof setInterval> | null = null;
 
-  private static readonly TASK_TIMEOUT_MS = 30 * 60 * 1000;
+  private static readonly TASK_TIMEOUT_MS = 10 * 60 * 1000; // 10分钟
   private static readonly STUCK_CHECK_INTERVAL_MS = 60 * 1000;
 
   private constructor() {

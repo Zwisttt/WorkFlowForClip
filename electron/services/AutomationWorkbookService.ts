@@ -58,12 +58,7 @@ function normalizeTemplateName(value: string): string {
 }
 
 function normalizeWorkName(value: string): string {
-  const raw = value.trim();
-  const compactTime = raw.match(/^(.*)_(\d{2})(\d{2})$/);
-  if (compactTime) return `${compactTime[1]} ${compactTime[2]}:${compactTime[3]}`;
-  const separatedTime = raw.match(/^(.*)_(\d{1,2}):(\d{2})$/);
-  if (separatedTime) return `${separatedTime[1]} ${separatedTime[2]}:${separatedTime[3]}`;
-  return raw;
+  return value.trim();
 }
 
 function parseTopics(raw: string): string[] {

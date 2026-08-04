@@ -131,7 +131,7 @@ function usedMaterialIds(data: DraftData, trackType: string): string[] {
 
 function sanitizeName(value: string): string {
   const name = value
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
     .replace(/[. ]+$/g, '')
     .trim();
   return name || '未命名作品';
