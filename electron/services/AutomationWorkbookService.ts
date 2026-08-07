@@ -197,21 +197,40 @@ function extractEmbeddedImage(
 
             // 保存图片到临时文件
             const buffer = image.buffer as Buffer;
+            if (!buffer || buffer.length === 0) {
+              console.error('[AutomationWorkbook] 图片buffer为空');
+              return null;
+            }
             fs.writeFileSync(filePath, buffer);
 
-            console.log('[AutomationWorkbook] 提取DISPIMG图片:', {
+            // 验证文件是否成功创建
+            if (!fs.existsSync(filePath)) {
+              console.error('[AutomationWorkbook] 文件创建失败:', filePath);
+              return null;
+            }
+
+            console.log('[AutomationWorkbook] 提取DISPIMG图片成功:', {
               row: rowNumber,
               column: columnNumber,
               dispimgIndex,
               mediaIndex: image.index,
               extension,
               path: filePath,
-              size: buffer.length
+              isAbsolute: path.isAbsolute(filePath),
+              exists: fs.existsSync(filePath),
+              size: buffer.length,
+              platform: os.platform()
             });
 
             return filePath;
           } catch (error) {
-            console.error('[AutomationWorkbook] 提取DISPIMG图片失败:', error);
+            console.error('[AutomationWorkbook] 提取DISPIMG图片失败:', {
+              row: rowNumber,
+              column: columnNumber,
+              error: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined
+            });
+            return null;
           }
         } else {
           console.warn('[AutomationWorkbook] DISPIMG索引超出媒体资源范围:', {
@@ -262,19 +281,37 @@ function extractEmbeddedImage(
 
         // 保存图片到临时文件（image.buffer是Buffer类型）
         const buffer = image.buffer as Buffer;
+        if (!buffer || buffer.length === 0) {
+          console.error('[AutomationWorkbook] 传统图片buffer为空');
+          return null;
+        }
         fs.writeFileSync(filePath, buffer);
 
-        console.log('[AutomationWorkbook] 提取传统嵌入图片:', {
+        // 验证文件是否成功创建
+        if (!fs.existsSync(filePath)) {
+          console.error('[AutomationWorkbook] 文件创建失败:', filePath);
+          return null;
+        }
+
+        console.log('[AutomationWorkbook] 提取传统嵌入图片成功:', {
           row: rowNumber,
           column: columnNumber,
           extension,
           path: filePath,
-          size: buffer.length
+          isAbsolute: path.isAbsolute(filePath),
+          exists: fs.existsSync(filePath),
+          size: buffer.length,
+          platform: os.platform()
         });
 
         return filePath;
       } catch (error) {
-        console.error('[AutomationWorkbook] 提取传统图片失败:', error);
+        console.error('[AutomationWorkbook] 提取传统图片失败:', {
+          row: rowNumber,
+          column: columnNumber,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        });
         return null;
       }
     }
@@ -361,7 +398,14 @@ export class AutomationWorkbookService {
           const embeddedBg = extractEmbeddedImage(worksheet, rowNumber, headers.get('底图')!, workbook);
           if (embeddedBg) {
             backgroundPath = embeddedBg;
-            console.log(`[AutomationWorkbook] 行${rowNumber}：使用嵌入的底图`);
+            console.log(`[AutomationWorkbook] 行${rowNumber}：使用嵌入的底图`, {
+              path: embeddedBg,
+              isAbsolute: path.isAbsolute(embeddedBg),
+              exists: fs.existsSync(embeddedBg),
+              platform: os.platform()
+            });
+          } else {
+            console.log(`[AutomationWorkbook] 行${rowNumber}：底图单元格为空且未检测到嵌入图片`);
           }
         }
 
@@ -371,7 +415,14 @@ export class AutomationWorkbookService {
           const embeddedChart = extractEmbeddedImage(worksheet, rowNumber, headers.get('星盘图片')!, workbook);
           if (embeddedChart) {
             chartPath = embeddedChart;
-            console.log(`[AutomationWorkbook] 行${rowNumber}：使用嵌入的星盘图片`);
+            console.log(`[AutomationWorkbook] 行${rowNumber}：使用嵌入的星盘图片`, {
+              path: embeddedChart,
+              isAbsolute: path.isAbsolute(embeddedChart),
+              exists: fs.existsSync(embeddedChart),
+              platform: os.platform()
+            });
+          } else {
+            console.log(`[AutomationWorkbook] 行${rowNumber}：星盘图片单元格为空且未检测到嵌入图片`);
           }
         }
 
@@ -403,16 +454,24 @@ export class AutomationWorkbookService {
         if (!script) addIssue('脚本', '脚本不能为空');
         if (!publishCopy) addIssue('发布文案', '发布文案不能为空');
         if (!workName) addIssue('作品名字', '作品名字不能为空');
-        if (!preview.backgroundPath) addIssue('底图', '底图绝对路径不能为空');
-        if (preview.backgroundPath && (!path.isAbsolute(preview.backgroundPath) || !fs.existsSync(preview.backgroundPath))) {
-          addIssue('底图', `底图绝对路径不存在：${preview.backgroundPath}`);
+        if (!preview.backgroundPath) addIssue('底图', '底图不能为空（需要填写绝对路径或在单元格中插入图片）');
+        if (preview.backgroundPath) {
+          if (!path.isAbsolute(preview.backgroundPath)) {
+            addIssue('底图', `底图路径必须是绝对路径：${preview.backgroundPath}`);
+          } else if (!fs.existsSync(preview.backgroundPath)) {
+            addIssue('底图', `底图文件不存在：${preview.backgroundPath}`);
+          }
         }
         const imageSlots = template ? JSON.parse(template.image_slot_keys) as string[] : [];
         if (imageSlots.length > 1 && !preview.chartPath) {
-          addIssue('星盘图片', '双图模版必须填写星盘图片绝对路径');
+          addIssue('星盘图片', '双图模版必须提供星盘图片（填写绝对路径或在单元格中插入图片）');
         }
-        if (preview.chartPath && (!path.isAbsolute(preview.chartPath) || !fs.existsSync(preview.chartPath))) {
-          addIssue('星盘图片', `星盘图片绝对路径不存在：${preview.chartPath}`);
+        if (preview.chartPath) {
+          if (!path.isAbsolute(preview.chartPath)) {
+            addIssue('星盘图片', `星盘图片路径必须是绝对路径：${preview.chartPath}`);
+          } else if (!fs.existsSync(preview.chartPath)) {
+            addIssue('星盘图片', `星盘图片文件不存在：${preview.chartPath}`);
+          }
         }
         if (preview.bgmPath && (!path.isAbsolute(preview.bgmPath) || !fs.existsSync(preview.bgmPath))) {
           addIssue('BGM素材', `BGM 绝对路径不存在：${preview.bgmPath}`);
