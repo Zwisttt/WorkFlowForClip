@@ -151,33 +151,57 @@ function extractEmbeddedImage(
       console.log('[AutomationWorkbook] 检测到DISPIMG公式:', formula);
 
       // DISPIMG类型的图片存储在workbook.model.media中
-      // 由于无法通过ID匹配，我们需要根据行列位置或索引来推断
       const media = workbook.model.media as any[];
       if (media && media.length > 0) {
-        // 策略：遍历所有媒体资源，尝试匹配
-        // 由于DISPIMG的ID和media的name不匹配，我们使用启发式方法
+        // 提取DISPIMG公式中的ID
+        const idMatch = formula.match(/DISPIMG\s*\(\s*["']([^"']+)["']/);
+        const dispimgId = idMatch ? idMatch[1] : null;
 
-        // 计算当前单元格在所有DISPIMG单元格中的索引
-        let dispimgIndex = 0;
-        for (let r = 2; r <= rowNumber; r++) {
-          for (let c = 1; c <= worksheet.columnCount; c++) {
-            const testCell = worksheet.getRow(r).getCell(c);
-            if (testCell.value && typeof testCell.value === 'object' && 'formula' in testCell.value) {
-              const testFormula = String((testCell.value as any).formula || '');
-              if (testFormula.includes('DISPIMG')) {
-                if (r === rowNumber && c === columnNumber) {
-                  // 找到当前单元格的DISPIMG索引
-                  break;
+        console.log('[AutomationWorkbook] DISPIMG ID:', dispimgId);
+
+        // 策略1: 尝试通过ID在媒体资源的name中查找匹配
+        let image = null;
+        if (dispimgId) {
+          image = media.find((m: any) => m.name && m.name.includes(dispimgId));
+        }
+
+        // 策略2: 如果找不到匹配，且只有一个媒体资源，直接使用它
+        // (Excel中多个DISPIMG可能引用同一个图片)
+        if (!image && media.length === 1) {
+          console.log('[AutomationWorkbook] 未找到ID匹配，使用唯一的媒体资源');
+          image = media[0];
+        }
+
+        // 策略3: 如果有多个媒体资源，计算当前DISPIMG在工作表中的出现顺序索引
+        if (!image && media.length > 1) {
+          let dispimgIndex = 0;
+          let found = false;
+
+          for (let r = 1; r <= rowNumber && !found; r++) {
+            for (let c = 1; c <= worksheet.columnCount && !found; c++) {
+              const testCell = worksheet.getRow(r).getCell(c);
+              if (testCell.value && typeof testCell.value === 'object' && 'formula' in testCell.value) {
+                const testFormula = String((testCell.value as any).formula || '');
+                if (testFormula.includes('DISPIMG')) {
+                  if (r === rowNumber && c === columnNumber) {
+                    // 找到当前单元格
+                    found = true;
+                  } else {
+                    dispimgIndex++;
+                  }
                 }
-                dispimgIndex++;
               }
             }
           }
+
+          console.log('[AutomationWorkbook] 计算的DISPIMG索引:', dispimgIndex);
+          if (dispimgIndex < media.length) {
+            image = media[dispimgIndex];
+          }
         }
 
-        // 使用索引获取对应的媒体资源
-        if (dispimgIndex < media.length) {
-          const image = media[dispimgIndex];
+        // 提取图片
+        if (image) {
           try {
             // 确定图片扩展名
             let extension = '.png';
@@ -212,8 +236,9 @@ function extractEmbeddedImage(
             console.log('[AutomationWorkbook] 提取DISPIMG图片成功:', {
               row: rowNumber,
               column: columnNumber,
-              dispimgIndex,
+              dispimgId,
               mediaIndex: image.index,
+              mediaName: image.name,
               extension,
               path: filePath,
               isAbsolute: path.isAbsolute(filePath),
@@ -233,8 +258,8 @@ function extractEmbeddedImage(
             return null;
           }
         } else {
-          console.warn('[AutomationWorkbook] DISPIMG索引超出媒体资源范围:', {
-            dispimgIndex,
+          console.warn('[AutomationWorkbook] 未找到匹配的DISPIMG媒体资源:', {
+            dispimgId,
             mediaLength: media.length
           });
         }
