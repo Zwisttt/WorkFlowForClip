@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { randomUUID } from 'crypto';
 import ExcelJS from 'exceljs';
 import { accountService } from './AccountService';
 import { automationTemplateRepo } from '../data/repositories/AutomationRepository';
@@ -42,6 +44,10 @@ function cellText(value: ExcelJS.CellValue): string {
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'object') {
     if ('text' in value && typeof value.text === 'string') return value.text.trim();
+    // 忽略DISPIMG公式，返回空字符串（因为图片内容应该通过extractEmbeddedImage提取）
+    if ('formula' in value && typeof value.formula === 'string' && value.formula.includes('DISPIMG')) {
+      return '';
+    }
     if ('result' in value) return cellText(value.result as ExcelJS.CellValue);
     if ('richText' in value && Array.isArray(value.richText)) {
       return value.richText.map((item) => item.text).join('').trim();
@@ -121,6 +127,162 @@ function normalizeAccountName(value: string): string {
   return value.trim().toLocaleLowerCase('zh-CN');
 }
 
+/**
+ * 从Excel工作表中提取嵌入的图片
+ * @param worksheet Excel工作表
+ * @param rowNumber 行号（从1开始）
+ * @param columnNumber 列号（从1开始）
+ * @param workbook Excel工作簿（用于获取图片数据）
+ * @returns 提取并保存的图片绝对路径，如果没有图片则返回null
+ */
+function extractEmbeddedImage(
+  worksheet: ExcelJS.Worksheet,
+  rowNumber: number,
+  columnNumber: number,
+  workbook: ExcelJS.Workbook,
+): string | null {
+  // 方法1: 检查单元格是否包含DISPIMG公式（Excel 365的单元格图片）
+  const row = worksheet.getRow(rowNumber);
+  const cell = row.getCell(columnNumber);
+
+  if (cell.value && typeof cell.value === 'object' && 'formula' in cell.value) {
+    const formula = String((cell.value as any).formula || '');
+    if (formula.includes('DISPIMG')) {
+      console.log('[AutomationWorkbook] 检测到DISPIMG公式:', formula);
+
+      // DISPIMG类型的图片存储在workbook.model.media中
+      // 由于无法通过ID匹配，我们需要根据行列位置或索引来推断
+      const media = workbook.model.media as any[];
+      if (media && media.length > 0) {
+        // 策略：遍历所有媒体资源，尝试匹配
+        // 由于DISPIMG的ID和media的name不匹配，我们使用启发式方法
+
+        // 计算当前单元格在所有DISPIMG单元格中的索引
+        let dispimgIndex = 0;
+        for (let r = 2; r <= rowNumber; r++) {
+          for (let c = 1; c <= worksheet.columnCount; c++) {
+            const testCell = worksheet.getRow(r).getCell(c);
+            if (testCell.value && typeof testCell.value === 'object' && 'formula' in testCell.value) {
+              const testFormula = String((testCell.value as any).formula || '');
+              if (testFormula.includes('DISPIMG')) {
+                if (r === rowNumber && c === columnNumber) {
+                  // 找到当前单元格的DISPIMG索引
+                  break;
+                }
+                dispimgIndex++;
+              }
+            }
+          }
+        }
+
+        // 使用索引获取对应的媒体资源
+        if (dispimgIndex < media.length) {
+          const image = media[dispimgIndex];
+          try {
+            // 确定图片扩展名
+            let extension = '.png';
+            if (image.extension) {
+              extension = image.extension.startsWith('.') ? image.extension : `.${image.extension}`;
+            }
+
+            // 创建临时目录
+            const tempDir = path.join(os.tmpdir(), 'matrixflow-excel-images');
+            if (!fs.existsSync(tempDir)) {
+              fs.mkdirSync(tempDir, { recursive: true });
+            }
+
+            // 生成唯一的文件名
+            const fileName = `excel-image-${randomUUID()}${extension}`;
+            const filePath = path.join(tempDir, fileName);
+
+            // 保存图片到临时文件
+            const buffer = image.buffer as Buffer;
+            fs.writeFileSync(filePath, buffer);
+
+            console.log('[AutomationWorkbook] 提取DISPIMG图片:', {
+              row: rowNumber,
+              column: columnNumber,
+              dispimgIndex,
+              mediaIndex: image.index,
+              extension,
+              path: filePath,
+              size: buffer.length
+            });
+
+            return filePath;
+          } catch (error) {
+            console.error('[AutomationWorkbook] 提取DISPIMG图片失败:', error);
+          }
+        } else {
+          console.warn('[AutomationWorkbook] DISPIMG索引超出媒体资源范围:', {
+            dispimgIndex,
+            mediaLength: media.length
+          });
+        }
+      }
+    }
+  }
+
+  // 方法2: 检查传统的嵌入图片
+  const images = worksheet.getImages();
+
+  for (const imageData of images) {
+    // ExcelJS的图片位置可能在range.tl或直接在tl属性
+    const tl = imageData.range?.tl || (imageData as any).tl;
+
+    if (!tl) continue;
+
+    // 检查图片是否位于目标单元格（ExcelJS的行列号从0开始）
+    // nativeCol和nativeRow是Anchor对象的属性
+    const imageRow = (tl.nativeRow ?? tl.row) + 1;
+    const imageCol = (tl.nativeCol ?? tl.col) + 1;
+
+    if (imageRow === rowNumber && imageCol === columnNumber) {
+      try {
+        // 获取图片数据（使用any类型绕过ExcelJS的类型限制）
+        const media = workbook.model.media as any[];
+        const image = media?.find((m: any) => m.index === imageData.imageId);
+        if (!image) continue;
+
+        // 确定图片扩展名
+        let extension = '.png';
+        if (image.extension) {
+          extension = image.extension.startsWith('.') ? image.extension : `.${image.extension}`;
+        }
+
+        // 创建临时目录
+        const tempDir = path.join(os.tmpdir(), 'matrixflow-excel-images');
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        // 生成唯一的文件名
+        const fileName = `excel-image-${randomUUID()}${extension}`;
+        const filePath = path.join(tempDir, fileName);
+
+        // 保存图片到临时文件（image.buffer是Buffer类型）
+        const buffer = image.buffer as Buffer;
+        fs.writeFileSync(filePath, buffer);
+
+        console.log('[AutomationWorkbook] 提取传统嵌入图片:', {
+          row: rowNumber,
+          column: columnNumber,
+          extension,
+          path: filePath,
+          size: buffer.length
+        });
+
+        return filePath;
+      } catch (error) {
+        console.error('[AutomationWorkbook] 提取传统图片失败:', error);
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
 export class AutomationWorkbookService {
   async analyze(filePath: string): Promise<AutomationWorkbookPreview> {
     const normalizedPath = path.resolve(filePath);
@@ -193,14 +355,34 @@ export class AutomationWorkbookService {
         if (!hasContent) continue;
         rowCount += 1;
 
+        // 处理底图：优先使用文本路径，如果没有则尝试提取嵌入图片
+        let backgroundPath = cellText(get('底图'));
+        if (!backgroundPath) {
+          const embeddedBg = extractEmbeddedImage(worksheet, rowNumber, headers.get('底图')!, workbook);
+          if (embeddedBg) {
+            backgroundPath = embeddedBg;
+            console.log(`[AutomationWorkbook] 行${rowNumber}：使用嵌入的底图`);
+          }
+        }
+
+        // 处理星盘图片：优先使用文本路径，如果没有则尝试提取嵌入图片
+        let chartPath = cellText(get('星盘图片'));
+        if (!chartPath) {
+          const embeddedChart = extractEmbeddedImage(worksheet, rowNumber, headers.get('星盘图片')!, workbook);
+          if (embeddedChart) {
+            chartPath = embeddedChart;
+            console.log(`[AutomationWorkbook] 行${rowNumber}：使用嵌入的星盘图片`);
+          }
+        }
+
         const split = splitPublishCopy(publishCopy);
         const preview: AutomationRowPreview = {
           sheetName: worksheet.name,
           rowNumber,
           templateName,
           script,
-          backgroundPath: cellText(get('底图')),
-          chartPath: cellText(get('星盘图片')),
+          backgroundPath,
+          chartPath,
           bgmPath: cellText(get('BGM素材')),
           publishCopy,
           topics: parseTopics(cellText(get('话题'))),
